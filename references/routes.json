@@ -1,0 +1,54 @@
+{
+  "_comment": "Waypoints by map ID. Pokemon Red/Blue map IDs from datacrystal.romhacking.net.",
+
+  "0": {
+    "name": "Pallet Town",
+    "waypoints": [
+      {"x": 5, "y": 5, "note": "Start position"},
+      {"x": 5, "y": 1, "note": "Exit north to Route 1"}
+    ]
+  },
+
+  "12": {
+    "name": "Route 1",
+    "waypoints": [
+      {"x": 5, "y": 33, "note": "Enter from Pallet Town"},
+      {"x": 5, "y": 1,  "note": "Exit north to Viridian City"}
+    ]
+  },
+
+  "1": {
+    "name": "Viridian City",
+    "waypoints": [
+      {"x": 17, "y": 17, "note": "Enter from Route 1"},
+      {"x": 17, "y": 10, "note": "Pokemon Center"},
+      {"x": 17, "y": 1,  "note": "Exit north to Route 2"}
+    ]
+  },
+
+  "13": {
+    "name": "Route 2",
+    "waypoints": [
+      {"x": 3, "y": 43, "note": "Enter from Viridian"},
+      {"x": 3, "y": 1,  "note": "Exit north to Viridian Forest entrance"}
+    ]
+  },
+
+  "51": {
+    "name": "Viridian Forest",
+    "waypoints": [
+      {"x": 1, "y": 43, "note": "Entrance"},
+      {"x": 17, "y": 24, "note": "Mid-forest (grind zone)"},
+      {"x": 25, "y": 1,  "note": "Exit north"}
+    ]
+  },
+
+  "2": {
+    "name": "Pewter City",
+    "waypoints": [
+      {"x": 13, "y": 25, "note": "Enter from forest"},
+      {"x": 19, "y": 17, "note": "Pokemon Center"},
+      {"x": 16, "y": 11, "note": "Pewter Gym"}
+    ]
+  }
+}

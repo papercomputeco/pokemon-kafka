@@ -1,0 +1,32 @@
+# jcard.toml — stereOS VM configuration for Pokemon Agent
+
+mixtape = "opencode-mixtape:latest"
+
+name = "pokemon-agent"
+
+[resources]
+cpus   = 2
+memory = "4GiB"
+disk   = "20GiB"
+
+[network]
+mode = "nat"
+
+# Uncomment for LLM-powered strategy:
+# mode = "nat"
+# egress_allow = ["api.anthropic.com"]
+
+[[shared]]
+host = "./"
+guest = "/workspace"
+readonly = false
+
+[secrets]
+# Only needed for LLM strategy
+# ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
+
+[agent]
+harness = "claude-code"
+prompt = "cd /workspace && bash scripts/install.sh && python3 scripts/agent.py rom/pokemon_red.gb --strategy heuristic --max-turns 500000"
+workdir = "/workspace"
+restart = "no"

@@ -1,0 +1,25 @@
+# ROM files (legally obtained, not for distribution)
+rom/
+
+# Emulator save data
+*.ram
+*.sav
+*.state
+
+# Screenshot output
+frames/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Environment / secrets
+.env
+*.key
