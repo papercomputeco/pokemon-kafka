@@ -25,6 +25,8 @@ Host: frames/  .tapes/  pokedex/
 
 The agent runs a tight loop: read game state from known memory addresses, pick an action, send button inputs, tick the emulator forward. No display server needed. Screenshots come from PyBoy's internal frame buffer (`screen.ndarray`), not from the OS.
 
+**Shared mount permissions.** The `[[shared]]` mount in `jcard.toml` maps `./` on the host to `/workspace` in the VM. Files keep their host ownership (UID 501 on macOS), but the VM runs as `admin` (UID 1000). This means host-created directories are read-only inside the VM by default. The install script opens write permissions on output directories (`frames/`, `pokedex/`, `.tapes/`) so the agent can write session data that persists back to the host.
+
 ## Quickstart
 
 ### stereOS (recommended)

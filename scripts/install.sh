@@ -77,10 +77,16 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Directories
+# Writable directories (shared mount permissions)
 # ---------------------------------------------------------------------------
-mkdir -p "$SKILL_DIR/frames"
-mkdir -p "$SKILL_DIR/pokedex"
+# The stereOS shared mount preserves host file ownership (UID 501 on macOS).
+# The VM runs as admin (UID 1000), so host-created directories are read-only
+# unless we open permissions. These directories hold runtime output that the
+# agent writes during a session.
+for dir in frames pokedex .tapes; do
+    mkdir -p "$SKILL_DIR/$dir"
+    chmod a+rwx "$SKILL_DIR/$dir" 2>/dev/null || true
+done
 
 # ---------------------------------------------------------------------------
 # Tapes CLI

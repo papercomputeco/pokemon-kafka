@@ -166,6 +166,10 @@ mb up
 mb attach  # watch the agent play
 ```
 
+### Shared Mount Permissions
+
+The `[[shared]]` mount maps the host repo to `/workspace` inside the VM. Host files retain their original ownership (UID 501 on macOS), but the VM runs as `admin` (UID 1000). Output directories (`frames/`, `pokedex/`, `.tapes/`) need world-writable permissions so the agent can write data that persists back to the host. The install script handles this automatically with `chmod a+rwx`.
+
 ### Tapes Telemetry
 
 Tapes captures all LLM API calls made by the agent transparently — no instrumentation needed. Every battle decision, every route choice, every item use is logged with cryptographic audit trails.
