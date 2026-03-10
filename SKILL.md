@@ -184,6 +184,38 @@ tapes search "battle" # Search session turns
 tapes checkout <hash> # Restore a previous conversation state
 ```
 
+### Observational Memory
+
+Long agent runs hit context compaction — when the context window fills up, older messages are compressed and cache prefixes are destroyed. Tapes solves this by storing the full conversation in `.tapes/tapes.sqlite` regardless of what happens to the live context.
+
+The observational memory system reads Tapes data and distills it into a lightweight observations file that the agent can load at session start. This gives the agent durable memory across compaction boundaries and between sessions.
+
+**Session start:** Read `.tapes/memory/observations.md` to recall what happened in previous sessions — errors hit, files created, progress made. This is cheap to load and keeps the agent from repeating mistakes or rediscovering things it already learned.
+
+**Session end:** Run the observer to extract observations from the current session into the memory file.
+
+```bash
+# Check observations from past sessions before starting
+cat .tapes/memory/observations.md
+
+# After a session, distill new observations
+python3 scripts/observe_cli.py
+
+# Preview what would be extracted without writing
+python3 scripts/observe_cli.py --dry-run
+```
+
+Observations are tagged by priority:
+- `[important]` — errors, crashes, bugs, security issues
+- `[possible]` — tests added, refactors, dependency updates
+- `[informational]` — session goals, token usage, general context
+
+For long speed runs, the pattern is:
+1. Load observations at session start for continuity
+2. Play the game, making decisions informed by past sessions
+3. Run the observer after the session to capture what happened
+4. Next session picks up where this one left off, even if context was compacted
+
 ## File Structure
 
 ```
@@ -191,10 +223,14 @@ pokemon-agent/
 ├── SKILL.md              # This file
 ├── jcard.toml            # stereOS VM config
 ├── .tapes/               # Tapes telemetry DB + config (gitignored)
+│   └── memory/           # Observational memory output
 ├── scripts/
 │   ├── install.sh        # Setup script (installs PyBoy + Tapes)
 │   ├── agent.py          # Main agent loop
-│   └── memory_reader.py  # Memory address utilities
+│   ├── memory_reader.py  # Memory address utilities
+│   ├── tape_reader.py    # Tapes SQLite reader
+│   ├── observer.py       # Observation extraction heuristics
+│   └── observe_cli.py    # Observer CLI
 └── references/
     ├── routes.json        # Overworld route plans
     └── type_chart.json    # Pokemon type effectiveness

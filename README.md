@@ -73,6 +73,44 @@ tapes checkout <hash>   # restore a previous conversation state
 
 Session data lives in `.tapes/` (gitignored).
 
+## Observational Memory
+
+Inspired by [Mastra's observational memory](https://mastra.ai/blog/observational-memory), this system reads the [Tapes](https://tapes.dev) SQLite database, extracts noteworthy events via heuristic pattern matching (no LLM calls), and writes prioritized observations to memory files.
+
+Tapes records every LLM conversation as a content-addressable DAG of nodes in `.tapes/tapes.sqlite`. The observer walks these conversation chains, identifies patterns (errors, file creations, token usage), and writes observations alongside the database.
+
+```
+.tapes/
+├── tapes.sqlite             # Tapes DB: nodes, embeddings, facets
+└── memory/
+    ├── observations.md      # date-grouped observations with priority tags
+    └── observer_state.json  # watermark tracking processed sessions
+```
+
+**What it extracts:**
+- Session goals (first user message)
+- Tool errors and exception tracebacks
+- Files created during the session
+- Token usage summaries
+
+Each observation is tagged `[important]`, `[possible]`, or `[informational]` based on keyword matching (e.g. bug/error/crash are important, test/refactor are possible).
+
+```bash
+# Preview observations without writing
+python3 scripts/observe_cli.py --dry-run
+
+# Process all unprocessed sessions
+python3 scripts/observe_cli.py
+
+# Reprocess everything from scratch
+python3 scripts/observe_cli.py --reset
+
+# Process a single session by root node hash
+python3 scripts/observe_cli.py --session <hash>
+```
+
+Auto-detects `.tapes/tapes.sqlite` from cwd. Override with `--db`.
+
 ## Project Structure
 
 ```
@@ -86,7 +124,10 @@ pokemon-agent/
 ├── scripts/
 │   ├── install.sh           # setup: Python, PyBoy, Tapes
 │   ├── agent.py             # main agent loop + strategies
-│   └── memory_reader.py     # memory address definitions
+│   ├── memory_reader.py     # memory address definitions
+│   ├── tape_reader.py       # Tapes SQLite reader (stdlib only)
+│   ├── observer.py          # heuristic observation extractor
+│   └── observe_cli.py       # CLI for running the observer
 ├── references/
 │   ├── routes.json          # overworld waypoints
 │   └── type_chart.json      # type effectiveness data

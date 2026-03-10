@@ -17,7 +17,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "tests"]
 
 [tool.coverage.run]
 source = ["scripts"]
