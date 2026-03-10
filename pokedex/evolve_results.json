@@ -18,42 +18,6 @@
     "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
-    "agent_id": 2,
-    "label": "dc2",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 2,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y",
-      "bt_max_snapshots": 8,
-      "bt_restore_threshold": 15,
-      "bt_max_attempts": 3,
-      "bt_snapshot_interval": 50
-    },
-    "fitness": {},
-    "score": -999,
-    "elapsed": 0.1,
-    "error": "Expecting value: line 1 column 1 (char 0)"
-  },
-  {
-    "agent_id": 3,
-    "label": "low_stuck_dc4",
-    "params": {
-      "stuck_threshold": 4,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y",
-      "bt_max_snapshots": 8,
-      "bt_restore_threshold": 15,
-      "bt_max_attempts": 3,
-      "bt_snapshot_interval": 50
-    },
-    "fitness": {},
-    "score": -999,
-    "elapsed": 0.1,
-    "error": "Expecting value: line 1 column 1 (char 0)"
-  },
-  {
     "agent_id": 1,
     "label": "original",
     "params": {
@@ -90,12 +54,12 @@
     "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
-    "agent_id": 8,
-    "label": "aggressive",
+    "agent_id": 2,
+    "label": "dc2",
     "params": {
-      "stuck_threshold": 3,
+      "stuck_threshold": 8,
       "door_cooldown": 2,
-      "waypoint_skip_distance": 5,
+      "waypoint_skip_distance": 3,
       "axis_preference_map_0": "y",
       "bt_max_snapshots": 8,
       "bt_restore_threshold": 15,
@@ -108,30 +72,12 @@
     "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
-    "agent_id": 7,
-    "label": "x_axis_dc4",
+    "agent_id": 3,
+    "label": "low_stuck_dc4",
     "params": {
-      "stuck_threshold": 8,
+      "stuck_threshold": 4,
       "door_cooldown": 4,
       "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "x",
-      "bt_max_snapshots": 8,
-      "bt_restore_threshold": 15,
-      "bt_max_attempts": 3,
-      "bt_snapshot_interval": 50
-    },
-    "fitness": {},
-    "score": -999,
-    "elapsed": 0.1,
-    "error": "Expecting value: line 1 column 1 (char 0)"
-  },
-  {
-    "agent_id": 9,
-    "label": "moderate",
-    "params": {
-      "stuck_threshold": 6,
-      "door_cooldown": 6,
-      "waypoint_skip_distance": 4,
       "axis_preference_map_0": "y",
       "bt_max_snapshots": 8,
       "bt_restore_threshold": 15,
@@ -162,6 +108,24 @@
     "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
+    "agent_id": 7,
+    "label": "x_axis_dc4",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "x",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
     "agent_id": 6,
     "label": "narrow_dc4",
     "params": {
@@ -180,15 +144,33 @@
     "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
-    "agent_id": 11,
-    "label": "no_bt",
+    "agent_id": 8,
+    "label": "aggressive",
     "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 3,
+      "stuck_threshold": 3,
+      "door_cooldown": 2,
+      "waypoint_skip_distance": 5,
       "axis_preference_map_0": "y",
-      "bt_max_snapshots": 0,
-      "bt_restore_threshold": 999,
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 9,
+    "label": "moderate",
+    "params": {
+      "stuck_threshold": 6,
+      "door_cooldown": 6,
+      "waypoint_skip_distance": 4,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
       "bt_max_attempts": 3,
       "bt_snapshot_interval": 50
     },
@@ -208,6 +190,24 @@
       "bt_max_snapshots": 8,
       "bt_restore_threshold": 10,
       "bt_max_attempts": 5,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 11,
+    "label": "no_bt",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 0,
+      "bt_restore_threshold": 999,
+      "bt_max_attempts": 3,
       "bt_snapshot_interval": 50
     },
     "fitness": {},

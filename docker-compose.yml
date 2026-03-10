@@ -27,6 +27,20 @@ services:
       timeout: 5s
       retries: 5
 
+  tapes-proxy:
+    image: ghcr.io/papercomputeco/tapes:latest
+    command: >
+      serve proxy
+      --listen 0.0.0.0:8080
+      --upstream ${ANTHROPIC_API_BASE:-https://api.anthropic.com}
+      --kafka-brokers kafka:29092
+      --kafka-topic agent.telemetry.raw
+    ports:
+      - "8080:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   telemetry-consumer:
     build: docker/telemetry-consumer
     depends_on:

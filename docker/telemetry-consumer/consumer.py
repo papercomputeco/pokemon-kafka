@@ -1,4 +1,4 @@
-"""Telemetry consumer — reads Merkle DAG nodes from Kafka and displays them."""
+"""Telemetry consumer — reads tapes.node.v1 events from Kafka and displays them."""
 
 import json
 import os
@@ -10,19 +10,25 @@ BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "telemetry-consumer")
 
 
-def format_node(data: dict) -> str:
-    role = data.get("role", "?")
-    turn = data.get("turn", "?")
-    content = data.get("content", "")[:120]
-    session = data.get("session_id", "?")[:8]
-    node_hash = data.get("hash", "?")[:12]
-    parent = data.get("parent", "")[:12] or "ROOT"
-    tokens = f"in={data.get('tokens_in', 0)} out={data.get('tokens_out', 0)}"
+def format_event(data: dict) -> str:
+    root = data.get("root_hash", "?")[:12]
+    node = data.get("node", {})
+    node_hash = node.get("hash", "?")[:12]
+    parent = (node.get("parent_hash") or "")[:12] or "ROOT"
+    bucket = node.get("bucket", {})
+    role = bucket.get("role", "?")
+    model = bucket.get("model", "?")
+    usage = node.get("usage") or {}
+    tokens_in = usage.get("input_tokens", 0)
+    tokens_out = usage.get("output_tokens", 0)
+    stop = node.get("stop_reason", "")
 
     return (
-        f"[{session}] turn={turn} {role:<12} "
+        f"[{root}] {role:<10} "
         f"hash={node_hash} parent={parent} "
-        f"{tokens} | {content}"
+        f"in={tokens_in} out={tokens_out} "
+        f"model={model}"
+        f"{f' stop={stop}' if stop else ''}"
     )
 
 
@@ -52,7 +58,7 @@ def main():
 
             try:
                 data = json.loads(msg.value().decode("utf-8"))
-                print(format_node(data), flush=True)
+                print(format_event(data), flush=True)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 print(f"[consumer] Bad message: {exc}", flush=True)
     except KeyboardInterrupt:

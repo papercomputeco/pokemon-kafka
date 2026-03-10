@@ -12,13 +12,13 @@ GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "alerts-consumer")
 
 def format_alert(data: dict) -> str:
     alert_type = data.get("alert_type", "UNKNOWN")
-    session = data.get("session_id", "?")[:8]
+    root = data.get("root_hash", "?")[:12]
     detail = data.get("detail", "")[:200]
     window_start = data.get("window_start", "")
     window_end = data.get("window_end", "")
     count = data.get("event_count", 0)
     window = f" window=[{window_start} -> {window_end}]" if window_start else ""
-    return f"*** ALERT [{alert_type}] session={session} count={count}{window} | {detail}"
+    return f"*** ALERT [{alert_type}] conv={root} count={count}{window} | {detail}"
 
 
 def main():
