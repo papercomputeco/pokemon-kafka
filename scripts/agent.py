@@ -538,12 +538,31 @@ class PokemonAgent:
                     return "up"
                 return "a"
 
-        # In Oak's Lab with a Pokemon: alternate A/down to advance scripted
-        # sequence while moving south (away from bookshelf/table).
+        # In Oak's Lab with a Pokemon: navigate to exit and trigger rival.
+        # After picking a starter, the rival picks his, then challenges when
+        # the player walks toward the exit.  NPCs can block the path south
+        # from the table area, so go left first, then south.
+        # The exit door is at roughly (4, 11).
         if state.map_id == 40 and state.party_count > 0:
-            if self.turn_count % 3 == 0:
-                return "down"
-            return "a"
+            if not hasattr(self, '_lab_exit_turns'):
+                self._lab_exit_turns = 0
+            self._lab_exit_turns += 1
+
+            # First 30 turns: heavy A-mash to clear rival pick dialogue
+            if self._lab_exit_turns <= 30:
+                if self._lab_exit_turns % 5 == 0:
+                    return "down"
+                return "a"
+
+            # Navigate: go left to center column, then south to exit door (~y=11)
+            if state.x > 5:
+                if self._lab_exit_turns % 3 == 0:
+                    return "a"  # talk to NPCs / clear dialogue
+                return "left"
+            # Keep walking south — door is at y=11, interleave A for dialogue
+            if self._lab_exit_turns % 4 == 0:
+                return "a"  # interact with rival when intercepted / clear text
+            return "down"
 
         direction = self.navigator.next_direction(
             state,

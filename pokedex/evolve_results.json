@@ -1,7 +1,79 @@
 [
   {
+    "agent_id": 2,
+    "label": "dc2",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 2,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y"
+    },
+    "fitness": {
+      "turns": 5000,
+      "battles_won": 1,
+      "maps_visited": 4,
+      "final_map_id": 0,
+      "final_x": 11,
+      "final_y": 12,
+      "badges": 0,
+      "party_size": 1,
+      "stuck_count": 15
+    },
+    "score": -65.0,
+    "elapsed": 15.8,
+    "returncode": 0
+  },
+  {
+    "agent_id": 4,
+    "label": "high_stuck_dc4",
+    "params": {
+      "stuck_threshold": 12,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y"
+    },
+    "fitness": {
+      "turns": 5000,
+      "battles_won": 1,
+      "maps_visited": 4,
+      "final_map_id": 0,
+      "final_x": 7,
+      "final_y": 12,
+      "badges": 0,
+      "party_size": 1,
+      "stuck_count": 15
+    },
+    "score": -65.0,
+    "elapsed": 17.2,
+    "returncode": 0
+  },
+  {
     "agent_id": 3,
-    "label": "short_door",
+    "label": "low_stuck_dc4",
+    "params": {
+      "stuck_threshold": 4,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y"
+    },
+    "fitness": {
+      "turns": 5000,
+      "battles_won": 1,
+      "maps_visited": 4,
+      "final_map_id": 0,
+      "final_x": 7,
+      "final_y": 12,
+      "badges": 0,
+      "party_size": 1,
+      "stuck_count": 15
+    },
+    "score": -65.0,
+    "elapsed": 17.2,
+    "returncode": 0
+  },
+  {
+    "agent_id": 0,
+    "label": "baseline_4dc",
     "params": {
       "stuck_threshold": 8,
       "door_cooldown": 4,
@@ -9,234 +81,162 @@
       "axis_preference_map_0": "y"
     },
     "fitness": {
-      "turns": 800,
-      "battles_won": 0,
+      "turns": 5000,
+      "battles_won": 1,
       "maps_visited": 4,
-      "final_map_id": 40,
+      "final_map_id": 0,
       "final_x": 7,
-      "final_y": 5,
+      "final_y": 12,
       "badges": 0,
       "party_size": 1,
-      "stuck_count": 9
+      "stuck_count": 15
     },
-    "score": 40375.0,
-    "elapsed": 5.4,
-    "returncode": 0
-  },
-  {
-    "agent_id": 0,
-    "label": "baseline",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 8,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 800,
-      "battles_won": 0,
-      "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 11
-    },
-    "score": 40365.0,
-    "elapsed": 5.5,
-    "returncode": 0
-  },
-  {
-    "agent_id": 2,
-    "label": "high_stuck",
-    "params": {
-      "stuck_threshold": 12,
-      "door_cooldown": 8,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 800,
-      "battles_won": 0,
-      "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 11
-    },
-    "score": 40365.0,
-    "elapsed": 5.5,
-    "returncode": 0
-  },
-  {
-    "agent_id": 1,
-    "label": "low_stuck",
-    "params": {
-      "stuck_threshold": 4,
-      "door_cooldown": 8,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 800,
-      "battles_won": 0,
-      "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 11
-    },
-    "score": 40365.0,
-    "elapsed": 5.6,
+    "score": -65.0,
+    "elapsed": 17.2,
     "returncode": 0
   },
   {
     "agent_id": 5,
-    "label": "wide_skip",
+    "label": "wide_skip_dc4",
     "params": {
       "stuck_threshold": 8,
-      "door_cooldown": 8,
+      "door_cooldown": 4,
       "waypoint_skip_distance": 6,
       "axis_preference_map_0": "y"
     },
     "fitness": {
-      "turns": 800,
-      "battles_won": 0,
+      "turns": 5000,
+      "battles_won": 1,
       "maps_visited": 4,
-      "final_map_id": 40,
+      "final_map_id": 0,
       "final_x": 7,
-      "final_y": 5,
+      "final_y": 12,
       "badges": 0,
       "party_size": 1,
-      "stuck_count": 11
+      "stuck_count": 15
     },
-    "score": 40365.0,
-    "elapsed": 5.4,
-    "returncode": 0
-  },
-  {
-    "agent_id": 6,
-    "label": "narrow_skip",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 8,
-      "waypoint_skip_distance": 1,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 800,
-      "battles_won": 0,
-      "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 11
-    },
-    "score": 40365.0,
-    "elapsed": 5.3,
-    "returncode": 0
-  },
-  {
-    "agent_id": 7,
-    "label": "x_axis",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 8,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "x"
-    },
-    "fitness": {
-      "turns": 800,
-      "battles_won": 0,
-      "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 11
-    },
-    "score": 40365.0,
-    "elapsed": 5.4,
+    "score": -65.0,
+    "elapsed": 17.2,
     "returncode": 0
   },
   {
     "agent_id": 8,
     "label": "aggressive",
     "params": {
-      "stuck_threshold": 4,
-      "door_cooldown": 6,
+      "stuck_threshold": 3,
+      "door_cooldown": 2,
       "waypoint_skip_distance": 5,
       "axis_preference_map_0": "y"
     },
     "fitness": {
-      "turns": 800,
-      "battles_won": 0,
+      "turns": 5000,
+      "battles_won": 1,
       "maps_visited": 4,
-      "final_map_id": 40,
-      "final_x": 7,
-      "final_y": 5,
+      "final_map_id": 0,
+      "final_x": 11,
+      "final_y": 12,
       "badges": 0,
       "party_size": 1,
-      "stuck_count": 11
+      "stuck_count": 15
     },
-    "score": 40365.0,
-    "elapsed": 5.3,
+    "score": -65.0,
+    "elapsed": 15.8,
     "returncode": 0
   },
   {
-    "agent_id": 4,
-    "label": "long_door",
+    "agent_id": 7,
+    "label": "x_axis_dc4",
     "params": {
       "stuck_threshold": 8,
-      "door_cooldown": 12,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "x"
+    },
+    "fitness": {
+      "turns": 5000,
+      "battles_won": 1,
+      "maps_visited": 4,
+      "final_map_id": 0,
+      "final_x": 7,
+      "final_y": 12,
+      "badges": 0,
+      "party_size": 1,
+      "stuck_count": 15
+    },
+    "score": -65.0,
+    "elapsed": 17.2,
+    "returncode": 0
+  },
+  {
+    "agent_id": 6,
+    "label": "narrow_dc4",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 1,
+      "axis_preference_map_0": "y"
+    },
+    "fitness": {
+      "turns": 5000,
+      "battles_won": 1,
+      "maps_visited": 4,
+      "final_map_id": 0,
+      "final_x": 7,
+      "final_y": 12,
+      "badges": 0,
+      "party_size": 1,
+      "stuck_count": 15
+    },
+    "score": -65.0,
+    "elapsed": 17.2,
+    "returncode": 0
+  },
+  {
+    "agent_id": 1,
+    "label": "original",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 8,
       "waypoint_skip_distance": 3,
       "axis_preference_map_0": "y"
     },
     "fitness": {
-      "turns": 800,
-      "battles_won": 0,
+      "turns": 5000,
+      "battles_won": 1,
       "maps_visited": 4,
-      "final_map_id": 40,
+      "final_map_id": 0,
       "final_x": 7,
-      "final_y": 5,
+      "final_y": 12,
       "badges": 0,
       "party_size": 1,
-      "stuck_count": 16
+      "stuck_count": 18
     },
-    "score": 40340.0,
-    "elapsed": 5.5,
+    "score": -80.0,
+    "elapsed": 17.8,
     "returncode": 0
   },
   {
     "agent_id": 9,
-    "label": "conservative",
+    "label": "moderate",
     "params": {
-      "stuck_threshold": 14,
-      "door_cooldown": 12,
-      "waypoint_skip_distance": 2,
+      "stuck_threshold": 6,
+      "door_cooldown": 6,
+      "waypoint_skip_distance": 4,
       "axis_preference_map_0": "y"
     },
     "fitness": {
-      "turns": 800,
-      "battles_won": 0,
+      "turns": 5000,
+      "battles_won": 1,
       "maps_visited": 4,
-      "final_map_id": 40,
+      "final_map_id": 0,
       "final_x": 7,
-      "final_y": 5,
+      "final_y": 12,
       "badges": 0,
       "party_size": 1,
-      "stuck_count": 16
+      "stuck_count": 18
     },
-    "score": 40340.0,
-    "elapsed": 5.4,
+    "score": -80.0,
+    "elapsed": 17.9,
     "returncode": 0
   }
 ]

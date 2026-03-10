@@ -751,12 +751,12 @@ class TestChooseOverworldAction:
         # Phase 0 of the lab strategy: dismiss text (b) or move south (down)
         assert result in ("a", "b", "down", "right", "up")
 
-    def test_oaks_lab_with_party_uses_navigator(self, tmp_path):
+    def test_oaks_lab_with_party_uses_lab_exit(self, tmp_path):
         ag = _make_agent(tmp_path)
         state = OverworldState(map_id=40, party_count=1, x=5, y=5)
         result = ag.choose_overworld_action(state)
-        # map 40 not in EARLY_GAME_TARGETS and not in routes -> cycles directions
-        assert result in ("down", "right", "left", "up")
+        # Lab exit navigation: at x=5 (center), should go down or A
+        assert result in ("down", "a")
 
     def test_navigator_returns_none_falls_back_to_a(self, tmp_path):
         ag = _make_agent(tmp_path)
@@ -1694,18 +1694,50 @@ class TestOaksLabPhases:
             result = ag.choose_overworld_action(state)
         assert result == "a"
 
-    def test_lab_with_pokemon_turn_div3_returns_down(self, tmp_path):
-        """Line 519-520: map 40, party>0, turn_count % 3 == 0 -> 'down'."""
+    def test_lab_exit_early_mash_a(self, tmp_path):
+        """First 30 turns in lab with party: mostly A-mash."""
         ag = _make_agent(tmp_path)
-        ag.turn_count = 9  # 9 % 3 == 0
+        state = OverworldState(map_id=40, party_count=1, x=7, y=5)
+        # First call -> _lab_exit_turns = 1, not % 5 == 0 -> "a"
+        result = ag.choose_overworld_action(state)
+        assert result == "a"
+
+    def test_lab_exit_early_occasional_down(self, tmp_path):
+        """Early lab exit: every 5th turn returns 'down'."""
+        ag = _make_agent(tmp_path)
+        ag._lab_exit_turns = 4  # will be 5, 5 % 5 == 0
+        state = OverworldState(map_id=40, party_count=1, x=7, y=5)
+        result = ag.choose_overworld_action(state)
+        assert result == "down"
+
+    def test_lab_exit_go_left_when_east(self, tmp_path):
+        """After 30 turns, x>5 -> go left."""
+        ag = _make_agent(tmp_path)
+        ag._lab_exit_turns = 30  # will be 31, not % 3 == 0
+        state = OverworldState(map_id=40, party_count=1, x=7, y=5)
+        result = ag.choose_overworld_action(state)
+        assert result == "left"
+
+    def test_lab_exit_go_left_interleave_a(self, tmp_path):
+        """After 30 turns, x>5, every 3rd turn -> A."""
+        ag = _make_agent(tmp_path)
+        ag._lab_exit_turns = 32  # will be 33, 33 % 3 == 0
+        state = OverworldState(map_id=40, party_count=1, x=7, y=5)
+        result = ag.choose_overworld_action(state)
+        assert result == "a"
+
+    def test_lab_exit_go_south_at_center(self, tmp_path):
+        """At x<=5, go south toward exit."""
+        ag = _make_agent(tmp_path)
+        ag._lab_exit_turns = 30  # will be 31, not % 4 == 0
         state = OverworldState(map_id=40, party_count=1, x=5, y=5)
         result = ag.choose_overworld_action(state)
         assert result == "down"
 
-    def test_lab_with_pokemon_turn_not_div3_returns_a(self, tmp_path):
-        """Line 521: map 40, party>0, turn_count % 3 != 0 -> 'a'."""
+    def test_lab_exit_south_interleave_a(self, tmp_path):
+        """At x<=5, every 4th turn -> A."""
         ag = _make_agent(tmp_path)
-        ag.turn_count = 10  # 10 % 3 == 1
+        ag._lab_exit_turns = 31  # will be 32, 32 % 4 == 0
         state = OverworldState(map_id=40, party_count=1, x=5, y=5)
         result = ag.choose_overworld_action(state)
         assert result == "a"

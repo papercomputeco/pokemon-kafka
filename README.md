@@ -111,6 +111,34 @@ uv run scripts/observe_cli.py --session <hash>
 
 Auto-detects `.tapes/tapes.sqlite` from cwd. Override with `--db`.
 
+## AlphaEvolve Strategy Evolution
+
+Inspired by [AlphaEvolve](https://arxiv.org/abs/2506.13131) (DeepMind), the agent can automatically improve its navigation parameters through headless evaluation runs. Instead of manually tuning thresholds, the evolution harness runs 10 agent variants in parallel, scores them against a composite fitness function, and keeps the winner.
+
+**How it works.** The agent's navigator has tunable knobs: stuck threshold, door cooldown, waypoint skip distance, axis preference. The harness treats these as a genome. Each generation, it either asks an LLM to propose a mutation (informed by observer diagnostics) or randomly perturbs values. The variant runs headless, and its fitness is compared to the current best.
+
+```bash
+# Run the evolution harness (LLM-free random perturbation by default)
+uv run scripts/evolve.py rom/pokemon_red.gb --generations 5 --max-turns 1000
+
+# Run 10 parameter variants in parallel and rank them
+uv run scripts/run_10_agents.py rom/pokemon_red.gb
+```
+
+The observer feeds failure context (stuck events, tool errors) into the LLM mutation prompt so variants target actual problems rather than making blind changes.
+
+**First finding:** `door_cooldown=2` beats the default of 8. Shorter cooldown means fewer wasted turns walking away from doors before retrying. Confirmed across two milestones (Pokemon selection and rival battle) with 10 independent runs each.
+
+### Long-session mode
+
+You can still run the agent the traditional way for a single long session, the way [ClaudePlaysPokemon](https://www.twitch.tv/claudeplayspokemon) works on Twitch:
+
+```bash
+uv run scripts/agent.py rom/pokemon_red.gb --strategy heuristic --max-turns 50000
+```
+
+The two approaches complement each other. Long sessions are better for discovering new capabilities and debugging game-specific logic. The evolution loop is better for optimizing parameters once the code structure exists.
+
 ## Project Structure
 
 ```
@@ -127,7 +155,9 @@ pokemon-agent/
 │   ├── memory_reader.py     # memory address definitions
 │   ├── tape_reader.py       # Tapes SQLite reader (stdlib only)
 │   ├── observer.py          # heuristic observation extractor
-│   └── observe_cli.py       # CLI for running the observer
+│   ├── observe_cli.py       # CLI for running the observer
+│   ├── evolve.py            # AlphaEvolve strategy evolution harness
+│   └── run_10_agents.py     # parallel multi-agent evaluation runner
 ├── references/
 │   ├── routes.json          # overworld waypoints
 │   └── type_chart.json      # type effectiveness data
@@ -157,6 +187,8 @@ Target turn counts for community benchmarking. Fork it, improve the strategy, po
 
 ## Inspiration & References
 
+- [AlphaEvolve](https://arxiv.org/abs/2506.13131) — DeepMind's LLM-driven code evolution framework
+- [Discovering Multiagent Learning Algorithms with LLMs](https://arxiv.org/abs/2602.16928) — AlphaEvolve applied to game-playing agents
 - [ClaudePlaysPokemon](https://www.twitch.tv/claudeplayspokemon) — Anthropic's Claude-plays-Pokemon Twitch stream
 - [Insights into Claude Opus 4.5 from Pokemon](https://www.lesswrong.com/posts/u6Lacc7wx4yYkBQ3r/insights-into-claude-opus-4-5-from-pokemon) — Navigation, memory notes, and spatial reasoning analysis
 - [ClaudePlaysPokemon Harness Changes](https://docs.google.com/document/u/1/d/e/2PACX-1vRIsu2pLI21W4KjfYbN13or8E-8cvJYw570wGMEp4UQU63ZhEh9FPGgj2ark8Yk7Vyrtt9MWq3jnn4h/pub) — Minimap, navigator, and memory file evolution

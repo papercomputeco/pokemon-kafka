@@ -20,41 +20,42 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 AGENT_SCRIPT = SCRIPT_DIR / "agent.py"
 
-# 10 parameter variants to try
+# 10 parameter variants to try — tuned for reaching rival battle
+# Previous winner: door_cooldown=4 beat baseline for Pokemon selection
 PARAM_VARIANTS = [
-    # Baseline
-    {"stuck_threshold": 8, "door_cooldown": 8, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "label": "baseline"},
-    # Lower stuck threshold — skip waypoints faster
-    {"stuck_threshold": 4, "door_cooldown": 8, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "label": "low_stuck"},
-    # Higher stuck threshold — more patient
-    {"stuck_threshold": 12, "door_cooldown": 8, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "label": "high_stuck"},
-    # Short door cooldown
+    # Baseline (previous winner door_cooldown=4)
     {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "label": "short_door"},
-    # Long door cooldown
-    {"stuck_threshold": 8, "door_cooldown": 12, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "label": "long_door"},
-    # Wide skip distance
-    {"stuck_threshold": 8, "door_cooldown": 8, "waypoint_skip_distance": 6,
-     "axis_preference_map_0": "y", "label": "wide_skip"},
-    # Narrow skip distance
-    {"stuck_threshold": 8, "door_cooldown": 8, "waypoint_skip_distance": 1,
-     "axis_preference_map_0": "y", "label": "narrow_skip"},
-    # X-axis preference
+     "axis_preference_map_0": "y", "label": "baseline_4dc"},
+    # Original defaults
     {"stuck_threshold": 8, "door_cooldown": 8, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "x", "label": "x_axis"},
-    # Aggressive: low stuck + wide skip
-    {"stuck_threshold": 4, "door_cooldown": 6, "waypoint_skip_distance": 5,
+     "axis_preference_map_0": "y", "label": "original"},
+    # Very short door cooldown
+    {"stuck_threshold": 8, "door_cooldown": 2, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", "label": "dc2"},
+    # Low stuck + short door
+    {"stuck_threshold": 4, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", "label": "low_stuck_dc4"},
+    # High stuck + short door
+    {"stuck_threshold": 12, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", "label": "high_stuck_dc4"},
+    # Wide skip + short door
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 6,
+     "axis_preference_map_0": "y", "label": "wide_skip_dc4"},
+    # Narrow skip + short door
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 1,
+     "axis_preference_map_0": "y", "label": "narrow_dc4"},
+    # X-axis + short door
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "x", "label": "x_axis_dc4"},
+    # Aggressive: low stuck + very short door + wide skip
+    {"stuck_threshold": 3, "door_cooldown": 2, "waypoint_skip_distance": 5,
      "axis_preference_map_0": "y", "label": "aggressive"},
-    # Conservative: high stuck + narrow skip + long door
-    {"stuck_threshold": 14, "door_cooldown": 12, "waypoint_skip_distance": 2,
-     "axis_preference_map_0": "y", "label": "conservative"},
+    # Moderate: medium stuck + short door
+    {"stuck_threshold": 6, "door_cooldown": 6, "waypoint_skip_distance": 4,
+     "axis_preference_map_0": "y", "label": "moderate"},
 ]
 
-MAX_TURNS = 800  # Enough to get through intro + navigate to Pokemon selection
+MAX_TURNS = 5000  # Intro + Pokemon selection + rival scripted sequence + battle + exit
 
 
 def score(fitness: dict) -> float:
