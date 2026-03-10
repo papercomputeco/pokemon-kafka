@@ -53,7 +53,7 @@ services:
       - "8081:8081"
     command: jobmanager
     volumes:
-      - flink-lib:/opt/flink/lib-extra
+      - flink-lib:/opt/flink/lib
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
@@ -64,7 +64,7 @@ services:
       - flink-jobmanager
     command: taskmanager
     volumes:
-      - flink-lib:/opt/flink/lib-extra
+      - flink-lib:/opt/flink/lib
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
@@ -97,7 +97,7 @@ services:
         condition: service_healthy
     volumes:
       - ./docker/flink-sql:/opt/flink-sql
-      - flink-lib:/opt/flink/lib-extra
+      - flink-lib:/opt/flink/lib
     command: ["/bin/bash", "/opt/flink-sql/submit-jobs.sh"]
     environment:
       FLINK_PROPERTIES: |

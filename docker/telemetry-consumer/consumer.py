@@ -2,8 +2,6 @@
 
 import json
 import os
-import sys
-import time
 
 from confluent_kafka import Consumer, KafkaError
 

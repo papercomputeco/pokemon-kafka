@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 
 from confluent_kafka import Consumer, KafkaError
 

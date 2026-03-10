@@ -11,7 +11,7 @@ CREATE TABLE agent_telemetry_raw (
     `latency_ms` INT,
     `session_id` STRING,
     `turn` INT,
-    `event_time` AS TO_TIMESTAMP(`timestamp`),
+    `event_time` AS TO_TIMESTAMP(`timestamp`, 'yyyy-MM-dd''T''HH:mm:ss.SSS''Z'''),
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECONDS
 ) WITH (
     'connector' = 'kafka',
