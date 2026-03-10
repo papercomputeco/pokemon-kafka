@@ -44,3 +44,6 @@ venv/
 pokedex/log[7-9]*.md
 pokedex/log1[0-9]*.md
 pokedex/log2[0-9]*.md
+
+# Docker
+docker-compose.override.yml
