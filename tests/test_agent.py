@@ -24,6 +24,7 @@ from agent import (
     GameController,
     BattleStrategy,
     Navigator,
+    StrategyEngine,
     PokemonAgent,
     main,
 )
@@ -526,7 +527,7 @@ def _make_agent(tmp_path, screenshots=False, routes=None, type_chart_data=None):
     ):
         ag = PokemonAgent(
             str(tmp_path / "fake.gb"),
-            strategy="heuristic",
+            strategy="low",
             screenshots=screenshots,
         )
 
@@ -538,6 +539,52 @@ def _make_agent(tmp_path, screenshots=False, routes=None, type_chart_data=None):
         ag.frames_dir.mkdir(parents=True, exist_ok=True)
 
     return ag
+
+
+# ===================================================================
+# StrategyEngine tests
+# ===================================================================
+
+
+class TestStrategyEngine:
+    def test_low_tier_no_notes(self):
+        engine = StrategyEngine("low")
+        assert engine.tier == "low"
+        assert engine.notes is None
+
+    def test_medium_tier_has_notes(self, tmp_path):
+        engine = StrategyEngine("medium", notes_path=str(tmp_path / "notes.md"))
+        assert engine.tier == "medium"
+        assert engine.notes is not None
+
+    def test_high_tier_has_notes(self, tmp_path):
+        engine = StrategyEngine("high", notes_path=str(tmp_path / "notes.md"))
+        assert engine.tier == "high"
+        assert engine.notes is not None
+
+    def test_medium_no_notes_path(self):
+        engine = StrategyEngine("medium")
+        assert engine.notes is None
+
+    def test_should_call_llm_low_never(self):
+        engine = StrategyEngine("low")
+        assert engine.should_call_llm(stuck_turns=100, map_changed=True) is False
+
+    def test_should_call_llm_medium_when_stuck(self):
+        engine = StrategyEngine("medium")
+        assert engine.should_call_llm(stuck_turns=10, map_changed=False) is True
+
+    def test_should_call_llm_medium_on_map_change(self):
+        engine = StrategyEngine("medium")
+        assert engine.should_call_llm(stuck_turns=0, map_changed=True) is True
+
+    def test_should_call_llm_medium_not_stuck(self):
+        engine = StrategyEngine("medium")
+        assert engine.should_call_llm(stuck_turns=5, map_changed=False) is False
+
+    def test_should_call_llm_high_always(self):
+        engine = StrategyEngine("high")
+        assert engine.should_call_llm(stuck_turns=0, map_changed=False) is True
 
 
 # ===================================================================
@@ -1040,11 +1087,11 @@ class TestMain:
         mock_agent = MagicMock()
 
         with patch(
-            "sys.argv", ["agent.py", str(rom), "--strategy", "heuristic", "--max-turns", "5"]
+            "sys.argv", ["agent.py", str(rom), "--strategy", "low", "--max-turns", "5"]
         ), patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls:
             main()
 
-        mock_cls.assert_called_once_with(str(rom), strategy="heuristic", screenshots=False)
+        mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
         mock_agent.run.assert_called_once_with(max_turns=5)
 
     def test_main_rom_not_found(self, tmp_path):
@@ -1067,7 +1114,7 @@ class TestMain:
         ), patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls:
             main()
 
-        mock_cls.assert_called_once_with(str(rom), strategy="heuristic", screenshots=True)
+        mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=True)
         mock_agent.run.assert_called_once_with(max_turns=10)
 
     def test_main_default_args(self, tmp_path):
@@ -1081,7 +1128,7 @@ class TestMain:
         ) as mock_cls:
             main()
 
-        mock_cls.assert_called_once_with(str(rom), strategy="heuristic", screenshots=False)
+        mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
         mock_agent.run.assert_called_once_with(max_turns=100_000)
 
 
@@ -1154,3 +1201,213 @@ class TestModuleConstants:
         assert 0x01 in MOVE_DATA
         assert 0x00 in MOVE_DATA
         assert 0x56 in MOVE_DATA  # Thunder Wave (status)
+
+
+# ===================================================================
+# Navigator -- collision_grid + A* integration
+# ===================================================================
+
+
+class TestNavigatorCollisionGrid:
+    """Tests for A* pathfinding integration in Navigator.next_direction."""
+
+    def _open_grid(self):
+        """Return a fully walkable 9x10 grid."""
+        return [[1] * 10 for _ in range(9)]
+
+    def test_with_collision_grid_uses_astar_for_waypoint(self):
+        """When collision_grid is provided and target is on screen, A* is used."""
+        routes = {"10": [{"x": 7, "y": 6}]}
+        nav = Navigator(routes)
+        # Player at (5, 5), target at (7, 6) -> screen target = (4+1, 4+2) = (5, 6)
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        # A* should give a direction toward (5, 6) from (4, 4)
+        assert result in ("down", "right")
+
+    def test_with_collision_grid_astar_returns_first_direction(self):
+        """A* path result is used to pick the first direction."""
+        routes = {"10": [{"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        # Player at (5, 5), target at (6, 5) -> screen target = (4, 5)
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        # Target is to the right on screen
+        assert result == "right"
+
+    def test_with_collision_grid_falls_back_when_astar_fails(self):
+        """When A* returns failure (all walls), fall back to _direction_toward_target."""
+        routes = {"10": [{"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        state = OverworldState(map_id=10, x=5, y=5)
+        # All walls except the player position
+        grid = [[0] * 10 for _ in range(9)]
+        grid[4][4] = 1  # player position is walkable
+        result = nav.next_direction(state, collision_grid=grid)
+        # A* fails, falls back to _direction_toward_target
+        assert result == "right"  # x-preference default
+
+    def test_without_collision_grid_behaves_as_before(self):
+        """When collision_grid is None (default), behavior is unchanged."""
+        routes = {"10": [{"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        state = OverworldState(map_id=10, x=5, y=5)
+        result = nav.next_direction(state)
+        assert result == "right"  # _direction_toward_target with x-preference
+
+    def test_with_collision_grid_target_offscreen_falls_back(self):
+        """When target is offscreen, A* is not attempted."""
+        routes = {"10": [{"x": 20, "y": 5}]}
+        nav = Navigator(routes)
+        # Player at (5, 5), target at (20, 5) -> screen col = 4 + (20-5) = 19 -> offscreen
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        # Falls back to _direction_toward_target
+        assert result == "right"
+
+    def test_with_collision_grid_target_offscreen_negative_falls_back(self):
+        """When target is offscreen in the negative direction, A* is not attempted."""
+        routes = {"10": [{"x": 0, "y": 0}]}
+        nav = Navigator(routes)
+        # Player at (10, 10), target at (0, 0) -> screen row = 4 + (0-10) = -6 -> offscreen
+        state = OverworldState(map_id=10, x=10, y=10)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        assert result == "left"  # x-preference fallback
+
+    def test_with_collision_grid_for_early_game_targets(self):
+        """A* is used for early game targets when collision_grid is provided."""
+        nav = Navigator({})
+        # Map 38 = Red's bedroom, target (7, 1), axis "x"
+        # Player at (3, 3) -> screen target = (4 + (1-3), 4 + (7-3)) = (2, 8)
+        state = OverworldState(map_id=38, x=3, y=3)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        # A* should navigate toward (2, 8) from (4, 4)
+        assert result in ("right", "up")
+
+    def test_with_collision_grid_early_game_offscreen_falls_back(self):
+        """Early game target offscreen falls back to _direction_toward_target."""
+        nav = Navigator({})
+        # Map 0 = Pallet Town, target (5, 1)
+        # Player at (5, 20) -> screen target = (4 + (1-20), 4 + (5-5)) = (-15, 4) -> offscreen
+        state = OverworldState(map_id=0, x=5, y=20)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        assert result == "up"  # y-axis preference for Pallet Town is "x" but y needed
+
+    def test_with_collision_grid_early_game_astar_failure_falls_back(self):
+        """Early game A* failure falls back to _direction_toward_target."""
+        nav = Navigator({})
+        # Map 38, target (7, 1), player at (3, 3)
+        # screen target = (2, 8) -- make all walls except player
+        state = OverworldState(map_id=38, x=3, y=3)
+        grid = [[0] * 10 for _ in range(9)]
+        grid[4][4] = 1  # player only
+        result = nav.next_direction(state, collision_grid=grid)
+        assert result == "right"  # x-preference fallback
+
+    def test_with_collision_grid_astar_partial_result_used(self):
+        """A* partial result (target is wall but path approaches it) is used."""
+        routes = {"10": [{"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        # Make the target cell a wall so A* returns partial
+        grid[4][5] = 0
+        result = nav.next_direction(state, collision_grid=grid)
+        # Partial result still gives a direction
+        assert result is not None
+
+    def test_with_collision_grid_astar_empty_directions_falls_back(self):
+        """When A* succeeds but returns no directions (at target), falls back."""
+        routes = {"10": [{"x": 5, "y": 5}, {"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        # Player is AT the first waypoint -> advances to second, then A* on second
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        result = nav.next_direction(state, collision_grid=grid)
+        assert result is not None
+
+    def test_collision_grid_forwarded_on_recursive_call(self):
+        """When waypoint is reached and next_direction recurses, collision_grid is forwarded."""
+        routes = {"10": [{"x": 5, "y": 5}, {"x": 6, "y": 5}]}
+        nav = Navigator(routes)
+        state = OverworldState(map_id=10, x=5, y=5)
+        grid = self._open_grid()
+        # Block the direct path in _direction_toward_target but leave A* path open
+        # This verifies collision_grid gets forwarded in recursion
+        result = nav.next_direction(state, collision_grid=grid)
+        assert nav.current_waypoint == 1
+        assert result == "right"
+
+
+# ===================================================================
+# PokemonAgent -- CollisionMap integration
+# ===================================================================
+
+
+class TestPokemonAgentCollisionMap:
+    """Tests for CollisionMap integration in PokemonAgent."""
+
+    def test_agent_creates_collision_map(self, tmp_path):
+        """PokemonAgent.__init__ creates a collision_map attribute."""
+        ag = _make_agent(tmp_path)
+        assert hasattr(ag, "collision_map")
+        from memory_reader import CollisionMap
+        assert isinstance(ag.collision_map, CollisionMap)
+
+    def test_run_overworld_updates_collision_map(self, tmp_path):
+        """run_overworld calls collision_map.update before choosing action."""
+        ag = _make_agent(tmp_path)
+        state = OverworldState(map_id=99, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.controller = MagicMock()
+        ag.turn_count = 1
+
+        # Mock the collision_map to track update calls
+        ag.collision_map = MagicMock()
+        ag.collision_map.grid = [[1] * 10 for _ in range(9)]
+
+        ag.run_overworld()
+
+        ag.collision_map.update.assert_called_once_with(ag.pyboy)
+
+    def test_run_overworld_handles_collision_map_failure(self, tmp_path):
+        """run_overworld continues even if collision_map.update raises."""
+        ag = _make_agent(tmp_path)
+        state = OverworldState(map_id=99, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.controller = MagicMock()
+        ag.turn_count = 1
+
+        # Make collision_map.update raise
+        ag.collision_map = MagicMock()
+        ag.collision_map.update.side_effect = Exception("no game_wrapper")
+        ag.collision_map.grid = [[1] * 10 for _ in range(9)]
+
+        # Should not raise
+        ag.run_overworld()
+
+        assert ag.last_overworld_state == state
+
+    def test_choose_overworld_action_passes_collision_grid(self, tmp_path):
+        """choose_overworld_action passes collision_grid to navigator."""
+        ag = _make_agent(tmp_path)
+        ag.collision_map = MagicMock()
+        ag.collision_map.grid = [[1] * 10 for _ in range(9)]
+
+        state = OverworldState(map_id=99, x=5, y=5)
+        ag.navigator.next_direction = MagicMock(return_value="down")
+
+        ag.choose_overworld_action(state)
+
+        ag.navigator.next_direction.assert_called_once_with(
+            state,
+            turn=ag.turn_count,
+            stuck_turns=ag.stuck_turns,
+            collision_grid=ag.collision_map.grid,
+        )

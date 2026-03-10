@@ -1,7 +1,7 @@
 """Tests for memory_reader.py — targeting 100% line coverage."""
 
 import pytest
-from memory_reader import BattleState, OverworldState, MemoryReader
+from memory_reader import BattleState, OverworldState, MemoryReader, CollisionMap
 
 
 # ---------------------------------------------------------------------------
@@ -364,3 +364,66 @@ class TestPlayerWhitedOut:
         reader = MemoryReader(mock_pyboy)
         fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 0
         assert reader.player_whited_out() is True
+
+
+# ---------------------------------------------------------------------------
+# CollisionMap
+# ---------------------------------------------------------------------------
+
+class TestCollisionMap:
+    def test_init_defaults(self):
+        cm = CollisionMap()
+        assert cm.grid == [[0] * 10 for _ in range(9)]
+        assert cm.player_pos == (4, 4)
+        assert cm.sprites == []
+
+    def test_update_reads_collision_data(self, mock_pyboy):
+        """update() should read game_area_collision and downsample 18x20 to 9x10."""
+        cm = CollisionMap()
+        raw = [[1] * 20 for _ in range(18)]
+        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        cm.update(mock_pyboy)
+        for row in cm.grid:
+            for cell in row:
+                assert cell == 1
+
+    def test_update_walls_downsample(self, mock_pyboy):
+        """A 2x2 block with any 0 should produce a 0 in the downsampled grid."""
+        cm = CollisionMap()
+        raw = [[1] * 20 for _ in range(18)]
+        raw[0][0] = 0
+        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        cm.update(mock_pyboy)
+        assert cm.grid[0][0] == 0
+
+    def test_update_all_walls(self, mock_pyboy):
+        """All zeros -> all walls."""
+        cm = CollisionMap()
+        raw = [[0] * 20 for _ in range(18)]
+        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        cm.update(mock_pyboy)
+        for row in cm.grid:
+            for cell in row:
+                assert cell == 0
+
+    def test_to_ascii(self):
+        cm = CollisionMap()
+        cm.grid = [[1] * 10 for _ in range(9)]
+        cm.grid[0][0] = 0
+        result = cm.to_ascii()
+        assert isinstance(result, str)
+        lines = result.strip().split("\n")
+        assert len(lines) == 9
+        assert "@" in lines[4]
+
+    def test_to_ascii_with_sprites(self):
+        cm = CollisionMap()
+        cm.grid = [[1] * 10 for _ in range(9)]
+        cm.sprites = [(0, 0)]
+        result = cm.to_ascii()
+        lines = result.strip().split("\n")
+        assert "S" in lines[0]
+
+    def test_player_pos_always_center(self):
+        cm = CollisionMap()
+        assert cm.player_pos == (4, 4)

@@ -15,6 +15,9 @@ frames/
 # Plans (ephemeral working artifacts, never commit)
 docs/plans/
 
+# Agent working memory (ephemeral per-run notes)
+notes.md
+
 # macOS
 .DS_Store
 

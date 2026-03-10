@@ -211,3 +211,45 @@ class MemoryReader:
             if hp > 0:
                 return False
         return True
+
+
+class CollisionMap:
+    """9x10 walkability grid from PyBoy's collision data."""
+
+    def __init__(self):
+        self.grid: list[list[int]] = [[0] * 10 for _ in range(9)]
+        self.player_pos: tuple[int, int] = (4, 4)
+        self.sprites: list[tuple[int, int]] = []
+
+    def update(self, pyboy) -> None:
+        """Read collision data and downsample 18x20 to 9x10."""
+        raw = pyboy.game_wrapper().game_area_collision()
+        self.sprites = []
+        for r in range(9):
+            for c in range(10):
+                cells = [
+                    raw[r * 2][c * 2],
+                    raw[r * 2][c * 2 + 1],
+                    raw[r * 2 + 1][c * 2],
+                    raw[r * 2 + 1][c * 2 + 1],
+                ]
+                self.grid[r][c] = 1 if all(v != 0 for v in cells) else 0
+
+    def to_ascii(self) -> str:
+        """Printable map: @ = player, # = wall, . = walkable, S = sprite."""
+        sprite_set = set(self.sprites)
+        lines = []
+        for r in range(9):
+            row = []
+            for c in range(10):
+                if (r, c) == self.player_pos:
+                    row.append("@")
+                elif (r, c) in sprite_set:
+                    row.append("S")
+                elif self.grid[r][c] == 0:
+                    row.append("#")
+                else:
+                    row.append(".")
+                row.append(" ")
+            lines.append("".join(row).rstrip())
+        return "\n".join(lines)

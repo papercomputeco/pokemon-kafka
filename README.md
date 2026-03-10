@@ -97,3 +97,28 @@ pokemon-agent/
 ## Pokedex
 
 The `pokedex/` directory contains session logs and development notes. Each log documents what happened during a run: setup blockers, fixes, observations about agent behavior. These serve as a record of how the project evolved and what the agent encountered.
+
+## Speed Run Milestones
+
+Target turn counts for community benchmarking. Fork it, improve the strategy, post your numbers.
+
+| Milestone | Low | Medium | High |
+|---|---|---|---|
+| Get Charmander + beat rival | ~200 | ~200 | ~200 |
+| Reach Viridian City | ~2,000 | ~1,000 | ~500 |
+| Reach Pewter City | ~5,000 | ~3,000 | ~1,500 |
+| Beat Brock (1st gym) | ~8,000 | ~5,000 | ~3,000 |
+| Clear Mt. Moon | ~20,000 | ~10,000 | ~5,000 |
+| Beat Misty (2nd gym) | ~30,000 | ~15,000 | ~8,000 |
+| Beat Lt. Surge (3rd gym) | ~50,000 | ~25,000 | ~15,000 |
+| 8 badges | ~200,000 | ~100,000 | ~60,000 |
+| Elite Four | ~300,000 | ~150,000 | ~80,000 |
+
+## Inspiration & References
+
+- [ClaudePlaysPokemon](https://www.twitch.tv/claudeplayspokemon) — Anthropic's Claude-plays-Pokemon Twitch stream
+- [Insights into Claude Opus 4.5 from Pokemon](https://www.lesswrong.com/posts/u6Lacc7wx4yYkBQ3r/insights-into-claude-opus-4-5-from-pokemon) — Navigation, memory notes, and spatial reasoning analysis
+- [ClaudePlaysPokemon Harness Changes](https://docs.google.com/document/u/1/d/e/2PACX-1vRIsu2pLI21W4KjfYbN13or8E-8cvJYw570wGMEp4UQU63ZhEh9FPGgj2ark8Yk7Vyrtt9MWq3jnn4h/pub) — Minimap, navigator, and memory file evolution
+- [Claude Plays Pokemon](https://jurgengravestein.substack.com/p/claude-plays-pokemon) — Why games reveal AI capabilities better than benchmarks
+- [ClaudePlaysPokemonStarter](https://github.com/davidhershey/ClaudePlaysPokemonStarter) — Official minimal starter harness
+- [LLM Pokemon Scaffold](https://github.com/cicero225/llm_pokemon_scaffold) — Multi-model scaffold (Claude, Gemini, o3)

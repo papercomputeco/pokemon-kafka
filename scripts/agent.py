@@ -6,7 +6,7 @@ Runs headless. Reads game state from memory. Makes decisions.
 Sends inputs. Logs everything. Designed for stereOS + Tapes.
 
 Usage:
-    python3 agent.py path/to/pokemon_red.gb [--strategy heuristic|llm]
+    python3 agent.py path/to/pokemon_red.gb [--strategy low|medium|high]
 """
 
 import argparse
@@ -27,7 +27,9 @@ try:
 except ImportError:
     Image = None
 
-from memory_reader import MemoryReader, BattleState, OverworldState
+from memory_reader import MemoryReader, BattleState, OverworldState, CollisionMap
+from memory_file import MemoryFile
+from pathfinding import astar_path
 
 # ---------------------------------------------------------------------------
 # Type chart (simplified — super effective multipliers)
@@ -247,7 +249,17 @@ class Navigator:
             return None
         return ordered[stuck_turns % len(ordered)]
 
-    def next_direction(self, state: OverworldState, turn: int = 0, stuck_turns: int = 0) -> str | None:
+    def _try_astar(self, state: OverworldState, target_x: int, target_y: int, collision_grid: list) -> str | None:
+        """Try A* pathfinding to target. Returns first direction or None."""
+        screen_target_row = 4 + (target_y - state.y)
+        screen_target_col = 4 + (target_x - state.x)
+        if 0 <= screen_target_row < 9 and 0 <= screen_target_col < 10:
+            result = astar_path(collision_grid, (4, 4), (screen_target_row, screen_target_col))
+            if result["status"] in ("success", "partial") and result["directions"]:
+                return result["directions"][0]
+        return None
+
+    def next_direction(self, state: OverworldState, turn: int = 0, stuck_turns: int = 0, collision_grid: list | None = None) -> str | None:
         """Get the next direction to move based on current position and route plan."""
         map_key = str(state.map_id)
 
@@ -259,6 +271,10 @@ class Navigator:
         special_target = EARLY_GAME_TARGETS.get(state.map_id)
         if special_target:
             target_x, target_y = special_target["target"]
+            if collision_grid is not None:
+                astar_dir = self._try_astar(state, target_x, target_y, collision_grid)
+                if astar_dir is not None:
+                    return astar_dir
             return self._direction_toward_target(
                 state,
                 target_x,
@@ -282,9 +298,40 @@ class Navigator:
 
         if state.x == tx and state.y == ty:
             self.current_waypoint += 1
-            return self.next_direction(state, turn=turn, stuck_turns=stuck_turns)
+            return self.next_direction(state, turn=turn, stuck_turns=stuck_turns, collision_grid=collision_grid)
+
+        if collision_grid is not None:
+            astar_dir = self._try_astar(state, tx, ty, collision_grid)
+            if astar_dir is not None:
+                return astar_dir
 
         return self._direction_toward_target(state, tx, ty, stuck_turns=stuck_turns)
+
+
+# ---------------------------------------------------------------------------
+# Strategy engine
+# ---------------------------------------------------------------------------
+
+
+class StrategyEngine:
+    """Controls intelligence level based on strategy tier."""
+
+    STUCK_THRESHOLD = 10
+
+    def __init__(self, tier: str, notes_path: str | None = None):
+        self.tier = tier
+        self.notes: MemoryFile | None = None
+        if tier in ("medium", "high") and notes_path:
+            self.notes = MemoryFile(notes_path)
+
+    def should_call_llm(self, stuck_turns: int = 0, map_changed: bool = False) -> bool:
+        """Determine if an LLM call should be made this turn."""
+        if self.tier == "low":
+            return False
+        if self.tier == "high":
+            return True
+        # medium: call on triggers only
+        return stuck_turns >= self.STUCK_THRESHOLD or map_changed
 
 
 # ---------------------------------------------------------------------------
@@ -294,13 +341,17 @@ class Navigator:
 class PokemonAgent:
     """Autonomous Pokemon player."""
 
-    def __init__(self, rom_path: str, strategy: str = "heuristic", screenshots: bool = False):
+    def __init__(self, rom_path: str, strategy: str = "low", screenshots: bool = False):
         self.rom_path = rom_path
         self.pyboy = PyBoy(rom_path, window="null")
         self.controller = GameController(self.pyboy)
         self.memory = MemoryReader(self.pyboy)
         self.type_chart = load_type_chart()
         self.battle_strategy = BattleStrategy(self.type_chart)
+        self.strategy_engine = StrategyEngine(
+            strategy,
+            notes_path=str(SCRIPT_DIR.parent / "notes.md") if strategy != "low" else None,
+        )
         self.turn_count = 0
         self.battles_won = 0
         self.screenshots = screenshots
@@ -310,6 +361,7 @@ class PokemonAgent:
         self.recent_positions: list[tuple[int, int, int]] = []
         self.maps_visited: set[int] = set()
         self.events: list[str] = []
+        self.collision_map = CollisionMap()
 
         # Screenshot output directory
         self.frames_dir = SCRIPT_DIR.parent / "frames"
@@ -382,6 +434,7 @@ class PokemonAgent:
             state,
             turn=self.turn_count,
             stuck_turns=self.stuck_turns,
+            collision_grid=self.collision_map.grid,
         )
         return direction or "a"
 
@@ -495,6 +548,10 @@ class PokemonAgent:
         """Move in the overworld."""
         state = self.memory.read_overworld_state()
         self.update_overworld_progress(state)
+        try:
+            self.collision_map.update(self.pyboy)
+        except Exception:
+            pass  # game_wrapper may not be available in all contexts
         action = self.choose_overworld_action(state)
 
         if action in {"up", "down", "left", "right"}:
@@ -571,9 +628,9 @@ def main():
     parser.add_argument("rom", help="Path to ROM file (.gb or .gbc)")
     parser.add_argument(
         "--strategy",
-        choices=["heuristic", "llm"],
-        default="heuristic",
-        help="Decision strategy (default: heuristic)",
+        choices=["low", "medium", "high"],
+        default="low",
+        help="Decision strategy (default: low)",
     )
     parser.add_argument(
         "--max-turns",
