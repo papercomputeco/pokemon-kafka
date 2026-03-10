@@ -15,10 +15,6 @@ dev = [
     "pytest-cov",
 ]
 
-kafka = [
-    "confluent-kafka",
-]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts", "tests"]

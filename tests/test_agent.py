@@ -955,36 +955,6 @@ class TestPokemonAgentInit:
         ag = _make_agent(tmp_path, type_chart_data=chart)
         assert ag.type_chart == chart
 
-    def test_init_telemetry_enabled_prints(self, tmp_path, capsys):
-        """Line 500: print fires when KAFKA_BOOTSTRAP_SERVERS is set."""
-        from collections import defaultdict
-        import kafka_producer
-
-        mock_pb = MagicMock()
-        mock_pb.memory = defaultdict(int)
-        tc_path = tmp_path / "tc.json"
-        rp = tmp_path / "routes.json"
-
-        mock_kafka_client = MagicMock()
-        original_client = kafka_producer.KafkaProducerClient
-        try:
-            kafka_producer.KafkaProducerClient = MagicMock(return_value=mock_kafka_client)
-            with (
-                patch.dict(os.environ, {"KAFKA_BOOTSTRAP_SERVERS": "localhost:9092"}, clear=False),
-                patch("agent.PyBoy", return_value=mock_pb),
-                patch.object(agent, "TYPE_CHART_PATH", tc_path),
-                patch.object(agent, "ROUTES_PATH", rp),
-                patch.object(agent, "SCRIPT_DIR", tmp_path),
-                patch("kafka_producer._ensure_kafka_client"),
-            ):
-                ag = PokemonAgent(str(tmp_path / "fake.gb"), strategy="low")
-        finally:
-            kafka_producer.KafkaProducerClient = original_client
-
-        captured = capsys.readouterr()
-        assert "Kafka telemetry enabled" in captured.out
-        assert ag.telemetry.enabled is True
-
 
 class TestUpdateOverworldProgress:
     def test_first_call(self, tmp_path):

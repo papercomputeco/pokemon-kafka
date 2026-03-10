@@ -1,51 +1,39 @@
 [
   {
+    "agent_id": 0,
+    "label": "baseline_4dc",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
     "agent_id": 2,
     "label": "dc2",
     "params": {
       "stuck_threshold": 8,
       "door_cooldown": 2,
       "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 11,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 15.8,
-    "returncode": 0
-  },
-  {
-    "agent_id": 4,
-    "label": "high_stuck_dc4",
-    "params": {
-      "stuck_threshold": 12,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
     "agent_id": 3,
@@ -54,142 +42,16 @@
       "stuck_threshold": 4,
       "door_cooldown": 4,
       "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
-  },
-  {
-    "agent_id": 0,
-    "label": "baseline_4dc",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
-  },
-  {
-    "agent_id": 5,
-    "label": "wide_skip_dc4",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 6,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
-  },
-  {
-    "agent_id": 8,
-    "label": "aggressive",
-    "params": {
-      "stuck_threshold": 3,
-      "door_cooldown": 2,
-      "waypoint_skip_distance": 5,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 11,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 15.8,
-    "returncode": 0
-  },
-  {
-    "agent_id": 7,
-    "label": "x_axis_dc4",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "x"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
-  },
-  {
-    "agent_id": 6,
-    "label": "narrow_dc4",
-    "params": {
-      "stuck_threshold": 8,
-      "door_cooldown": 4,
-      "waypoint_skip_distance": 1,
-      "axis_preference_map_0": "y"
-    },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 15
-    },
-    "score": -65.0,
-    "elapsed": 17.2,
-    "returncode": 0
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
     "agent_id": 1,
@@ -198,22 +60,70 @@
       "stuck_threshold": 8,
       "door_cooldown": 8,
       "waypoint_skip_distance": 3,
-      "axis_preference_map_0": "y"
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 18
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 4,
+    "label": "high_stuck_dc4",
+    "params": {
+      "stuck_threshold": 12,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "score": -80.0,
-    "elapsed": 17.8,
-    "returncode": 0
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 8,
+    "label": "aggressive",
+    "params": {
+      "stuck_threshold": 3,
+      "door_cooldown": 2,
+      "waypoint_skip_distance": 5,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 7,
+    "label": "x_axis_dc4",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "x",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
   },
   {
     "agent_id": 9,
@@ -222,21 +132,87 @@
       "stuck_threshold": 6,
       "door_cooldown": 6,
       "waypoint_skip_distance": 4,
-      "axis_preference_map_0": "y"
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "fitness": {
-      "turns": 5000,
-      "battles_won": 1,
-      "maps_visited": 4,
-      "final_map_id": 0,
-      "final_x": 7,
-      "final_y": 12,
-      "badges": 0,
-      "party_size": 1,
-      "stuck_count": 18
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 5,
+    "label": "wide_skip_dc4",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 6,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
     },
-    "score": -80.0,
-    "elapsed": 17.9,
-    "returncode": 0
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 6,
+    "label": "narrow_dc4",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 1,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 15,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 11,
+    "label": "no_bt",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 0,
+      "bt_restore_threshold": 999,
+      "bt_max_attempts": 3,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
+  },
+  {
+    "agent_id": 10,
+    "label": "aggressive_bt",
+    "params": {
+      "stuck_threshold": 8,
+      "door_cooldown": 4,
+      "waypoint_skip_distance": 3,
+      "axis_preference_map_0": "y",
+      "bt_max_snapshots": 8,
+      "bt_restore_threshold": 10,
+      "bt_max_attempts": 5,
+      "bt_snapshot_interval": 50
+    },
+    "fitness": {},
+    "score": -999,
+    "elapsed": 0.1,
+    "error": "Expecting value: line 1 column 1 (char 0)"
   }
 ]

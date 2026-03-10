@@ -18,7 +18,7 @@ import os
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from kafka_producer import TelemetryProducer
+
 
 try:
     from pyboy import PyBoy
@@ -494,11 +494,6 @@ class PokemonAgent:
                 skip_distance=int(self.evolve_params.get("waypoint_skip_distance", 3)),
             )
 
-        # Kafka telemetry producer
-        self.telemetry = TelemetryProducer.from_env()
-        if self.telemetry.enabled:
-            print(f"[agent] Kafka telemetry enabled: {os.environ.get('KAFKA_BOOTSTRAP_SERVERS')}")
-
         print(f"[agent] Loaded ROM: {rom_path}")
         print(f"[agent] Strategy: {strategy}")
         if self.evolve_params:
@@ -650,7 +645,6 @@ class PokemonAgent:
         line = f"[{timestamp}] {msg}"
         print(line, flush=True)
         self.events.append(line)
-        self.telemetry.publish("tool_result", msg, turn=self.turn_count)
 
     def write_pokedex_entry(self):
         """Write a session summary to the pokedex directory."""
@@ -719,12 +713,6 @@ class PokemonAgent:
             f"Enemy HP: {battle.enemy_hp}/{battle.enemy_max_hp} | "
             f"Action: {action}"
         )
-        self.telemetry.publish(
-            "tool_call",
-            json.dumps(action),
-            turn=self.turn_count,
-        )
-
         if action["action"] == "fight":
             # Navigate to FIGHT menu
             self.controller.press("a")  # Select FIGHT
@@ -893,11 +881,6 @@ class PokemonAgent:
 
         self.last_overworld_state = state
         self.last_overworld_action = action
-        self.telemetry.publish(
-            "tool_call",
-            json.dumps({"action": action, "map_id": state.map_id, "x": state.x, "y": state.y}),
-            turn=self.turn_count,
-        )
 
     def compute_fitness(self) -> dict:
         """Return structured metrics from the current run state."""
@@ -918,11 +901,6 @@ class PokemonAgent:
     def run(self, max_turns: int = 100_000):
         """Main agent loop. Returns fitness dict at end."""
         self.log("Agent starting. Advancing through intro...")
-        self.telemetry.publish(
-            "user",
-            json.dumps({"rom": self.rom_path, "strategy": self.strategy_engine.tier, "max_turns": max_turns}),
-            turn=0,
-        )
 
         # Advance through title screen (needs ~1500 frames to reach "Press Start")
         self.controller.wait(1500)
@@ -968,11 +946,6 @@ class PokemonAgent:
         self.log(f"Session complete. Turns: {self.turn_count} | Wins: {self.battles_won}")
         self.write_pokedex_entry()
         fitness = self.compute_fitness()
-        self.telemetry.publish(
-            "assistant",
-            json.dumps(fitness),
-            turn=self.turn_count,
-        )
         try:
             self.pyboy.stop()
         except PermissionError:
