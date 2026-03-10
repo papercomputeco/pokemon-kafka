@@ -26,3 +26,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  telemetry-consumer:
+    build: docker/telemetry-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: agent.telemetry.raw
+      KAFKA_GROUP_ID: telemetry-consumer
