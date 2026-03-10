@@ -46,3 +46,62 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TOPIC: agent.telemetry.alerts
       KAFKA_GROUP_ID: alerts-consumer
+
+  flink-jobmanager:
+    image: flink:1.18
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    volumes:
+      - flink-lib:/opt/flink/lib-extra
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+
+  flink-taskmanager:
+    image: flink:1.18
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    volumes:
+      - flink-lib:/opt/flink/lib-extra
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+
+  # Downloads the Kafka connector JAR required by Flink SQL.
+  # The flink:1.18 image does NOT include it by default.
+  flink-kafka-connector:
+    image: flink:1.18
+    volumes:
+      - flink-lib:/opt/flink/lib
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Downloading Flink Kafka connector..."
+        curl -fSL https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.1.0-1.18/flink-sql-connector-kafka-3.1.0-1.18.jar \
+          -o /opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar
+        echo "Done."
+
+  flink-sql-client:
+    image: flink:1.18
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      flink-taskmanager:
+        condition: service_started
+      flink-kafka-connector:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/flink-sql:/opt/flink-sql
+      - flink-lib:/opt/flink/lib-extra
+    command: ["/bin/bash", "/opt/flink-sql/submit-jobs.sh"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+
+volumes:
+  flink-lib:
