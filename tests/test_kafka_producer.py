@@ -170,3 +170,33 @@ class TestTelemetryProducer:
         with patch.dict(os.environ, {"KAFKA_SESSION_ID": "my-session", "KAFKA_BOOTSTRAP_SERVERS": ""}, clear=False):
             producer = TelemetryProducer.from_env()
             assert producer.session_id == "my-session"
+
+
+class TestEnsureKafkaClient:
+    """Test lazy-loading of the Kafka client class."""
+
+    def test_returns_existing_client_when_already_set(self):
+        import kafka_producer
+        original = kafka_producer.KafkaProducerClient
+        try:
+            sentinel = object()
+            kafka_producer.KafkaProducerClient = sentinel
+            result = kafka_producer._ensure_kafka_client()
+            assert result is sentinel
+        finally:
+            kafka_producer.KafkaProducerClient = original
+
+    def test_imports_confluent_kafka_producer(self):
+        import kafka_producer
+        original = kafka_producer.KafkaProducerClient
+        try:
+            kafka_producer.KafkaProducerClient = None
+            mock_producer_class = MagicMock()
+            mock_confluent = MagicMock()
+            mock_confluent.Producer = mock_producer_class
+            with patch.dict("sys.modules", {"confluent_kafka": mock_confluent}):
+                result = kafka_producer._ensure_kafka_client()
+            assert result is mock_producer_class
+            assert kafka_producer.KafkaProducerClient is mock_producer_class
+        finally:
+            kafka_producer.KafkaProducerClient = original
