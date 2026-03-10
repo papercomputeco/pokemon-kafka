@@ -1,5 +1,7 @@
 # Pokemon Agent
 
+![Pokemon Agent](hero2.png)
+
 Autonomous Pokemon Red player that reads game memory, makes strategic decisions, and plays headlessly inside a stereOS VM.
 
 ## Architecture
