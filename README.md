@@ -156,6 +156,7 @@ pokemon-agent/
 │   ├── tape_reader.py       # Tapes SQLite reader (stdlib only)
 │   ├── observer.py          # heuristic observation extractor
 │   ├── observe_cli.py       # CLI for running the observer
+│   ├── pathfinding.py       # collision map + backtrack manager
 │   ├── evolve.py            # AlphaEvolve strategy evolution harness
 │   └── run_10_agents.py     # parallel multi-agent evaluation runner
 ├── references/
@@ -185,8 +186,24 @@ Target turn counts for community benchmarking. Fork it, improve the strategy, po
 | 8 badges | ~200,000 | ~100,000 | ~60,000 |
 | Elite Four | ~300,000 | ~150,000 | ~80,000 |
 
+## FLE-Style Backtracking
+
+Inspired by the [Factorio Learning Environment](https://arxiv.org/abs/2503.09617)'s `BacktrackingAgent`, the agent snapshots game state at key moments (map changes, periodic intervals) and restores when stuck. This directly addresses navigation dead-ends like Route 1's y=28 blocker — instead of wasting turns in a loop, the agent reverts to a known-good state and tries an alternate path.
+
+Snapshots use PyBoy's `save_state()`/`load_state()` with in-memory `BytesIO` buffers (~130KB each, <1ms). A bounded deque keeps the most recent 8 snapshots. Each snapshot tracks its restore count, and after 3 failed attempts from the same snapshot it's discarded. Four parameters control the behavior and are evolvable through AlphaEvolve:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `bt_max_snapshots` | 8 | Max snapshots in the deque |
+| `bt_restore_threshold` | 15 | Stuck turns before restoring |
+| `bt_max_attempts` | 3 | Retries per snapshot |
+| `bt_snapshot_interval` | 50 | Periodic snapshot frequency |
+
+Scripted areas like Oak's Lab (map 40) disable backtracking entirely — the lab's multi-phase cutscene looks "stuck" but is progressing naturally.
+
 ## Inspiration & References
 
+- [Factorio Learning Environment](https://arxiv.org/abs/2503.09617) — Backtracking agent patterns, structured observations, and incremental report distillation for game-playing LLM agents
 - [AlphaEvolve](https://arxiv.org/abs/2506.13131) — DeepMind's LLM-driven code evolution framework
 - [Discovering Multiagent Learning Algorithms with LLMs](https://arxiv.org/abs/2602.16928) — AlphaEvolve applied to game-playing agents
 - [ClaudePlaysPokemon](https://www.twitch.tv/claudeplayspokemon) — Anthropic's Claude-plays-Pokemon Twitch stream

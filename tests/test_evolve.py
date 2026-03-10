@@ -45,6 +45,10 @@ class TestDefaultParams:
         assert "door_cooldown" in DEFAULT_PARAMS
         assert "waypoint_skip_distance" in DEFAULT_PARAMS
         assert "axis_preference_map_0" in DEFAULT_PARAMS
+        assert "bt_max_snapshots" in DEFAULT_PARAMS
+        assert "bt_restore_threshold" in DEFAULT_PARAMS
+        assert "bt_max_attempts" in DEFAULT_PARAMS
+        assert "bt_snapshot_interval" in DEFAULT_PARAMS
 
 
 # ── score() ────────────────────────────────────────────────────────────
@@ -83,6 +87,15 @@ class TestScore:
                 "battles_won": 0, "stuck_count": 0, "turns": 0}
         stuck = dict(base, stuck_count=100)
         assert score(stuck) < score(base)
+
+    def test_backtrack_restores_penalizes(self):
+        base = {"final_map_id": 1, "badges": 0, "party_size": 0,
+                "battles_won": 0, "stuck_count": 0, "turns": 0,
+                "backtrack_restores": 0}
+        with_bt = dict(base, backtrack_restores=10)
+        assert score(with_bt) < score(base)
+        # Penalty is -2 per restore
+        assert score(base) - score(with_bt) == 20
 
 
 # ── run_agent() ────────────────────────────────────────────────────────
@@ -179,6 +192,13 @@ class TestBuildMutationPrompt:
         assert "stuck_threshold" in prompt
         assert '"turns": 100' in prompt
 
+    def test_includes_bt_descriptions(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {})
+        assert "bt_max_snapshots" in prompt
+        assert "bt_restore_threshold" in prompt
+        assert "bt_max_attempts" in prompt
+        assert "bt_snapshot_interval" in prompt
+
     def test_includes_observations(self):
         obs = [{"priority": "important", "content": "Tool error: boom"}]
         prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, obs)
@@ -237,11 +257,28 @@ class TestPerturb:
         import random
         random.seed(0)
         params = dict(DEFAULT_PARAMS, stuck_threshold=1, door_cooldown=1,
-                      waypoint_skip_distance=1)
+                      waypoint_skip_distance=1, bt_max_snapshots=1,
+                      bt_restore_threshold=1, bt_max_attempts=1,
+                      bt_snapshot_interval=1)
         for _ in range(50):
             result = _perturb(params)
-            for key in ("stuck_threshold", "door_cooldown", "waypoint_skip_distance"):
+            for key in ("stuck_threshold", "door_cooldown", "waypoint_skip_distance",
+                        "bt_max_snapshots", "bt_restore_threshold",
+                        "bt_max_attempts", "bt_snapshot_interval"):
                 assert result[key] >= 1
+
+    def test_can_perturb_bt_keys(self):
+        """bt_* keys should be reachable by perturbation."""
+        import random
+        random.seed(123)
+        bt_changed = set()
+        for _ in range(200):
+            result = _perturb(DEFAULT_PARAMS)
+            for key in ("bt_max_snapshots", "bt_restore_threshold",
+                        "bt_max_attempts", "bt_snapshot_interval"):
+                if result[key] != DEFAULT_PARAMS[key]:
+                    bt_changed.add(key)
+        assert len(bt_changed) > 0
 
 
 # ── evolve() ───────────────────────────────────────────────────────────

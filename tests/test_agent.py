@@ -1,6 +1,7 @@
 """Comprehensive tests for agent.py — targeting 100% line coverage."""
 
 import importlib
+import io
 import json
 import os
 import runpy
@@ -25,6 +26,8 @@ from agent import (
     GameController,
     BattleStrategy,
     Navigator,
+    Snapshot,
+    BacktrackManager,
     StrategyEngine,
     PokemonAgent,
     main,
@@ -550,6 +553,326 @@ def _make_agent(tmp_path, screenshots=False, routes=None, type_chart_data=None):
         ag.frames_dir.mkdir(parents=True, exist_ok=True)
 
     return ag
+
+
+# ===================================================================
+# BacktrackManager tests
+# ===================================================================
+
+
+class TestBacktrackManager:
+    """Tests for Snapshot dataclass and BacktrackManager."""
+
+    def test_snapshot_defaults(self):
+        buf = io.BytesIO(b"state")
+        snap = Snapshot(state_bytes=buf, map_id=1, x=5, y=10, turn=42)
+        assert snap.attempts == 0
+        assert snap.map_id == 1
+        assert snap.turn == 42
+
+    def test_init_defaults(self):
+        bm = BacktrackManager()
+        assert bm.max_snapshots == 8
+        assert bm.restore_threshold == 15
+        assert bm.max_attempts == 3
+        assert bm.total_restores == 0
+        assert len(bm.snapshots) == 0
+
+    def test_init_custom(self):
+        bm = BacktrackManager(max_snapshots=4, restore_threshold=10, max_attempts=5)
+        assert bm.max_snapshots == 4
+        assert bm.restore_threshold == 10
+        assert bm.max_attempts == 5
+
+    def test_save_snapshot(self):
+        bm = BacktrackManager(max_snapshots=3)
+        mock_pyboy = MagicMock()
+        state = OverworldState(map_id=1, x=5, y=10)
+
+        bm.save_snapshot(mock_pyboy, state, turn=10)
+        assert len(bm.snapshots) == 1
+        assert bm.snapshots[0].map_id == 1
+        assert bm.snapshots[0].x == 5
+        assert bm.snapshots[0].y == 10
+        assert bm.snapshots[0].turn == 10
+        mock_pyboy.save_state.assert_called_once()
+
+    def test_save_snapshot_deque_bounds(self):
+        bm = BacktrackManager(max_snapshots=2)
+        mock_pyboy = MagicMock()
+        for i in range(5):
+            state = OverworldState(map_id=i, x=i, y=i)
+            bm.save_snapshot(mock_pyboy, state, turn=i)
+        assert len(bm.snapshots) == 2
+        # Oldest snapshots should have been evicted
+        assert bm.snapshots[0].map_id == 3
+        assert bm.snapshots[1].map_id == 4
+
+    def test_should_restore_below_threshold(self):
+        bm = BacktrackManager(restore_threshold=15)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=0, x=0, y=0), turn=0)
+        assert bm.should_restore(14) is False
+
+    def test_should_restore_no_snapshots(self):
+        bm = BacktrackManager(restore_threshold=5)
+        assert bm.should_restore(10) is False
+
+    def test_should_restore_all_exhausted(self):
+        bm = BacktrackManager(restore_threshold=5, max_attempts=1)
+        snap = Snapshot(io.BytesIO(b"x"), map_id=0, x=0, y=0, turn=0, attempts=1)
+        bm.snapshots.append(snap)
+        assert bm.should_restore(10) is False
+
+    def test_should_restore_viable(self):
+        bm = BacktrackManager(restore_threshold=5, max_attempts=3)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=0, x=0, y=0), turn=0)
+        assert bm.should_restore(5) is True
+
+    def test_restore_loads_state(self):
+        bm = BacktrackManager(max_attempts=3)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=1, x=3, y=7), turn=20)
+
+        snap = bm.restore(mock_pyboy)
+        assert snap is not None
+        assert snap.map_id == 1
+        assert snap.x == 3
+        assert snap.y == 7
+        assert snap.turn == 20
+        assert snap.attempts == 1
+        assert bm.total_restores == 1
+        mock_pyboy.load_state.assert_called_once()
+
+    def test_restore_keeps_snapshot_if_attempts_remain(self):
+        bm = BacktrackManager(max_attempts=3)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=1, x=0, y=0), turn=10)
+
+        bm.restore(mock_pyboy)
+        # Snapshot re-appended with attempts=1
+        assert len(bm.snapshots) == 1
+        assert bm.snapshots[0].attempts == 1
+
+    def test_restore_removes_snapshot_at_max_attempts(self):
+        bm = BacktrackManager(max_attempts=1)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=1, x=0, y=0), turn=10)
+
+        snap = bm.restore(mock_pyboy)
+        assert snap is not None
+        assert snap.attempts == 1
+        # Not re-appended since attempts == max_attempts
+        assert len(bm.snapshots) == 0
+
+    def test_restore_none_when_all_exhausted(self):
+        bm = BacktrackManager(max_attempts=1)
+        snap = Snapshot(io.BytesIO(b"x"), map_id=0, x=0, y=0, turn=0, attempts=1)
+        bm.snapshots.append(snap)
+
+        mock_pyboy = MagicMock()
+        result = bm.restore(mock_pyboy)
+        assert result is None
+        assert bm.total_restores == 0
+
+    def test_restore_picks_most_recent_viable(self):
+        bm = BacktrackManager(max_attempts=2)
+        # First snapshot exhausted
+        exhausted = Snapshot(io.BytesIO(b"old"), map_id=0, x=0, y=0, turn=5, attempts=2)
+        bm.snapshots.append(exhausted)
+        # Second snapshot viable
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=1, x=3, y=3), turn=15)
+
+        snap = bm.restore(mock_pyboy)
+        assert snap is not None
+        assert snap.map_id == 1
+        assert snap.turn == 15
+
+    def test_total_restores_accumulates(self):
+        bm = BacktrackManager(max_attempts=5)
+        mock_pyboy = MagicMock()
+        bm.save_snapshot(mock_pyboy, OverworldState(map_id=0, x=0, y=0), turn=0)
+
+        bm.restore(mock_pyboy)
+        bm.restore(mock_pyboy)
+        assert bm.total_restores == 2
+
+
+class TestBacktrackIntegration:
+    """Test BacktrackManager integration with PokemonAgent."""
+
+    def test_agent_has_backtrack_manager(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        assert hasattr(ag, "backtrack")
+        assert isinstance(ag.backtrack, BacktrackManager)
+
+    def test_agent_backtrack_defaults(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        assert ag.backtrack.max_snapshots == 8
+        assert ag.backtrack.restore_threshold == 15
+        assert ag.backtrack.max_attempts == 3
+        assert ag._bt_snapshot_interval == 50
+
+    def test_evolve_params_flow_to_backtrack(self, tmp_path):
+        params = {
+            "stuck_threshold": 8, "door_cooldown": 8,
+            "waypoint_skip_distance": 3, "axis_preference_map_0": "y",
+            "bt_max_snapshots": 4, "bt_restore_threshold": 10,
+            "bt_max_attempts": 5, "bt_snapshot_interval": 25,
+        }
+        ag = _make_agent_with_evolve(tmp_path, evolve_params=params)
+        assert ag.backtrack.max_snapshots == 4
+        assert ag.backtrack.restore_threshold == 10
+        assert ag.backtrack.max_attempts == 5
+        assert ag._bt_snapshot_interval == 25
+
+    def test_snapshot_on_map_change(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        state1 = OverworldState(map_id=0, x=5, y=5)
+        state2 = OverworldState(map_id=1, x=3, y=3)
+
+        ag.memory.read_overworld_state = MagicMock(return_value=state1)
+        ag._bt_last_map_id = 0  # set previous map
+        ag.run_overworld()
+
+        # No map change yet
+        initial_count = len(ag.backtrack.snapshots)
+
+        ag._bt_last_map_id = 0
+        ag.memory.read_overworld_state = MagicMock(return_value=state2)
+        ag.run_overworld()
+
+        # Map changed from 0 -> 1, should have saved a snapshot
+        assert len(ag.backtrack.snapshots) > initial_count
+
+    def test_periodic_snapshot(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag._bt_snapshot_interval = 5
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag._bt_last_map_id = 0
+        ag.stuck_turns = 0
+
+        # Run until turn_count hits the interval
+        for _ in range(6):
+            ag.turn_count += 1
+            if ag.turn_count % ag._bt_snapshot_interval == 0 and ag.stuck_turns == 0:
+                ag.backtrack.save_snapshot(ag.pyboy, state, ag.turn_count)
+
+        assert len(ag.backtrack.snapshots) == 1
+
+    def test_restore_on_stuck(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.backtrack.restore_threshold = 3
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+
+        # Save a snapshot manually
+        ag.backtrack.save_snapshot(ag.pyboy, state, turn=0)
+        ag._bt_last_map_id = 0
+
+        # Simulate being stuck
+        ag.stuck_turns = 3
+        ag.run_overworld()
+
+        # Should have restored
+        assert ag.backtrack.total_restores == 1
+        assert ag.stuck_turns == 0
+
+    def test_compute_fitness_includes_backtrack_restores(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.backtrack.total_restores = 7
+        ag.memory.read_overworld_state = MagicMock(
+            return_value=OverworldState(map_id=0, x=0, y=0)
+        )
+        fitness = ag.compute_fitness()
+        assert fitness["backtrack_restores"] == 7
+
+    def test_backtrack_event_logged(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.backtrack.restore_threshold = 1
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.backtrack.save_snapshot(ag.pyboy, state, turn=0)
+        ag._bt_last_map_id = 0
+        ag.stuck_turns = 1
+
+        ag.run_overworld()
+
+        backtrack_events = [e for e in ag.events if "BACKTRACK" in e]
+        assert len(backtrack_events) == 1
+
+    def test_restore_resets_script_gate_flags(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.backtrack.restore_threshold = 1
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.backtrack.save_snapshot(ag.pyboy, state, turn=0)
+        ag._bt_last_map_id = 0
+        ag.stuck_turns = 1
+
+        # Set flags that should be cleared on restore
+        ag._oak_wait_done = True
+        ag._pallet_diag_done = True
+        ag._house_diag_done = True
+
+        ag.run_overworld()
+
+        assert not hasattr(ag, '_oak_wait_done')
+        assert not hasattr(ag, '_pallet_diag_done')
+        assert not hasattr(ag, '_house_diag_done')
+
+    def test_backtrack_skipped_in_oaks_lab(self, tmp_path):
+        """Backtrack should NOT trigger in Oak's Lab (map 40) at all."""
+        ag = _make_agent(tmp_path)
+        ag.backtrack.restore_threshold = 1
+        state = OverworldState(map_id=40, party_count=0, x=5, y=3)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.backtrack.save_snapshot(ag.pyboy, state, turn=0)
+        ag._bt_last_map_id = 40
+        ag.stuck_turns = 5  # well above threshold
+
+        with patch.object(agent, "Image", None):
+            ag.run_overworld()
+
+        # Should NOT have restored despite being stuck
+        assert ag.backtrack.total_restores == 0
+
+    def test_backtrack_skipped_in_oaks_lab_with_party(self, tmp_path):
+        """Backtrack should NOT trigger in Oak's Lab even after getting Pokemon."""
+        ag = _make_agent(tmp_path)
+        ag.backtrack.restore_threshold = 1
+        state = OverworldState(map_id=40, party_count=1, x=7, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.backtrack.save_snapshot(ag.pyboy, state, turn=0)
+        ag._bt_last_map_id = 40
+        ag.stuck_turns = 5
+
+        with patch.object(agent, "Image", None):
+            ag.run_overworld()
+
+        assert ag.backtrack.total_restores == 0
+
+    def test_periodic_snapshot_skips_duplicate_position(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag._bt_snapshot_interval = 1  # every turn
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag._bt_last_map_id = 0
+        ag.stuck_turns = 0
+
+        # First overworld call at turn 1 should snapshot
+        ag.turn_count = 1
+        ag.run_overworld()
+        assert len(ag.backtrack.snapshots) == 1
+
+        # Second call at same position should NOT add another
+        ag.turn_count = 2
+        ag.stuck_turns = 0
+        ag.run_overworld()
+        assert len(ag.backtrack.snapshots) == 1
 
 
 # ===================================================================
@@ -1623,7 +1946,7 @@ class TestOaksLabPhases:
     """Cover lab phases 0->1->2 with no Pokemon and lab with Pokemon."""
 
     def test_lab_phase0_y_ge_4_transitions_to_phase1(self, tmp_path):
-        """Lines 493-496: phase 0, y>=4 -> transition to phase 1, return 'right'."""
+        """Phase 0, y>=4 -> transition to phase 1, return 'right'."""
         ag = _make_agent(tmp_path)
         with patch.object(agent, "Image", None):
             state = OverworldState(map_id=40, party_count=0, x=3, y=4)
@@ -1633,7 +1956,7 @@ class TestOaksLabPhases:
         assert any("phase 0" in e for e in ag.events)
 
     def test_lab_phase0_odd_turn_returns_b(self, tmp_path):
-        """Lines 497-498: phase 0, _lab_turns odd -> return 'b'."""
+        """Phase 0, _lab_turns odd -> return 'b'."""
         ag = _make_agent(tmp_path)
         ag._lab_turns = 0  # will be incremented to 1 (odd)
         ag._lab_phase = 0
@@ -1643,7 +1966,7 @@ class TestOaksLabPhases:
         assert result == "b"
 
     def test_lab_phase0_even_turn_returns_down(self, tmp_path):
-        """Lines 498-499: phase 0, _lab_turns even -> return 'down'."""
+        """Phase 0, _lab_turns even -> return 'down'."""
         ag = _make_agent(tmp_path)
         ag._lab_turns = 1  # will be incremented to 2 (even)
         ag._lab_phase = 0
@@ -1653,7 +1976,7 @@ class TestOaksLabPhases:
         assert result == "down"
 
     def test_lab_phase1_x_ge_6_transitions_to_phase2(self, tmp_path):
-        """Lines 503-506: phase 1, x>=6 -> transition to phase 2, return 'up'."""
+        """Phase 1, x>=6 -> transition to phase 2, return 'up'."""
         ag = _make_agent(tmp_path)
         ag._lab_phase = 1
         ag._lab_turns = 0
@@ -1665,7 +1988,7 @@ class TestOaksLabPhases:
         assert any("phase 1" in e for e in ag.events)
 
     def test_lab_phase1_x_lt_6_returns_right(self, tmp_path):
-        """Line 507: phase 1, x<6 -> return 'right'."""
+        """Phase 1, x<6 -> return 'right'."""
         ag = _make_agent(tmp_path)
         ag._lab_phase = 1
         ag._lab_turns = 0
@@ -1675,7 +1998,7 @@ class TestOaksLabPhases:
         assert result == "right"
 
     def test_lab_phase2_even_turn_returns_up(self, tmp_path):
-        """Lines 512-513: phase 2, _lab_turns even -> return 'up'."""
+        """Phase 2, _lab_turns even -> return 'up'."""
         ag = _make_agent(tmp_path)
         ag._lab_phase = 2
         ag._lab_turns = 1  # incremented to 2 (even)
@@ -1685,7 +2008,7 @@ class TestOaksLabPhases:
         assert result == "up"
 
     def test_lab_phase2_odd_turn_returns_a(self, tmp_path):
-        """Line 514: phase 2, _lab_turns odd -> return 'a'."""
+        """Phase 2, _lab_turns odd -> return 'a'."""
         ag = _make_agent(tmp_path)
         ag._lab_phase = 2
         ag._lab_turns = 0  # incremented to 1 (odd)
@@ -1816,7 +2139,9 @@ class TestRunOverworldOakTrigger:
         ag = _make_agent(tmp_path)
         state = OverworldState(map_id=0, x=5, y=1, party_count=0)
         post_wait_state = OverworldState(map_id=40, x=5, y=3, party_count=0)
-        ag.memory.read_overworld_state = MagicMock(side_effect=[state, post_wait_state])
+        # read_overworld_state called: (1) top of run_overworld, (2) inside oak trigger
+        ag.memory.read_overworld_state = MagicMock(
+            side_effect=[state, post_wait_state])
         ag.controller = MagicMock()
         ag.collision_map = MagicMock()
         ag.collision_map.grid = [[1] * 10 for _ in range(9)]
@@ -1828,10 +2153,14 @@ class TestRunOverworldOakTrigger:
         assert hasattr(ag, '_oak_wait_done')
         assert ag._oak_wait_done is True
         assert any("OAK TRIGGER" in e for e in ag.events)
-        # Should have called wait(600) for Oak walk
+        # Should have called wait(600) for initial Oak walk
         ag.controller.wait.assert_any_call(600)
-        # Should have called mash_a 4 times
+        # 4 rounds of mash_a(30) + wait(300)
         assert ag.controller.mash_a.call_count == 4
+        for c in ag.controller.mash_a.call_args_list:
+            assert c == call(30, delay=30)
+        wait_300_calls = [c for c in ag.controller.wait.call_args_list if c == call(300)]
+        assert len(wait_300_calls) == 4
 
     def test_oak_wait_only_once(self, tmp_path):
         """Lines 673: _oak_wait_done already set -> skip Oak sequence."""
@@ -1892,6 +2221,30 @@ class TestRunOverworldBButton:
         ag.controller.press.assert_called_once_with("b", hold_frames=20, release_frames=12)
         ag.controller.wait.assert_called_once_with(24)
         assert ag.last_overworld_action == "b"
+
+
+# ===================================================================
+# run_overworld -- Wait action dispatch
+# ===================================================================
+
+
+class TestRunOverworldWaitAction:
+    """Cover action == 'wait' -> controller.wait() with no button press."""
+
+    def test_wait_action_just_waits(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        state = OverworldState(map_id=40, x=5, y=3)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.choose_overworld_action = MagicMock(return_value="wait")
+        ag.controller = MagicMock()
+        ag.turn_count = 1
+
+        ag.run_overworld()
+
+        ag.controller.wait.assert_called_once_with(30)
+        ag.controller.press.assert_not_called()
+        ag.controller.move.assert_not_called()
+        assert ag.last_overworld_action == "wait"
 
 
 # ===================================================================

@@ -29,6 +29,10 @@ DEFAULT_PARAMS = {
     "door_cooldown": 8,
     "waypoint_skip_distance": 3,
     "axis_preference_map_0": "y",
+    "bt_max_snapshots": 8,
+    "bt_restore_threshold": 15,
+    "bt_max_attempts": 3,
+    "bt_snapshot_interval": 50,
 }
 
 
@@ -57,6 +61,7 @@ def score(fitness: dict) -> float:
         + fitness.get("battles_won", 0) * 10
         - fitness.get("stuck_count", 0) * 5
         - fitness.get("turns", 0) * 0.1
+        - fitness.get("backtrack_restores", 0) * 2
     )
 
 
@@ -142,6 +147,10 @@ Parameter descriptions:
 - door_cooldown: frames to walk away from a door after exiting (int, 4-16)
 - waypoint_skip_distance: max Manhattan distance to skip a waypoint when stuck (int, 1-8)
 - axis_preference_map_0: preferred movement axis on Pallet Town map ("x" or "y")
+- bt_max_snapshots: max number of backtrack snapshots to keep (int, 2-16)
+- bt_restore_threshold: stuck turns before restoring a snapshot (int, 8-30)
+- bt_max_attempts: max times to retry from the same snapshot (int, 1-5)
+- bt_snapshot_interval: turns between periodic snapshots when not stuck (int, 20-100)
 
 Propose ONE set of modified parameters to improve the score. Focus on reducing
 stuck_count and increasing maps_visited. Return ONLY valid JSON with the same
@@ -270,7 +279,11 @@ def _perturb(params: dict) -> dict:
     import random
 
     new = dict(params)
-    key = random.choice(["stuck_threshold", "door_cooldown", "waypoint_skip_distance"])
+    key = random.choice([
+        "stuck_threshold", "door_cooldown", "waypoint_skip_distance",
+        "bt_max_snapshots", "bt_restore_threshold", "bt_max_attempts",
+        "bt_snapshot_interval",
+    ])
     delta = random.choice([-2, -1, 1, 2])
     new[key] = max(1, new[key] + delta)
     # Randomly flip axis preference

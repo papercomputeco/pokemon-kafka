@@ -15,7 +15,7 @@ import run_10_agents as mod
 from run_10_agents import (
     PARAM_VARIANTS,
     MAX_TURNS,
-    score,
+    score,  # re-exported from evolve
     run_one_agent,
     main,
 )
@@ -25,12 +25,14 @@ from run_10_agents import (
 
 
 class TestParamVariants:
-    def test_has_10_variants(self):
-        assert len(PARAM_VARIANTS) == 10
+    def test_has_12_variants(self):
+        assert len(PARAM_VARIANTS) == 12
 
     def test_all_variants_have_required_keys(self):
         required = {"stuck_threshold", "door_cooldown", "waypoint_skip_distance",
-                     "axis_preference_map_0", "label"}
+                     "axis_preference_map_0", "label",
+                     "bt_max_snapshots", "bt_restore_threshold",
+                     "bt_max_attempts", "bt_snapshot_interval"}
         for i, variant in enumerate(PARAM_VARIANTS):
             missing = required - set(variant.keys())
             assert not missing, f"Variant {i} ({variant.get('label', '?')}) missing: {missing}"
@@ -240,7 +242,7 @@ class TestMain:
         saved = tmp_path / "pokedex" / "evolve_results.json"
         assert saved.exists()
         data = json.loads(saved.read_text())
-        assert len(data) == 10
+        assert len(data) == len(PARAM_VARIANTS)
 
     def test_error_result_shows_fail(self, tmp_path, capsys):
         rom = tmp_path / "test.gb"
