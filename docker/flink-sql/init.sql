@@ -49,7 +49,7 @@ CREATE TABLE tapes_alerts (
     'format' = 'json'
 );
 
--- Stuck loop detection: 3+ assistant turns in a 30s window per conversation
+-- Stuck loop detection: 10+ assistant turns in a 30s window per conversation
 INSERT INTO tapes_alerts
 SELECT
     'STUCK_LOOP' AS alert_type,
@@ -67,7 +67,7 @@ FROM TABLE(
 )
 WHERE node.bucket.role = 'assistant'
 GROUP BY root_hash, node.bucket.role, window_start, window_end
-HAVING COUNT(*) >= 3;
+HAVING COUNT(*) >= 10;
 
 -- Token spike detection: max input_tokens > 2x average over 2-minute window
 INSERT INTO tapes_alerts

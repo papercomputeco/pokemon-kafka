@@ -29,6 +29,6 @@ ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
 
 [agent]
 harness = "claude-code"
-prompt = "cd /workspace && bash scripts/install.sh && export LD_LIBRARY_PATH=$HOME/.nix-profile/lib:$LD_LIBRARY_PATH && export PATH=/usr/local/bin:$PATH && docker compose up -d kafka && sleep 10 && tapes serve proxy --config-dir /workspace/.tapes --sqlite /workspace/.tapes/tapes.sqlite --kafka-brokers localhost:9092 --kafka-topic agent.telemetry.raw & sleep 2 && docker compose up -d && ~/venv/bin/python3 scripts/agent.py rom/pokemon_red.gb --strategy heuristic --max-turns 500000"
+prompt = "bash /workspace/scripts/entrypoint.sh"
 workdir = "/workspace"
 restart = "no"
