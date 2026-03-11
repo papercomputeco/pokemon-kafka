@@ -293,6 +293,55 @@ Snapshots use PyBoy's `save_state()`/`load_state()` with in-memory `BytesIO` buf
 
 Scripted areas like Oak's Lab (map 40) disable backtracking entirely — the lab's multi-phase cutscene looks "stuck" but is progressing naturally.
 
+## Case Study: 10,000-Turn Viridian City Speedrun
+
+Four 10-generation evolution runs with all features enabled: LLM-guided mutation, observational memory, historical observer with JSONL telemetry, and Tapes persistence. Each successive run had access to all previous runs' telemetry via the historical observer.
+
+### Results
+
+| Run | Historical entries | Gens improved | Final score | Evolution pattern |
+|-----|-------------------|---------------|-------------|-------------------|
+| 1 (cold) | 0 | 1/10 | 39,415 | One lucky jump at Gen 1, then 9 stale |
+| 2 | 10 | 3/10 | 12,836 | Three incremental steps (Gen 1, 5, 6) |
+| 3 | 20+ | 3/10 | 17,319 | Three progressive steps (Gen 1, 2, 4) |
+| 4 | 30+ | **4/10** | **39,423** | Four steps (Gen 1, 3, 4, 8), late breakthrough |
+
+### What the data shows
+
+**Improvement rate scales with historical context.** Cold start: 1/10 generations improved. With history: 3, 3, 4 out of 10. The LLM makes better mutations when it can see what failed before.
+
+**Exploration diversity increases.** Run 1 locked into one axis preference immediately. Runs 2-4 explored both `axis_preference: y` and `axis_preference: x` across generations. Run 4 explored for 7 generations before finding a 39k+ score at Gen 8 through a novel param combination (`unknown_move_score: 18.0`, `bt_max_snapshots: 14`) that no previous run had tried.
+
+**Score convergence through different paths.** Run 4 (39,423) matched Run 1 (39,415) but through systematic exploration across 8 generations rather than a lucky first guess. The historical observer enabled the LLM to find an equivalent optimum through data-informed search.
+
+### Run 4 detail (best run)
+
+| Gen | Score | Improved? | Key mutation |
+|-----|-------|-----------|-------------|
+| 1 | 11,429 | Yes | Lowered `stuck_threshold` to 4, `bt_restore_threshold` to 12 |
+| 2 | -9,559 | No | |
+| 3 | 11,991 | Yes | Switched to `axis_preference: x`, `waypoint_skip_distance: 6` |
+| 4 | 12,836 | Yes | Fine-tuned `stuck_threshold` to 4, kept x-axis |
+| 5-7 | ~11,400 | No | Plateau |
+| 8 | **39,423** | Yes | `unknown_move_score: 18`, `bt_max_snapshots: 14`, `hp_heal: 0.35` |
+| 9-10 | ~39,423 / 7,721 | No | |
+
+Gen 8 broke out of a local optimum by touching params previous runs had left alone (`unknown_move_score`, `status_move_score`). The historical telemetry showed the standard param space was exhausted, pushing the LLM to explore new dimensions.
+
+### Broader applications
+
+The feedback loop (agent runs, telemetry persists, historical observer surfaces patterns, next run reads those patterns) applies beyond games:
+
+- **Large-scale refactors** — each PR is a "generation." Cross-session telemetry prevents re-discovering the same edge cases across dozens of migration PRs.
+- **Product engineering** — DuckDB queries across sprint telemetry reveal which modules have the highest revision rates or where debugging tokens concentrate.
+- **Day-to-day AI coding** — every `claude code` session writes telemetry. The historical observer turns that into quantified patterns rather than starting each session cold.
+
+### The gap
+
+Every run hit a plateau where the LLM proposed near-identical variants for multiple consecutive generations. The historical observer recorded convergence but nothing acted on it. Run 4's Gen 8 breakthrough happened despite this gap, not because of a designed escape mechanism. The next step is closing that loop: detect convergence and inject a diversification signal automatically.
+
+All four runs were entirely local — JSONL files and DuckDB, no Kafka broker or managed services required. The [full writeup](https://gist.github.com/bdougie/8fd2c7f25dc4673be4ebc6f65098eb0c?permalink_comment_id=6023622#gistcomment-6023622) includes raw telemetry and winning parameters.
+
 ## Inspiration & References
 
 - [Factorio Learning Environment](https://arxiv.org/abs/2503.09617) — Backtracking agent patterns, structured observations, and incremental report distillation for game-playing LLM agents
