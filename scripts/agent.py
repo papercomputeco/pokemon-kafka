@@ -1001,6 +1001,12 @@ def main():
         default=None,
         help="Write fitness metrics JSON to this path at end of run",
     )
+    parser.add_argument(
+        "--telemetry-dir",
+        type=str,
+        default="data/telemetry",
+        help="Directory for JSONL telemetry (default: data/telemetry, empty to disable)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -1013,6 +1019,27 @@ def main():
     if args.output_json:
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output_json).write_text(json.dumps(fitness, indent=2) + "\n")
+
+    if args.telemetry_dir:
+        try:
+            from publisher import make_publisher
+
+            pub = make_publisher(telemetry_dir=args.telemetry_dir)
+            pub.publish({
+                "schema": "tapes.node.v1",
+                "type": "fitness",
+                "root_hash": f"local-{Path(args.rom).stem}",
+                "node": {
+                    "bucket": {"role": "agent", "model": "pokemon-agent"},
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                    "project": "pokemon-kafka",
+                },
+                "fitness": fitness,
+                "params": json.loads(os.environ.get("EVOLVE_PARAMS", "{}")),
+            })
+            pub.close()
+        except Exception as exc:
+            print(f"[agent] telemetry publish failed: {exc}")
 
 
 if __name__ == "__main__":
