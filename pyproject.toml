@@ -7,6 +7,7 @@ dependencies = [
     "pyboy",
     "pillow",
     "numpy",
+    "duckdb>=1.5.0",
 ]
 
 [dependency-groups]
