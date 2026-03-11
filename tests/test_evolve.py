@@ -5,7 +5,7 @@ import os
 import runpy
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -20,6 +20,7 @@ from evolve import (
     evolve,
     _perturb,
     _make_observer_fn,
+    _make_historical_fn,
     main,
 )
 
@@ -503,6 +504,42 @@ class TestMakeObserverFn:
         assert isinstance(result, list)
 
 
+class TestMakeHistoricalFn:
+    def test_returns_none_when_no_dir(self):
+        assert _make_historical_fn(None) is None
+        assert _make_historical_fn("") is None
+
+    def test_returns_callable_when_dir_set(self, tmp_path):
+        fn = _make_historical_fn(str(tmp_path))
+        assert callable(fn)
+
+    def test_returns_empty_list_when_dir_empty(self, tmp_path):
+        fn = _make_historical_fn(str(tmp_path))
+        assert fn() == []
+
+    def test_returns_empty_list_when_dir_missing(self, tmp_path):
+        fn = _make_historical_fn(str(tmp_path / "nonexistent"))
+        assert fn() == []
+
+    def test_no_historical_flag(self, tmp_path):
+        """--no-historical passes historical_fn=None to evolve()."""
+        rom = tmp_path / "test.gb"
+        rom.write_bytes(b"\x00" * 100)
+
+        with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
+                                "--max-turns", "10", "--no-llm",
+                                "--no-observer", "--no-historical"]):
+            with patch("evolve.evolve", return_value=[
+                EvolutionResult(generation=1, improved=False)
+            ]) as mock_evolve:
+                main()
+
+        mock_evolve.assert_called_once_with(
+            str(rom), max_generations=1, max_turns=10,
+            llm_fn=None, observer_fn=None, historical_fn=None,
+        )
+
+
 class TestMain:
     def test_rom_not_found(self):
         with patch("sys.argv", ["evolve.py", "/nonexistent/rom.gb"]):
@@ -523,7 +560,7 @@ class TestMain:
 
         mock_evolve.assert_called_once_with(
             str(rom), max_generations=1, max_turns=10,
-            llm_fn=None, observer_fn=None,
+            llm_fn=None, observer_fn=None, historical_fn=ANY,
         )
 
     def test_runs_with_tapes_db_flag(self, tmp_path):
@@ -559,7 +596,7 @@ class TestMain:
 
         mock_evolve.assert_called_once_with(
             str(rom), max_generations=1, max_turns=10,
-            llm_fn=None, observer_fn=None,
+            llm_fn=None, observer_fn=None, historical_fn=ANY,
         )
 
 
@@ -573,7 +610,8 @@ class TestMainGuard:
         rom.write_bytes(b"\x00" * 100)
 
         with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
-                                "--max-turns", "1", "--no-observer"]), \
+                                "--max-turns", "1", "--no-observer",
+                                "--no-historical"]), \
              patch("evolve.evolve", return_value=[
                  EvolutionResult(generation=1, improved=False)
              ]):

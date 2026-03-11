@@ -126,7 +126,8 @@ def run_agent(rom_path: str, max_turns: int, params: dict) -> dict:
 
 
 def build_mutation_prompt(
-    params: dict, fitness: dict, observations: list[dict] | None = None
+    params: dict, fitness: dict, observations: list[dict] | None = None,
+    historical: list[dict] | None = None,
 ) -> str:
     """Build a prompt asking the LLM to propose a parameter variant."""
     obs_section = ""
@@ -135,6 +136,13 @@ def build_mutation_prompt(
         for o in observations:
             obs_lines.append(f"  - [{o['priority']}] {o['content']}")
         obs_section = "\nRecent observations:\n" + "\n".join(obs_lines) + "\n"
+
+    hist_section = ""
+    if historical:
+        hist_lines = []
+        for h in historical:
+            hist_lines.append(f"  - [{h['priority']}] {h['content']}")
+        hist_section = "\nCross-session historical insights:\n" + "\n".join(hist_lines) + "\n"
 
     return f"""You are tuning navigation parameters for a Pokemon Red AI agent.
 
@@ -145,7 +153,7 @@ Current fitness:
 {json.dumps(fitness, indent=2)}
 
 Current score: {score(fitness):.1f}
-{obs_section}
+{obs_section}{hist_section}
 Parameter descriptions:
 - stuck_threshold: how many stuck turns before skipping a waypoint (int, 3-20)
 - door_cooldown: frames to walk away from a door after exiting (int, 4-16)
@@ -199,6 +207,7 @@ def evolve(
     max_turns: int = 200,
     llm_fn=None,
     observer_fn=None,
+    historical_fn=None,
 ) -> list[EvolutionResult]:
     """Run the evolution loop.
 
@@ -208,6 +217,7 @@ def evolve(
         max_turns: Max turns per agent run.
         llm_fn: Callable(prompt) -> str. If None, uses random perturbation.
         observer_fn: Callable() -> list[dict]. Returns observations for LLM context.
+        historical_fn: Callable() -> list[dict]. Returns cross-session insights.
 
     Returns:
         List of EvolutionResult for each generation.
@@ -226,11 +236,12 @@ def evolve(
 
         # Get observations if available
         observations = observer_fn() if observer_fn else None
+        historical = historical_fn() if historical_fn else None
 
         # Propose variant
         if llm_fn:
             prompt = build_mutation_prompt(
-                current_params, baseline_fitness, observations
+                current_params, baseline_fitness, observations, historical
             )
             response = llm_fn(prompt)
             variant_params = parse_llm_response(response)
@@ -335,6 +346,21 @@ def _make_observer_fn(tapes_db: str | None = None):
     return observer_fn
 
 
+def _make_historical_fn(telemetry_dir: str | None = None):
+    """Create a function that returns cross-session insights from JSONL files."""
+    if not telemetry_dir:
+        return None
+
+    def historical_fn():
+        if not Path(telemetry_dir).exists():
+            return []
+        from historical_observer import observe
+
+        return observe(telemetry_dir)
+
+    return historical_fn
+
+
 def _make_llm_fn():
     """Create an LLM function using the Anthropic API, if available."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -391,6 +417,16 @@ def main():
         action="store_true",
         help="Disable observational memory feedback",
     )
+    parser.add_argument(
+        "--telemetry-dir",
+        default=str(SCRIPT_DIR.parent / "data" / "telemetry"),
+        help="JSONL telemetry directory for historical insights (default: data/telemetry)",
+    )
+    parser.add_argument(
+        "--no-historical",
+        action="store_true",
+        help="Disable cross-session historical insights",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -399,9 +435,10 @@ def main():
 
     llm_fn = None if args.no_llm else _make_llm_fn()
     observer_fn = None if args.no_observer else _make_observer_fn(args.tapes_db)
+    historical_fn = None if args.no_historical else _make_historical_fn(args.telemetry_dir)
 
     results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns,
-                     llm_fn=llm_fn, observer_fn=observer_fn)
+                     llm_fn=llm_fn, observer_fn=observer_fn, historical_fn=historical_fn)
 
     # Summary
     improvements = [r for r in results if r.improved]
