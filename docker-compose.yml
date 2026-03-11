@@ -60,6 +60,10 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TOPIC: agent.telemetry.alerts
       KAFKA_GROUP_ID: alerts-consumer
+      TAPES_DB_PATH: /tapes/tapes.sqlite
+    volumes:
+      - ./.tapes:/tapes
+      - ./scripts/tape_writer.py:/app/tape_writer.py
 
   flink-jobmanager:
     image: flink:1.18
