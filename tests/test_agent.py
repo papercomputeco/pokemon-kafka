@@ -215,6 +215,27 @@ class TestBattleStrategy:
         }
         self.strategy = BattleStrategy(self.chart)
 
+    # -- constructor defaults --
+
+    def test_default_params(self):
+        assert self.strategy.hp_run_threshold == 0.2
+        assert self.strategy.hp_heal_threshold == 0.25
+        assert self.strategy.unknown_move_score == 10.0
+        assert self.strategy.status_move_score == 1.0
+
+    def test_custom_params(self):
+        s = BattleStrategy(
+            self.chart,
+            hp_run_threshold=0.1,
+            hp_heal_threshold=0.4,
+            unknown_move_score=20.0,
+            status_move_score=5.0,
+        )
+        assert s.hp_run_threshold == 0.1
+        assert s.hp_heal_threshold == 0.4
+        assert s.unknown_move_score == 20.0
+        assert s.status_move_score == 5.0
+
     # -- score_move --
 
     def test_score_move_no_pp(self):
@@ -226,9 +247,17 @@ class TestBattleStrategy:
     def test_score_move_unknown_move(self):
         assert self.strategy.score_move(0xFF, 10) == 10.0
 
+    def test_score_move_unknown_move_custom(self):
+        s = BattleStrategy(self.chart, unknown_move_score=20.0)
+        assert s.score_move(0xFF, 10) == 20.0
+
     def test_score_move_status_move(self):
         # Thunder Wave: power=0
         assert self.strategy.score_move(0x56, 10) == 1.0
+
+    def test_score_move_status_move_custom(self):
+        s = BattleStrategy(self.chart, status_move_score=5.0)
+        assert s.score_move(0x56, 10) == 5.0
 
     def test_score_move_no_move(self):
         # 0x00 = "(No move)", power=0, accuracy=0
@@ -328,6 +357,20 @@ class TestBattleStrategy:
         battle = self._make_battle(player_hp=0, player_max_hp=0, battle_type=1)
         action = self.strategy.choose_action(battle)
         assert action == {"action": "run"}
+
+    def test_choose_action_custom_run_threshold(self):
+        # With hp_run_threshold=0.4, hp_ratio=0.35 should trigger run
+        s = BattleStrategy(self.chart, hp_run_threshold=0.4)
+        battle = self._make_battle(player_hp=35, player_max_hp=100, battle_type=1)
+        action = s.choose_action(battle)
+        assert action == {"action": "run"}
+
+    def test_choose_action_custom_heal_threshold(self):
+        # With hp_heal_threshold=0.5, hp_ratio=0.45 (above default run 0.2) triggers heal
+        s = BattleStrategy(self.chart, hp_heal_threshold=0.5)
+        battle = self._make_battle(player_hp=45, player_max_hp=100, battle_type=2)
+        action = s.choose_action(battle)
+        assert action == {"action": "item", "item": "potion"}
 
 
 # ===================================================================
@@ -2526,6 +2569,33 @@ class TestEvolveParams:
         _make_agent_with_evolve(tmp_path, evolve_params=params)
         output = capsys.readouterr().out
         assert "Evolve params" in output
+
+    def test_battle_params_flow_to_strategy(self, tmp_path):
+        """Battle params from EVOLVE_PARAMS flow to BattleStrategy."""
+        params = {
+            "stuck_threshold": 8, "door_cooldown": 8,
+            "waypoint_skip_distance": 3, "axis_preference_map_0": "y",
+            "hp_run_threshold": 0.35, "hp_heal_threshold": 0.4,
+            "unknown_move_score": 20.0, "status_move_score": 5.0,
+        }
+        ag = _make_agent_with_evolve(tmp_path, evolve_params=params)
+        assert ag.battle_strategy.hp_run_threshold == 0.35
+        assert ag.battle_strategy.hp_heal_threshold == 0.4
+        assert ag.battle_strategy.unknown_move_score == 20.0
+        assert ag.battle_strategy.status_move_score == 5.0
+
+    def test_no_battle_params_uses_defaults(self, tmp_path):
+        """Without battle params in EVOLVE_PARAMS, BattleStrategy uses defaults."""
+        saved = os.environ.pop("EVOLVE_PARAMS", None)
+        try:
+            ag = _make_agent_with_evolve(tmp_path)
+            assert ag.battle_strategy.hp_run_threshold == 0.2
+            assert ag.battle_strategy.hp_heal_threshold == 0.25
+            assert ag.battle_strategy.unknown_move_score == 10.0
+            assert ag.battle_strategy.status_move_score == 1.0
+        finally:
+            if saved is not None:
+                os.environ["EVOLVE_PARAMS"] = saved
 
 
 # ===================================================================

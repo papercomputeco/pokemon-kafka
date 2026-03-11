@@ -33,6 +33,10 @@ DEFAULT_PARAMS = {
     "bt_restore_threshold": 15,
     "bt_max_attempts": 3,
     "bt_snapshot_interval": 50,
+    "hp_run_threshold": 0.2,
+    "hp_heal_threshold": 0.25,
+    "unknown_move_score": 10.0,
+    "status_move_score": 1.0,
 }
 
 
@@ -58,7 +62,7 @@ def score(fitness: dict) -> float:
         fitness.get("final_map_id", 0) * 1000
         + fitness.get("badges", 0) * 5000
         + fitness.get("party_size", 0) * 500
-        + fitness.get("battles_won", 0) * 10
+        + fitness.get("battles_won", 0) * 100
         - fitness.get("stuck_count", 0) * 5
         - fitness.get("turns", 0) * 0.1
         - fitness.get("backtrack_restores", 0) * 2
@@ -151,10 +155,14 @@ Parameter descriptions:
 - bt_restore_threshold: stuck turns before restoring a snapshot (int, 8-30)
 - bt_max_attempts: max times to retry from the same snapshot (int, 1-5)
 - bt_snapshot_interval: turns between periodic snapshots when not stuck (int, 20-100)
+- hp_run_threshold: HP ratio below which the agent runs from wild battles (float, 0.05-0.5)
+- hp_heal_threshold: HP ratio below which the agent uses a healing item (float, 0.1-0.6)
+- unknown_move_score: baseline score for moves not in the known move table (float, 1.0-30.0)
+- status_move_score: score assigned to zero-power status moves (float, 0.0-10.0)
 
 Propose ONE set of modified parameters to improve the score. Focus on reducing
-stuck_count and increasing maps_visited. Return ONLY valid JSON with the same
-keys, nothing else."""
+stuck_count, increasing maps_visited, and winning battles. Return ONLY valid JSON
+with the same keys, nothing else."""
 
 
 def parse_llm_response(response: str) -> dict | None:
@@ -278,14 +286,24 @@ def _perturb(params: dict) -> dict:
     """Simple random perturbation of numeric params (no LLM needed)."""
     import random
 
-    new = dict(params)
-    key = random.choice([
+    INT_KEYS = [
         "stuck_threshold", "door_cooldown", "waypoint_skip_distance",
         "bt_max_snapshots", "bt_restore_threshold", "bt_max_attempts",
         "bt_snapshot_interval",
-    ])
-    delta = random.choice([-2, -1, 1, 2])
-    new[key] = max(1, new[key] + delta)
+    ]
+    FLOAT_KEYS = [
+        "hp_run_threshold", "hp_heal_threshold",
+        "unknown_move_score", "status_move_score",
+    ]
+
+    new = dict(params)
+    key = random.choice(INT_KEYS + FLOAT_KEYS)
+    if key in FLOAT_KEYS:
+        delta = random.choice([-0.1, -0.05, 0.05, 0.1])
+        new[key] = max(0.0, round(new[key] + delta, 4))
+    else:
+        delta = random.choice([-2, -1, 1, 2])
+        new[key] = max(1, new[key] + delta)
     # Randomly flip axis preference
     if random.random() < 0.3:
         new["axis_preference_map_0"] = "x" if new["axis_preference_map_0"] == "y" else "y"
@@ -295,6 +313,52 @@ def _perturb(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+
+def _make_observer_fn(tapes_db: str | None = None):
+    """Create an observer function that reads from a Tapes database.
+
+    The DB existence check is deferred to call time so databases created
+    after CLI startup (e.g. by alerts-consumer during an evolution run)
+    are still picked up.
+    """
+    if not tapes_db:
+        return None
+
+    def observer_fn():
+        if not Path(tapes_db).exists():
+            return []
+        from observer import observe_session_inline
+
+        return observe_session_inline(tapes_db)
+
+    return observer_fn
+
+
+def _make_llm_fn():
+    """Create an LLM function using the Anthropic API, if available."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import anthropic
+    except ImportError:
+        print("[evolve] anthropic package not installed, using random perturbation")
+        return None
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    def llm_fn(prompt: str) -> str:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+    print("[evolve] Using Anthropic API for LLM-guided mutation")
+    return llm_fn
 
 
 def main():
@@ -312,13 +376,32 @@ def main():
         default=200,
         help="Max turns per agent run (default: 200)",
     )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Disable LLM mutation, use random perturbation only",
+    )
+    parser.add_argument(
+        "--tapes-db",
+        default=str(SCRIPT_DIR.parent / ".tapes" / "tapes.sqlite"),
+        help="Path to Tapes SQLite database (default: .tapes/tapes.sqlite)",
+    )
+    parser.add_argument(
+        "--no-observer",
+        action="store_true",
+        help="Disable observational memory feedback",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
         print(f"ROM not found: {args.rom}")
         sys.exit(1)
 
-    results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns)
+    llm_fn = None if args.no_llm else _make_llm_fn()
+    observer_fn = None if args.no_observer else _make_observer_fn(args.tapes_db)
+
+    results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns,
+                     llm_fn=llm_fn, observer_fn=observer_fn)
 
     # Summary
     improvements = [r for r in results if r.improved]
