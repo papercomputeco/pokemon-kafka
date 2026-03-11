@@ -22,7 +22,7 @@ from pathlib import Path
 
 try:
     import duckdb
-except ImportError:
+except ImportError:  # pragma: no cover
     print("Install duckdb: pip install duckdb", file=sys.stderr)
     sys.exit(1)
 

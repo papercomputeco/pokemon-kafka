@@ -11,6 +11,7 @@ from evolve import (
     DEFAULT_PARAMS,
     EvolutionResult,
     _make_historical_fn,
+    _make_llm_fn,
     _make_observer_fn,
     _perturb,
     build_mutation_prompt,
@@ -256,6 +257,13 @@ class TestBuildMutationPrompt:
         prompt = build_mutation_prompt(DEFAULT_PARAMS, {})
         assert "observations" not in prompt.lower() or "Recent" not in prompt
 
+    def test_includes_historical(self):
+        hist = [{"priority": "important", "content": "Fitness declining over 5 runs"}]
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, historical=hist)
+        assert "Fitness declining over 5 runs" in prompt
+        assert "[important]" in prompt
+        assert "historical" in prompt.lower() or "Cross-session" in prompt
+
 
 # ── parse_llm_response() ──────────────────────────────────────────────
 
@@ -493,6 +501,43 @@ class TestEvolve:
 
 
 # ── main() CLI ─────────────────────────────────────────────────────────
+
+
+class TestMakeLlmFn:
+    def test_returns_none_without_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            assert _make_llm_fn() is None
+
+    def test_returns_callable_with_api_key(self):
+        mock_client = MagicMock()
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch.dict("sys.modules", {"anthropic": mock_anthropic}),
+        ):
+            fn = _make_llm_fn()
+
+        assert callable(fn)
+
+    def test_callable_calls_anthropic_api(self):
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="response text")]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch.dict("sys.modules", {"anthropic": mock_anthropic}),
+        ):
+            fn = _make_llm_fn()
+            result = fn("test prompt")
+
+        assert result == "response text"
+        mock_client.messages.create.assert_called_once()
 
 
 class TestMakeObserverFn:

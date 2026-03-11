@@ -2,8 +2,10 @@
 """Tests for Historical Observer -- cross-session pattern extraction via DuckDB."""
 
 import json
+import runpy
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -136,3 +138,192 @@ def test_write_insights(telemetry_dir, tmp_path):
     text = output.read_text()
     assert "# Historical Insights" in text
     assert len(text.strip().split("\n")) > 1
+
+
+def test_observe_declining_fitness(tmp_path):
+    """Detects declining fitness when scores drop over runs."""
+    events = [
+        {
+            "schema": "tapes.node.v1",
+            "type": "fitness",
+            "root_hash": "run-001",
+            "occurred_at": "2026-03-09T10:00:00Z",
+            "fitness": {
+                "turns": 100,
+                "battles_won": 5,
+                "maps_visited": 4,
+                "final_map_id": 2,
+                "badges": 1,
+                "party_size": 3,
+                "stuck_count": 3,
+                "backtrack_restores": 0,
+            },
+            "params": {"stuck_threshold": 8},
+        },
+        {
+            "schema": "tapes.node.v1",
+            "type": "fitness",
+            "root_hash": "run-002",
+            "occurred_at": "2026-03-09T14:00:00Z",
+            "fitness": {
+                "turns": 200,
+                "battles_won": 0,
+                "maps_visited": 1,
+                "final_map_id": 0,
+                "badges": 0,
+                "party_size": 1,
+                "stuck_count": 20,
+                "backtrack_restores": 5,
+            },
+            "params": {"stuck_threshold": 8},
+        },
+    ]
+    f = tmp_path / "2026-03-09.jsonl"
+    f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    from historical_observer import observe
+
+    insights = observe(str(tmp_path))
+    contents = " ".join(i["content"] for i in insights)
+    assert "declining" in contents.lower()
+
+
+def test_observe_increasing_stuck(tmp_path):
+    """Detects increasing stuck count regression."""
+    events = [
+        {
+            "schema": "tapes.node.v1",
+            "type": "fitness",
+            "root_hash": "run-001",
+            "occurred_at": "2026-03-09T10:00:00Z",
+            "fitness": {
+                "turns": 100,
+                "battles_won": 1,
+                "maps_visited": 2,
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 1,
+                "stuck_count": 2,
+                "backtrack_restores": 0,
+            },
+        },
+        {
+            "schema": "tapes.node.v1",
+            "type": "fitness",
+            "root_hash": "run-002",
+            "occurred_at": "2026-03-09T14:00:00Z",
+            "fitness": {
+                "turns": 100,
+                "battles_won": 1,
+                "maps_visited": 2,
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 1,
+                "stuck_count": 15,
+                "backtrack_restores": 0,
+            },
+        },
+    ]
+    f = tmp_path / "2026-03-09.jsonl"
+    f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    from historical_observer import observe
+
+    insights = observe(str(tmp_path))
+    contents = " ".join(i["content"] for i in insights)
+    assert "increasing" in contents.lower()
+
+
+def test_extract_insights_malformed_jsonl(tmp_path):
+    """Exception during count query returns empty list."""
+    f = tmp_path / "bad.jsonl"
+    f.write_text("not valid json\n")
+
+    from historical_observer import observe
+
+    insights = observe(str(tmp_path))
+    assert insights == []
+
+
+def test_extract_insights_no_fitness_events(tmp_path):
+    """JSONL with non-fitness events returns empty list."""
+    event = {"schema": "tapes.node.v1", "type": "not_fitness", "root_hash": "x"}
+    f = tmp_path / "2026-03-09.jsonl"
+    f.write_text(json.dumps(event) + "\n")
+
+    from historical_observer import observe
+
+    insights = observe(str(tmp_path))
+    assert insights == []
+
+
+def test_extract_insights_no_params(tmp_path):
+    """Fitness events without params.stuck_threshold don't crash."""
+    events = [
+        {
+            "schema": "tapes.node.v1",
+            "type": "fitness",
+            "root_hash": f"run-{i}",
+            "occurred_at": f"2026-03-09T{10 + i}:00:00Z",
+            "fitness": {
+                "turns": 100,
+                "battles_won": 1,
+                "maps_visited": 2,
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 1,
+                "stuck_count": 5,
+                "backtrack_restores": 0,
+            },
+        }
+        for i in range(2)
+    ]
+    f = tmp_path / "2026-03-09.jsonl"
+    f.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    from historical_observer import observe
+
+    # Should not raise — the except block at line 188 handles missing params
+    insights = observe(str(tmp_path))
+    assert isinstance(insights, list)
+
+
+def test_main_dry_run(telemetry_dir):
+    """--dry-run prints insights but does not write file."""
+    from historical_observer import main
+
+    with patch("sys.argv", ["historical_observer.py", str(telemetry_dir), "--dry-run"]):
+        main()
+
+    # Default output should NOT exist
+    default_output = Path(".tapes/memory/historical_insights.md")
+    assert not default_output.exists()
+
+
+def test_main_writes_output(telemetry_dir, tmp_path):
+    """main() writes insights to --output path."""
+    from historical_observer import main
+
+    output = tmp_path / "insights.md"
+    with patch("sys.argv", ["historical_observer.py", str(telemetry_dir), "--output", str(output)]):
+        main()
+
+    assert output.exists()
+    assert "Historical Insights" in output.read_text()
+
+
+def test_main_no_insights(tmp_path):
+    """main() with empty dir prints message and returns."""
+    from historical_observer import main
+
+    with patch("sys.argv", ["historical_observer.py", str(tmp_path)]):
+        main()  # should not raise
+
+
+def test_dunder_main_guard(telemetry_dir, tmp_path):
+    """if __name__ == '__main__': main()"""
+    import historical_observer as ho_mod
+
+    output = tmp_path / "out.md"
+    with patch("sys.argv", ["historical_observer.py", str(telemetry_dir), "--output", str(output)]):
+        runpy.run_path(str(Path(ho_mod.__file__).resolve()), run_name="__main__")

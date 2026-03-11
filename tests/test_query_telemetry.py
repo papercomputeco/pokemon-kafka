@@ -1,8 +1,10 @@
 """Tests for DuckDB telemetry query script."""
 
 import json
+import runpy
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -94,3 +96,175 @@ def test_filter_by_role(telemetry_dir):
     conn = create_connection(telemetry_dir)
     result = conn.execute("SELECT count(*) FROM events WHERE node.bucket.role = 'assistant'").fetchone()
     assert result[0] == 1
+
+
+def test_main_help(telemetry_dir):
+    """--help prints docstring and exits 0."""
+    from query_telemetry import main
+
+    with patch("sys.argv", ["query_telemetry.py", "--help"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+
+
+def test_main_h_flag(telemetry_dir):
+    """-h also prints help and exits 0."""
+    from query_telemetry import main
+
+    with patch("sys.argv", ["query_telemetry.py", "-h"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+
+
+def _mock_fetchdf():
+    """Return a mock fetchdf that returns a mock DataFrame with to_string."""
+    from unittest.mock import MagicMock
+
+    mock_df = MagicMock()
+    mock_df.to_string.return_value = "mocked output"
+    return mock_df
+
+
+def test_main_default_summary(telemetry_dir):
+    """main() with data dir runs default summary query."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", str(telemetry_dir)]),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        main()
+
+
+def test_main_custom_query(telemetry_dir):
+    """main() with custom query arg."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", str(telemetry_dir), "SELECT count(*) FROM events"]),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        main()
+
+
+def test_main_sessions_flag(telemetry_dir):
+    """--sessions uses SESSIONS_QUERY."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--sessions", str(telemetry_dir)]),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        main()
+
+
+def test_main_missing_dir():
+    """main() with nonexistent dir exits 1."""
+    from query_telemetry import main
+
+    with patch("sys.argv", ["query_telemetry.py", "/nonexistent/path"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+
+def test_main_no_jsonl_files(tmp_path):
+    """main() with dir but no .jsonl files exits 1."""
+    from query_telemetry import main
+
+    with patch("sys.argv", ["query_telemetry.py", str(tmp_path)]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+
+
+def test_main_interactive_eof(telemetry_dir):
+    """Interactive mode exits on EOFError."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", str(telemetry_dir)]),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        main()
+
+
+def test_main_interactive_empty_line(telemetry_dir):
+    """Interactive mode exits on empty line."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", str(telemetry_dir)]),
+        patch("builtins.input", return_value=""),
+    ):
+        main()
+
+
+def test_main_interactive_query_and_exit(telemetry_dir):
+    """Interactive mode executes query then exits on empty."""
+    from query_telemetry import main
+
+    inputs = iter(["SELECT count(*) FROM events", ""])
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", str(telemetry_dir)]),
+        patch("builtins.input", side_effect=inputs),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        main()
+
+
+def test_main_interactive_bad_query(telemetry_dir):
+    """Interactive mode prints error on bad SQL."""
+    from query_telemetry import main
+
+    inputs = iter(["INVALID SQL QUERY", ""])
+
+    call_count = {"n": 0}
+
+    def mock_execute(self_or_sql, *args, **kwargs):
+        from unittest.mock import MagicMock
+
+        call_count["n"] += 1
+        # First call is CREATE VIEW (from create_connection), let it work
+        # Second call is the bad user query, raise
+        if call_count["n"] <= 1:
+            result = MagicMock()
+            result.fetchdf = _mock_fetchdf
+            return result
+        raise Exception("Parser Error")
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", str(telemetry_dir)]),
+        patch("builtins.input", side_effect=inputs),
+        patch("duckdb.DuckDBPyConnection.execute", mock_execute),
+    ):
+        main()  # should not raise
+
+
+def test_main_interactive_keyboard_interrupt(telemetry_dir):
+    """Interactive mode exits on KeyboardInterrupt."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", str(telemetry_dir)]),
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+    ):
+        main()
+
+
+def test_dunder_main_guard(telemetry_dir):
+    """if __name__ == '__main__': main()"""
+    import query_telemetry as qt_mod
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", str(telemetry_dir)]),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        runpy.run_path(str(Path(qt_mod.__file__).resolve()), run_name="__main__")
