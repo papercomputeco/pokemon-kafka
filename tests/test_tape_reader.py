@@ -383,3 +383,42 @@ class TestTapeReaderIterEntries:
         reader = TapeReader(str(db_path))
         entries = list(reader.iter_entries("nonexistent"))
         assert entries == []
+
+
+# ── Context manager ─────────────────────────────────────────────────
+
+
+class TestTapeReaderContextManager:
+    def test_context_manager_reuses_connection(self, tmp_path):
+        db_path = tmp_path / "tapes.sqlite"
+        conn = create_test_db(db_path)
+        insert_test_node(conn, "h1", role="user",
+                      content=[{"type": "text", "text": "hi"}],
+                      created_at="2026-01-01T00:00:00Z")
+        insert_test_node(conn, "h2", role="user",
+                      content=[{"type": "text", "text": "bye"}],
+                      created_at="2026-01-02T00:00:00Z")
+
+        with TapeReader(str(db_path)) as reader:
+            sessions = reader.list_sessions()
+            assert sessions == ["h1", "h2"]
+            session = reader.read_session("h1")
+            assert session.entries[0].text_content == "hi"
+            # Connection should be the same object across calls
+            assert reader._conn is not None
+
+        # After exiting, connection should be closed
+        assert reader._conn is None
+
+    def test_works_without_context_manager(self, tmp_path):
+        db_path = tmp_path / "tapes.sqlite"
+        conn = create_test_db(db_path)
+        insert_test_node(conn, "h1", role="user",
+                      content=[{"type": "text", "text": "hi"}])
+
+        reader = TapeReader(str(db_path))
+        assert reader._conn is None
+        sessions = reader.list_sessions()
+        assert sessions == ["h1"]
+        # No managed connection — should still be None
+        assert reader._conn is None
