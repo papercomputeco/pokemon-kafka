@@ -19,6 +19,7 @@ from evolve import (
     parse_llm_response,
     evolve,
     _perturb,
+    _make_observer_fn,
     main,
 )
 
@@ -439,6 +440,39 @@ class TestEvolve:
 # ── main() CLI ─────────────────────────────────────────────────────────
 
 
+class TestMakeObserverFn:
+    def test_returns_none_when_no_db(self):
+        assert _make_observer_fn(None) is None
+        assert _make_observer_fn("") is None
+
+    def test_returns_none_when_db_missing(self):
+        assert _make_observer_fn("/nonexistent/tapes.sqlite") is None
+
+    def test_returns_callable_when_db_exists(self, tmp_path):
+        from tape_helpers import create_test_db
+
+        db = tmp_path / "tapes.sqlite"
+        create_test_db(db)
+
+        fn = _make_observer_fn(str(db))
+        assert callable(fn)
+
+    def test_callable_returns_observations(self, tmp_path):
+        from tape_helpers import create_test_db, insert_test_node
+
+        db = tmp_path / "tapes.sqlite"
+        conn = create_test_db(db)
+        insert_test_node(
+            conn, "root1", role="assistant",
+            content=[{"type": "text", "text": "error: stuck in loop"}],
+        )
+        conn.close()
+
+        fn = _make_observer_fn(str(db))
+        result = fn()
+        assert isinstance(result, list)
+
+
 class TestMain:
     def test_rom_not_found(self):
         with patch("sys.argv", ["evolve.py", "/nonexistent/rom.gb"]):
@@ -450,18 +484,52 @@ class TestMain:
         rom = tmp_path / "test.gb"
         rom.write_bytes(b"\x00" * 100)
 
-        baseline = {"final_map_id": 0, "badges": 0, "party_size": 0,
-                    "battles_won": 0, "stuck_count": 0, "turns": 10}
-
         with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
-                                "--max-turns", "10"]):
+                                "--max-turns", "10", "--no-llm", "--no-observer"]):
             with patch("evolve.evolve", return_value=[
                 EvolutionResult(generation=1, improved=False)
             ]) as mock_evolve:
                 main()
 
         mock_evolve.assert_called_once_with(
-            str(rom), max_generations=1, max_turns=10
+            str(rom), max_generations=1, max_turns=10,
+            llm_fn=None, observer_fn=None,
+        )
+
+    def test_runs_with_tapes_db_flag(self, tmp_path):
+        rom = tmp_path / "test.gb"
+        rom.write_bytes(b"\x00" * 100)
+
+        from tape_helpers import create_test_db
+
+        db = tmp_path / "tapes.sqlite"
+        create_test_db(db)
+
+        with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
+                                "--max-turns", "10",
+                                "--tapes-db", str(db)]):
+            with patch("evolve.evolve", return_value=[
+                EvolutionResult(generation=1, improved=False)
+            ]) as mock_evolve:
+                main()
+
+        call_kwargs = mock_evolve.call_args
+        assert call_kwargs[1]["observer_fn"] is not None
+
+    def test_no_observer_flag(self, tmp_path):
+        rom = tmp_path / "test.gb"
+        rom.write_bytes(b"\x00" * 100)
+
+        with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
+                                "--max-turns", "10", "--no-llm", "--no-observer"]):
+            with patch("evolve.evolve", return_value=[
+                EvolutionResult(generation=1, improved=False)
+            ]) as mock_evolve:
+                main()
+
+        mock_evolve.assert_called_once_with(
+            str(rom), max_generations=1, max_turns=10,
+            llm_fn=None, observer_fn=None,
         )
 
 
@@ -470,12 +538,12 @@ class TestMain:
 
 class TestMainGuard:
     def test_dunder_main_calls_main(self, tmp_path):
-        """Line 316: if __name__ == '__main__': main()"""
+        """if __name__ == '__main__': main()"""
         rom = tmp_path / "test.gb"
         rom.write_bytes(b"\x00" * 100)
 
         with patch("sys.argv", ["evolve.py", str(rom), "--generations", "1",
-                                "--max-turns", "1"]), \
+                                "--max-turns", "1", "--no-observer"]), \
              patch("evolve.evolve", return_value=[
                  EvolutionResult(generation=1, improved=False)
              ]):

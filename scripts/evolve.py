@@ -315,6 +315,45 @@ def _perturb(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _make_observer_fn(tapes_db: str | None = None):
+    """Create an observer function if a Tapes database exists."""
+    if not tapes_db or not Path(tapes_db).exists():
+        return None
+
+    def observer_fn():
+        from observer import observe_session_inline
+
+        return observe_session_inline(tapes_db)
+
+    return observer_fn
+
+
+def _make_llm_fn():
+    """Create an LLM function using the Anthropic API, if available."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import anthropic
+    except ImportError:
+        print("[evolve] anthropic package not installed, using random perturbation")
+        return None
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    def llm_fn(prompt: str) -> str:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+    print("[evolve] Using Anthropic API for LLM-guided mutation")
+    return llm_fn
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evolve Pokemon agent parameters")
     parser.add_argument("rom", help="Path to ROM file")
@@ -330,13 +369,32 @@ def main():
         default=200,
         help="Max turns per agent run (default: 200)",
     )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Disable LLM mutation, use random perturbation only",
+    )
+    parser.add_argument(
+        "--tapes-db",
+        default=str(SCRIPT_DIR.parent / ".tapes" / "tapes.sqlite"),
+        help="Path to Tapes SQLite database (default: .tapes/tapes.sqlite)",
+    )
+    parser.add_argument(
+        "--no-observer",
+        action="store_true",
+        help="Disable observational memory feedback",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
         print(f"ROM not found: {args.rom}")
         sys.exit(1)
 
-    results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns)
+    llm_fn = None if args.no_llm else _make_llm_fn()
+    observer_fn = None if args.no_observer else _make_observer_fn(args.tapes_db)
+
+    results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns,
+                     llm_fn=llm_fn, observer_fn=observer_fn)
 
     # Summary
     improvements = [r for r in results if r.improved]
