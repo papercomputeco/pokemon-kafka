@@ -508,6 +508,23 @@ class TestMakeLlmFn:
         with patch.dict("os.environ", {}, clear=True):
             assert _make_llm_fn() is None
 
+    def test_returns_none_without_anthropic_package(self):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def deny_anthropic(name, *args, **kwargs):
+            if name == "anthropic":
+                raise ImportError("no anthropic")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch.dict("sys.modules", {"anthropic": None}),
+            patch("builtins.__import__", side_effect=deny_anthropic),
+        ):
+            assert _make_llm_fn() is None
+
     def test_returns_callable_with_api_key(self):
         mock_client = MagicMock()
         mock_anthropic = MagicMock()
