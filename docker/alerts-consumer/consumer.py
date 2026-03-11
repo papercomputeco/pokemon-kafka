@@ -39,6 +39,13 @@ def main():
     consumer.subscribe([TOPIC])
     print(f"[alerts] Subscribed. Waiting for alerts...", flush=True)
 
+    tape_writer = None
+    if TAPES_DB:
+        from tape_writer import TapeWriter
+
+        tape_writer = TapeWriter(TAPES_DB)
+        print(f"[alerts] Tapes writer: {TAPES_DB}", flush=True)
+
     try:
         while True:
             msg = consumer.poll(1.0)
@@ -55,12 +62,9 @@ def main():
                 alert_text = format_alert(data)
                 print(alert_text, flush=True)
 
-                if TAPES_DB:
+                if tape_writer:
                     try:
-                        from tape_writer import TapeWriter
-
-                        writer = TapeWriter(TAPES_DB)
-                        writer.write_node(
+                        tape_writer.write_node(
                             role="assistant",
                             content_blocks=[{"type": "text", "text": alert_text}],
                             agent_name="flink",
@@ -72,6 +76,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if tape_writer:
+            tape_writer.close()
         consumer.close()
 
 

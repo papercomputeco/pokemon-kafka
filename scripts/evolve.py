@@ -316,11 +316,18 @@ def _perturb(params: dict) -> dict:
 
 
 def _make_observer_fn(tapes_db: str | None = None):
-    """Create an observer function if a Tapes database exists."""
-    if not tapes_db or not Path(tapes_db).exists():
+    """Create an observer function that reads from a Tapes database.
+
+    The DB existence check is deferred to call time so databases created
+    after CLI startup (e.g. by alerts-consumer during an evolution run)
+    are still picked up.
+    """
+    if not tapes_db:
         return None
 
     def observer_fn():
+        if not Path(tapes_db).exists():
+            return []
         from observer import observe_session_inline
 
         return observe_session_inline(tapes_db)

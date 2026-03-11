@@ -445,8 +445,16 @@ class TestMakeObserverFn:
         assert _make_observer_fn(None) is None
         assert _make_observer_fn("") is None
 
-    def test_returns_none_when_db_missing(self):
-        assert _make_observer_fn("/nonexistent/tapes.sqlite") is None
+    def test_returns_callable_when_path_provided(self):
+        """Returns a callable even if the DB doesn't exist yet (deferred check)."""
+        fn = _make_observer_fn("/nonexistent/tapes.sqlite")
+        assert callable(fn)
+
+    def test_deferred_missing_db_returns_empty(self):
+        """Calling observer_fn when DB doesn't exist returns empty list."""
+        fn = _make_observer_fn("/nonexistent/tapes.sqlite")
+        result = fn()
+        assert result == []
 
     def test_returns_callable_when_db_exists(self, tmp_path):
         from tape_helpers import create_test_db
@@ -469,6 +477,28 @@ class TestMakeObserverFn:
         conn.close()
 
         fn = _make_observer_fn(str(db))
+        result = fn()
+        assert isinstance(result, list)
+
+    def test_picks_up_late_created_db(self, tmp_path):
+        """DB created after _make_observer_fn is still picked up."""
+        db = tmp_path / "tapes.sqlite"
+        fn = _make_observer_fn(str(db))
+
+        # DB doesn't exist yet — returns empty
+        assert fn() == []
+
+        # Now create the DB
+        from tape_helpers import create_test_db, insert_test_node
+
+        conn = create_test_db(db)
+        insert_test_node(
+            conn, "root1", role="assistant",
+            content=[{"type": "text", "text": "error: stuck"}],
+        )
+        conn.close()
+
+        # Same fn now picks up the data
         result = fn()
         assert isinstance(result, list)
 
