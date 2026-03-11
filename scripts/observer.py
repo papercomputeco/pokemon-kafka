@@ -4,6 +4,8 @@ Uses heuristic pattern matching (no LLM calls) to extract noteworthy events
 from Tapes conversation data and write them to memory files.
 """
 
+from __future__ import annotations
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -58,14 +60,13 @@ class Observer:
         if all_observations:
             self.write_observations(all_observations)
 
-        # Update watermark with all available sessions
+        # Update watermark — only keep sessions that still exist in the DB
+        # to prevent unbounded growth of the state file.
+        current_sessions = set(self.reader.list_sessions())
         state = self.load_state()
-        # NOTE: This list grows with each new session. Fine for typical usage
-        # (tens to low hundreds of sessions) but may need rotation if the
-        # database grows to thousands of sessions.
-        state["processed_sessions"] = list(
-            set(state.get("processed_sessions", []))
-            | set(self.reader.list_sessions())
+        previously_processed = set(state.get("processed_sessions", []))
+        state["processed_sessions"] = sorted(
+            (previously_processed | current_sessions) & current_sessions
         )
         self.save_state(state)
 
@@ -262,9 +263,11 @@ def _has_traceback(text: str) -> bool:
     """Check if text contains Python traceback patterns."""
     if "Traceback (most recent call last)" in text:
         return True
-    # Match "SomeError:" or "SomeException:" at line start — avoids false
-    # positives like "I see the error" or "Error handling is important".
-    return bool(re.search(r"^\w*(Error|Exception):", text, re.MULTILINE))
+    # Match "SomeError:" or "SomeException:" at line start where the prefix
+    # starts with an uppercase letter, matching Python exception naming
+    # conventions (e.g. ValueError, RuntimeError).  Avoids false positives
+    # like "myCustomError:" or bare "Error handling is important".
+    return bool(re.search(r"^[A-Z]\w*(Error|Exception):", text, re.MULTILINE))
 
 
 def _extract_traceback_summary(text: str) -> str:

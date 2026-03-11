@@ -4,6 +4,8 @@ Usage:
     python3 scripts/observe_cli.py [--db PATH] [--memory-dir DIR] [--dry-run] [--session HASH] [--reset]
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 from pathlib import Path
@@ -63,17 +65,22 @@ def main(argv: list[str] | None = None) -> None:
     if args.session:
         session = observer.reader.read_session(args.session)
         observations = observer.observe_session(session)
-    else:
-        if args.dry_run:
-            sessions = observer.get_unprocessed_sessions()
-            observations = []
-            for sid in sessions:
-                session = observer.reader.read_session(sid)
-                observations.extend(observer.observe_session(session))
+        if not args.dry_run and observations:
+            observer.write_observations(observations)
+            print(f"Wrote {len(observations)} observation(s) to {observer.observations_path}")
         else:
-            observations = observer.run()
-
-    if args.dry_run or args.session:
+            for obs in observations:
+                print(
+                    f"[{obs.priority}] {obs.content} "
+                    f"(session: {obs.source_session[:8]})"
+                )
+            print(f"\n{len(observations)} observation(s) found.")
+    elif args.dry_run:
+        sessions = observer.get_unprocessed_sessions()
+        observations = []
+        for sid in sessions:
+            session = observer.reader.read_session(sid)
+            observations.extend(observer.observe_session(session))
         for obs in observations:
             print(
                 f"[{obs.priority}] {obs.content} "
@@ -81,6 +88,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         print(f"\n{len(observations)} observation(s) found.")
     else:
+        observations = observer.run()
         print(f"Wrote {len(observations)} observation(s) to {observer.observations_path}")
 
 

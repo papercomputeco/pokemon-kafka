@@ -8,6 +8,7 @@ from confluent_kafka import Consumer, KafkaError
 TOPIC = os.environ.get("KAFKA_TOPIC", "agent.telemetry.raw")
 BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "telemetry-consumer")
+SINK_DIR = os.environ.get("SINK_DIR", "")
 
 
 def format_event(data: dict) -> str:
@@ -45,6 +46,12 @@ def main():
     consumer.subscribe([TOPIC])
     print(f"[consumer] Subscribed. Waiting for messages...", flush=True)
 
+    sink = None
+    if SINK_DIR:
+        from jsonl_writer import JSONLWriter
+        sink = JSONLWriter(SINK_DIR)
+        print(f"[consumer] JSONL sink: {SINK_DIR}", flush=True)
+
     try:
         while True:
             msg = consumer.poll(1.0)
@@ -59,11 +66,18 @@ def main():
             try:
                 data = json.loads(msg.value().decode("utf-8"))
                 print(format_event(data), flush=True)
+                if sink:
+                    try:
+                        sink.write(data)
+                    except Exception as exc:
+                        print(f"[consumer] Sink write failed: {exc}", flush=True)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 print(f"[consumer] Bad message: {exc}", flush=True)
     except KeyboardInterrupt:
         pass
     finally:
+        if sink:
+            sink.close()
         consumer.close()
 
 

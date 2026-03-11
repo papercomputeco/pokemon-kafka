@@ -4,6 +4,8 @@ Parses conversation nodes from tapes.sqlite into structured Python objects
 for analysis. Pure stdlib — no external dependencies beyond sqlite3.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -82,14 +84,44 @@ _CHAIN_QUERY = (
 
 
 class TapeReader:
-    """Reads and parses the Tapes SQLite database."""
+    """Reads and parses the Tapes SQLite database.
+
+    Supports context manager protocol for connection reuse::
+
+        with TapeReader(path) as reader:
+            for sid in reader.list_sessions():
+                session = reader.read_session(sid)
+
+    Also works without a context manager (opens/closes per call).
+    """
 
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
+        self._conn: sqlite3.Connection | None = None
+
+    def __enter__(self) -> "TapeReader":
+        self._conn = sqlite3.connect(str(self.db_path))
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Return the managed connection or open a temporary one."""
+        if self._conn:
+            return self._conn
+        return sqlite3.connect(str(self.db_path))
+
+    def _release_conn(self, conn: sqlite3.Connection) -> None:
+        """Close the connection only if it's not the managed one."""
+        if conn is not self._conn:
+            conn.close()
 
     def list_sessions(self) -> list[str]:
         """Return hashes of root nodes (conversation starts) ordered by time."""
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._get_conn()
         try:
             rows = conn.execute(
                 "SELECT hash FROM nodes "
@@ -98,15 +130,15 @@ class TapeReader:
             ).fetchall()
             return [r[0] for r in rows]
         finally:
-            conn.close()
+            self._release_conn(conn)
 
     def read_session(self, root_hash: str) -> TapeSession:
         """Walk the parent_hash chain from a root node into a TapeSession."""
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._get_conn()
         try:
             rows = conn.execute(_CHAIN_QUERY, (root_hash,)).fetchall()
         finally:
-            conn.close()
+            self._release_conn(conn)
 
         entries = [self._row_to_entry(row) for row in rows]
         session = TapeSession(
@@ -120,13 +152,13 @@ class TapeReader:
 
     def iter_entries(self, root_hash: str) -> Generator[TapeEntry, None, None]:
         """Lazy generator over entries in a conversation chain."""
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._get_conn()
         try:
             cursor = conn.execute(_CHAIN_QUERY, (root_hash,))
             for row in cursor:
                 yield self._row_to_entry(row)
         finally:
-            conn.close()
+            self._release_conn(conn)
 
     def _row_to_entry(self, row: tuple) -> TapeEntry:
         """Convert a database row into a TapeEntry."""
@@ -216,28 +248,30 @@ def _parse_content_blob(blob) -> list[dict]:
     return []
 
 
+_TOOL_SUMMARY_KEY: dict[str, str] = {
+    "Read": "file_path",
+    "Write": "file_path",
+    "Edit": "file_path",
+    "Bash": "command",
+    "Grep": "pattern",
+    "Glob": "pattern",
+    "Agent": "description",
+}
+
+_TOOL_PREFIX_KEY: set[str] = {"Grep", "Glob"}
+
+
 def _summarize_tool_input(name: str, tool_input: dict) -> str:
     """Create a short summary of a tool invocation's input."""
     if not isinstance(tool_input, dict):
         return str(tool_input)[:200]
 
-    if name == "Read":
-        return tool_input.get("file_path", "")
-    elif name == "Write":
-        return tool_input.get("file_path", "")
-    elif name == "Edit":
-        return tool_input.get("file_path", "")
-    elif name == "Bash":
-        cmd = tool_input.get("command", "")
-        return cmd[:200]
-    elif name == "Grep":
-        return f"pattern={tool_input.get('pattern', '')}"
-    elif name == "Glob":
-        return f"pattern={tool_input.get('pattern', '')}"
-    elif name == "Agent":
-        return tool_input.get("description", "")[:200]
-    else:
-        for key in ("prompt", "query", "description", "command", "file_path"):
-            if key in tool_input:
-                return f"{key}={str(tool_input[key])[:200]}"
-        return str(tool_input)[:200]
+    key = _TOOL_SUMMARY_KEY.get(name)
+    if key:
+        val = str(tool_input.get(key, ""))[:200]
+        return f"{key}={val}" if name in _TOOL_PREFIX_KEY else val
+
+    for key in ("prompt", "query", "description", "command", "file_path"):
+        if key in tool_input:
+            return f"{key}={str(tool_input[key])[:200]}"
+    return str(tool_input)[:200]

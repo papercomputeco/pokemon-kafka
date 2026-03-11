@@ -45,7 +45,7 @@ class TestMainDryRun:
 
 
 class TestMainSession:
-    def test_single_session(self, tmp_path, capsys):
+    def test_single_session_writes_to_disk(self, tmp_path, capsys):
         db_path = tmp_path / "tapes.sqlite"
         conn = create_test_db(db_path)
         insert_test_node(conn, "root1", role="user",
@@ -56,8 +56,23 @@ class TestMainSession:
         main(["--db", str(db_path), "--memory-dir", str(mem), "--session", "root1"])
 
         captured = capsys.readouterr()
+        assert "Wrote" in captured.out
+        assert (mem / "observations.md").exists()
+
+    def test_single_session_dry_run_no_write(self, tmp_path, capsys):
+        db_path = tmp_path / "tapes.sqlite"
+        conn = create_test_db(db_path)
+        insert_test_node(conn, "root1", role="user",
+                         content=[{"type": "text", "text": "add tests"}],
+                         created_at="2026-03-09T10:00:00Z")
+        mem = tmp_path / "memory"
+
+        main(["--db", str(db_path), "--memory-dir", str(mem), "--session", "root1", "--dry-run"])
+
+        captured = capsys.readouterr()
         assert "add tests" in captured.out
         assert "observation(s) found" in captured.out
+        assert not (mem / "observations.md").exists()
 
 
 class TestMainRun:

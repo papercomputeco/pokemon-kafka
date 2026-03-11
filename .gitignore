@@ -48,5 +48,8 @@ pokedex/log2[0-9]*.md
 # Generated results
 pokedex/evolve_results.json
 
+# Telemetry data (generated at runtime)
+data/telemetry/*.jsonl
+
 # Docker
 docker-compose.override.yml

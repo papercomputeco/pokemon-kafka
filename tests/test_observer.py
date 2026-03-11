@@ -102,6 +102,10 @@ class TestHasTraceback:
         text = "Some context\nModuleNotFoundError: No module named 'foo'\nmore"
         assert _has_traceback(text)
 
+    def test_lowercase_prefix_no_match(self):
+        """Lowercase-starting names like 'myCustomError:' should not match."""
+        assert not _has_traceback("myCustomError: something went wrong")
+
 
 class TestExtractTracebackSummary:
     def test_extracts_last_error_line(self):
@@ -602,6 +606,29 @@ class TestRun:
 
         state = obs.load_state()
         assert "root1" in state["processed_sessions"]
+
+    def test_run_rotates_stale_watermarks(self, tmp_path):
+        """Processed sessions that no longer exist in the DB should be pruned."""
+        db_path = tmp_path / "tapes.sqlite"
+        conn = create_test_db(db_path)
+        mem = tmp_path / "memory"
+        mem.mkdir()
+
+        insert_test_node(conn, "root1", role="user",
+                      content=[{"type": "text", "text": "hello"}],
+                      created_at="2026-03-09T10:00:00Z")
+
+        # Seed state with a session that no longer exists in DB
+        (mem / "observer_state.json").write_text(
+            json.dumps({"processed_sessions": ["deleted_session", "root1"]})
+        )
+
+        obs = Observer(str(db_path), str(mem))
+        obs.run()
+
+        state = obs.load_state()
+        assert "root1" in state["processed_sessions"]
+        assert "deleted_session" not in state["processed_sessions"]
 
     def test_run_no_observations_no_write(self, tmp_path):
         """When observe_session returns empty, observations.md shouldn't be created."""
