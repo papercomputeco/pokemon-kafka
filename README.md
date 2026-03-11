@@ -340,7 +340,7 @@ The feedback loop (agent runs, telemetry persists, historical observer surfaces 
 
 Every run hit a plateau where the LLM proposed near-identical variants for multiple consecutive generations. The historical observer recorded convergence but nothing acted on it. Run 4's Gen 8 breakthrough happened despite this gap, not because of a designed escape mechanism. The next step is closing that loop: detect convergence and inject a diversification signal automatically.
 
-All four runs were entirely local — JSONL files and DuckDB, no Kafka broker or managed services required. The [full writeup](https://gist.github.com/bdougie/8fd2c7f25dc4673be4ebc6f65098eb0c?permalink_comment_id=6023622#gistcomment-6023622) includes raw telemetry and winning parameters.
+All four runs were entirely local — JSONL files and DuckDB, no Kafka broker or managed services required. Raw telemetry lives in `data/telemetry/` and is queryable with `scripts/query_telemetry.py`.
 
 ## Inspiration & References
 
