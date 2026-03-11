@@ -25,8 +25,8 @@ from run_10_agents import (
 
 
 class TestParamVariants:
-    def test_has_12_variants(self):
-        assert len(PARAM_VARIANTS) == 12
+    def test_has_16_variants(self):
+        assert len(PARAM_VARIANTS) == 16
 
     def test_all_variants_have_required_keys(self):
         required = {"stuck_threshold", "door_cooldown", "waypoint_skip_distance",
@@ -58,7 +58,7 @@ class TestScore:
             "stuck_count": 2,
             "turns": 100,
         }
-        expected = 1000 + 5000 + 500 + 50 - 10 - 10.0
+        expected = 1000 + 5000 + 500 + 500 - 10 - 10.0
         assert score(f) == expected
 
     def test_stuck_penalizes(self):

@@ -71,6 +71,25 @@ PARAM_VARIANTS = [
      "axis_preference_map_0": "y", "bt_max_snapshots": 0,
      "bt_restore_threshold": 999, "bt_max_attempts": 3,
      "bt_snapshot_interval": 50, "label": "no_bt"},
+    # Aggressive battle: fight longer before running/healing
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", **_BT_DEFAULTS,
+     "hp_run_threshold": 0.1, "hp_heal_threshold": 0.15,
+     "label": "aggressive_battle"},
+    # Cautious battle: heal early and run early
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", **_BT_DEFAULTS,
+     "hp_run_threshold": 0.35, "hp_heal_threshold": 0.4,
+     "label": "cautious_battle"},
+    # Status moves: higher priority for status moves
+    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
+     "axis_preference_map_0": "y", **_BT_DEFAULTS,
+     "status_move_score": 5.0, "label": "status_moves"},
+    # Full aggressive: aggressive nav + aggressive battle
+    {"stuck_threshold": 3, "door_cooldown": 2, "waypoint_skip_distance": 5,
+     "axis_preference_map_0": "y", **_BT_DEFAULTS,
+     "hp_run_threshold": 0.1, "hp_heal_threshold": 0.15,
+     "label": "full_aggressive"},
 ]
 
 MAX_TURNS = 5000  # Intro + Pokemon selection + rival scripted sequence + battle + exit

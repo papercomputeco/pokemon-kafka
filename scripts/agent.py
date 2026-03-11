@@ -147,19 +147,30 @@ class GameController:
 class BattleStrategy:
     """Heuristic-based battle decision engine."""
 
-    def __init__(self, type_chart: dict):
+    def __init__(
+        self,
+        type_chart: dict,
+        hp_run_threshold: float = 0.2,
+        hp_heal_threshold: float = 0.25,
+        unknown_move_score: float = 10.0,
+        status_move_score: float = 1.0,
+    ):
         self.type_chart = type_chart
+        self.hp_run_threshold = hp_run_threshold
+        self.hp_heal_threshold = hp_heal_threshold
+        self.unknown_move_score = unknown_move_score
+        self.status_move_score = status_move_score
 
     def score_move(self, move_id: int, move_pp: int, enemy_type: str = "normal") -> float:
         """Score a move based on power, PP, and type effectiveness."""
         if move_pp <= 0:
             return -1.0
         if move_id not in MOVE_DATA:
-            return 10.0  # Unknown move, give it a baseline
+            return self.unknown_move_score
 
         name, move_type, power, accuracy = MOVE_DATA[move_id]
         if power == 0:
-            return 1.0  # Status move — low priority for grinding
+            return self.status_move_score
 
         effectiveness = 1.0
         if move_type in self.type_chart:
@@ -179,10 +190,10 @@ class BattleStrategy:
         """
         # Low HP — heal if wild battle
         hp_ratio = battle.player_hp / max(battle.player_max_hp, 1)
-        if hp_ratio < 0.2 and battle.battle_type == 1:  # Wild
+        if hp_ratio < self.hp_run_threshold and battle.battle_type == 1:  # Wild
             return {"action": "run"}  # Safe option when low
 
-        if hp_ratio < 0.25:
+        if hp_ratio < self.hp_heal_threshold:
             return {"action": "item", "item": "potion"}
 
         # Score all moves and pick the best
@@ -431,7 +442,7 @@ class PokemonAgent:
         self.controller = GameController(self.pyboy)
         self.memory = MemoryReader(self.pyboy)
         self.type_chart = load_type_chart()
-        self.battle_strategy = BattleStrategy(self.type_chart)
+        self.battle_strategy = BattleStrategy(self.type_chart)  # re-created below with evolve params
         self.strategy_engine = StrategyEngine(
             strategy,
             notes_path=str(SCRIPT_DIR.parent / "notes.md") if strategy != "low" else None,
@@ -486,12 +497,19 @@ class PokemonAgent:
         self._bt_snapshot_interval = int(self.evolve_params.get("bt_snapshot_interval", 50))
         self._bt_last_map_id: int | None = None
 
-        # Rebuild navigator with evolved params
+        # Rebuild navigator and battle strategy with evolved params
         if self.evolve_params:
             self.navigator = Navigator(
                 routes,
                 stuck_threshold=int(self.evolve_params.get("stuck_threshold", 8)),
                 skip_distance=int(self.evolve_params.get("waypoint_skip_distance", 3)),
+            )
+            self.battle_strategy = BattleStrategy(
+                self.type_chart,
+                hp_run_threshold=float(self.evolve_params.get("hp_run_threshold", 0.2)),
+                hp_heal_threshold=float(self.evolve_params.get("hp_heal_threshold", 0.25)),
+                unknown_move_score=float(self.evolve_params.get("unknown_move_score", 10.0)),
+                status_move_score=float(self.evolve_params.get("status_move_score", 1.0)),
             )
 
         print(f"[agent] Loaded ROM: {rom_path}")

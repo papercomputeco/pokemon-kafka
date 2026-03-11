@@ -228,6 +228,10 @@ Snapshots use PyBoy's `save_state()`/`load_state()` with in-memory `BytesIO` buf
 | `bt_restore_threshold` | 15 | Stuck turns before restoring |
 | `bt_max_attempts` | 3 | Retries per snapshot |
 | `bt_snapshot_interval` | 50 | Periodic snapshot frequency |
+| `hp_run_threshold` | 0.2 | HP ratio below which to run from wild battles |
+| `hp_heal_threshold` | 0.25 | HP ratio below which to use a healing item |
+| `unknown_move_score` | 10.0 | Baseline score for unknown moves |
+| `status_move_score` | 1.0 | Score for zero-power status moves |
 
 Scripted areas like Oak's Lab (map 40) disable backtracking entirely — the lab's multi-phase cutscene looks "stuck" but is progressing naturally.
 
