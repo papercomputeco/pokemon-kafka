@@ -67,16 +67,16 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
         SELECT
             occurred_at,
             root_hash,
-            fitness.final_map_id * 1000
-                + fitness.badges * 5000
-                + fitness.party_size * 500
-                + fitness.battles_won * 100
-                - fitness.stuck_count * 5
-                - fitness.turns * 0.1
-                - fitness.backtrack_restores * 2 AS score,
-            fitness.stuck_count,
-            fitness.battles_won,
-            fitness.final_map_id
+            COALESCE(fitness.final_map_id, 0) * 1000
+                + COALESCE(fitness.badges, 0) * 5000
+                + COALESCE(fitness.party_size, 0) * 500
+                + COALESCE(fitness.battles_won, 0) * 100
+                - COALESCE(fitness.stuck_count, 0) * 5
+                - COALESCE(fitness.turns, 0) * 0.1
+                - COALESCE(fitness.backtrack_restores, 0) * 2 AS score,
+            COALESCE(fitness.stuck_count, 0),
+            COALESCE(fitness.battles_won, 0),
+            COALESCE(fitness.final_map_id, 0)
         FROM read_json_auto('{pattern}')
         WHERE type = 'fitness'
         ORDER BY occurred_at
