@@ -49,6 +49,10 @@ class TestDefaultParams:
         assert "bt_restore_threshold" in DEFAULT_PARAMS
         assert "bt_max_attempts" in DEFAULT_PARAMS
         assert "bt_snapshot_interval" in DEFAULT_PARAMS
+        assert "hp_run_threshold" in DEFAULT_PARAMS
+        assert "hp_heal_threshold" in DEFAULT_PARAMS
+        assert "unknown_move_score" in DEFAULT_PARAMS
+        assert "status_move_score" in DEFAULT_PARAMS
 
 
 # ── score() ────────────────────────────────────────────────────────────
@@ -75,8 +79,8 @@ class TestScore:
             "stuck_count": 2,
             "turns": 100,
         }
-        # 1*1000 + 1*5000 + 1*500 + 5*10 - 2*5 - 100*0.1
-        expected = 1000 + 5000 + 500 + 50 - 10 - 10.0
+        # 1*1000 + 1*5000 + 1*500 + 5*100 - 2*5 - 100*0.1
+        expected = 1000 + 5000 + 500 + 500 - 10 - 10.0
         assert score(f) == expected
 
     def test_missing_keys_default_zero(self):
@@ -199,6 +203,13 @@ class TestBuildMutationPrompt:
         assert "bt_max_attempts" in prompt
         assert "bt_snapshot_interval" in prompt
 
+    def test_includes_battle_descriptions(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {})
+        assert "hp_run_threshold" in prompt
+        assert "hp_heal_threshold" in prompt
+        assert "unknown_move_score" in prompt
+        assert "status_move_score" in prompt
+
     def test_includes_observations(self):
         obs = [{"priority": "important", "content": "Tool error: boom"}]
         prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, obs)
@@ -279,6 +290,32 @@ class TestPerturb:
                 if result[key] != DEFAULT_PARAMS[key]:
                     bt_changed.add(key)
         assert len(bt_changed) > 0
+
+    def test_can_perturb_battle_float_keys(self):
+        """Battle float keys should be reachable by perturbation."""
+        import random
+        random.seed(456)
+        changed = set()
+        for _ in range(200):
+            result = _perturb(DEFAULT_PARAMS)
+            for key in ("hp_run_threshold", "hp_heal_threshold",
+                        "unknown_move_score", "status_move_score"):
+                if result[key] != DEFAULT_PARAMS[key]:
+                    changed.add(key)
+        assert len(changed) > 0
+
+    def test_float_perturbation_clamps_at_zero(self):
+        """Float params should never go below 0."""
+        import random
+        random.seed(0)
+        params = dict(DEFAULT_PARAMS, hp_run_threshold=0.0,
+                      hp_heal_threshold=0.0, unknown_move_score=0.0,
+                      status_move_score=0.0)
+        for _ in range(50):
+            result = _perturb(params)
+            for key in ("hp_run_threshold", "hp_heal_threshold",
+                        "unknown_move_score", "status_move_score"):
+                assert result[key] >= 0.0
 
 
 # ── evolve() ───────────────────────────────────────────────────────────

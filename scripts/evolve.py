@@ -33,6 +33,10 @@ DEFAULT_PARAMS = {
     "bt_restore_threshold": 15,
     "bt_max_attempts": 3,
     "bt_snapshot_interval": 50,
+    "hp_run_threshold": 0.2,
+    "hp_heal_threshold": 0.25,
+    "unknown_move_score": 10.0,
+    "status_move_score": 1.0,
 }
 
 
@@ -58,7 +62,7 @@ def score(fitness: dict) -> float:
         fitness.get("final_map_id", 0) * 1000
         + fitness.get("badges", 0) * 5000
         + fitness.get("party_size", 0) * 500
-        + fitness.get("battles_won", 0) * 10
+        + fitness.get("battles_won", 0) * 100
         - fitness.get("stuck_count", 0) * 5
         - fitness.get("turns", 0) * 0.1
         - fitness.get("backtrack_restores", 0) * 2
@@ -151,10 +155,14 @@ Parameter descriptions:
 - bt_restore_threshold: stuck turns before restoring a snapshot (int, 8-30)
 - bt_max_attempts: max times to retry from the same snapshot (int, 1-5)
 - bt_snapshot_interval: turns between periodic snapshots when not stuck (int, 20-100)
+- hp_run_threshold: HP ratio below which the agent runs from wild battles (float, 0.05-0.5)
+- hp_heal_threshold: HP ratio below which the agent uses a healing item (float, 0.1-0.6)
+- unknown_move_score: baseline score for moves not in the known move table (float, 1.0-30.0)
+- status_move_score: score assigned to zero-power status moves (float, 0.0-10.0)
 
 Propose ONE set of modified parameters to improve the score. Focus on reducing
-stuck_count and increasing maps_visited. Return ONLY valid JSON with the same
-keys, nothing else."""
+stuck_count, increasing maps_visited, and winning battles. Return ONLY valid JSON
+with the same keys, nothing else."""
 
 
 def parse_llm_response(response: str) -> dict | None:
@@ -278,14 +286,24 @@ def _perturb(params: dict) -> dict:
     """Simple random perturbation of numeric params (no LLM needed)."""
     import random
 
-    new = dict(params)
-    key = random.choice([
+    INT_KEYS = [
         "stuck_threshold", "door_cooldown", "waypoint_skip_distance",
         "bt_max_snapshots", "bt_restore_threshold", "bt_max_attempts",
         "bt_snapshot_interval",
-    ])
-    delta = random.choice([-2, -1, 1, 2])
-    new[key] = max(1, new[key] + delta)
+    ]
+    FLOAT_KEYS = [
+        "hp_run_threshold", "hp_heal_threshold",
+        "unknown_move_score", "status_move_score",
+    ]
+
+    new = dict(params)
+    key = random.choice(INT_KEYS + FLOAT_KEYS)
+    if key in FLOAT_KEYS:
+        delta = random.choice([-0.1, -0.05, 0.05, 0.1])
+        new[key] = max(0.0, round(new[key] + delta, 4))
+    else:
+        delta = random.choice([-2, -1, 1, 2])
+        new[key] = max(1, new[key] + delta)
     # Randomly flip axis preference
     if random.random() < 0.3:
         new["axis_preference_map_0"] = "x" if new["axis_preference_map_0"] == "y" else "y"
