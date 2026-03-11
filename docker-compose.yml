@@ -50,6 +50,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TOPIC: agent.telemetry.raw
       KAFKA_GROUP_ID: telemetry-consumer
+      SINK_DIR: /data/telemetry
+    volumes:
+      - ./data/telemetry:/data/telemetry
 
   alerts-consumer:
     build: docker/alerts-consumer
