@@ -1,14 +1,17 @@
 # scripts/publisher.py
 """Telemetry publisher — local-first event publishing.
 
-Mirrors the Publisher interface from tapes#90:
-    type Publisher interface {
-        Publish(ctx, event Event) error
-        Close() error
-    }
+Local-first complement to the tapes Kafka publisher. The tapes proxy
+already ships a Kafka-backed Publisher for the cloud path; this module
+provides a zero-infrastructure alternative that writes directly to
+date-partitioned JSONL files on disk. Same event shape, no broker needed.
+
+The local JSONL path lets us iterate on the learning loop (agent →
+telemetry → Historical Observer → evolution) without cloud dependencies,
+then graduate data to Kafka/Confluent Cloud when ready.
 
 Two implementations:
-- JSONLPublisher: writes events to date-partitioned JSONL files (no Kafka needed)
+- JSONLPublisher: writes events to date-partitioned JSONL files
 - NoopPublisher: discards events (for runs without telemetry)
 """
 
@@ -21,7 +24,7 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class Publisher(Protocol):
-    """Event publisher protocol — mirrors tapes#90 Go interface."""
+    """Event publisher protocol — same shape as the tapes Kafka publisher."""
 
     def publish(self, event: dict) -> None: ...
     def close(self) -> None: ...
