@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tape_reader import TapeReader, TapeEntry, TapeSession
+from tape_reader import TapeReader, TapeSession
 
 
 @dataclass
@@ -65,9 +65,7 @@ class Observer:
         current_sessions = set(self.reader.list_sessions())
         state = self.load_state()
         previously_processed = set(state.get("processed_sessions", []))
-        state["processed_sessions"] = sorted(
-            (previously_processed | current_sessions) & current_sessions
-        )
+        state["processed_sessions"] = sorted((previously_processed | current_sessions) & current_sessions)
         self.save_state(state)
 
         return all_observations
@@ -154,10 +152,7 @@ class Observer:
                     timestamp=now,
                     referenced_time=session.end_time,
                     priority="informational",
-                    content=(
-                        f"Token usage: {total_input} input, {total_output} output, "
-                        f"{total_cache_read} cache read"
-                    ),
+                    content=(f"Token usage: {total_input} input, {total_output} output, {total_cache_read} cache read"),
                     source_session=session.session_id,
                 )
             )
@@ -201,10 +196,7 @@ class Observer:
                 lines.append("")
 
             for obs in by_date[date]:
-                lines.append(
-                    f"- [{obs.priority}] {obs.content} "
-                    f"(session: {obs.source_session[:8]})"
-                )
+                lines.append(f"- [{obs.priority}] {obs.content} (session: {obs.source_session[:8]})")
 
         with open(self.observations_path, "a") as f:
             f.write("\n".join(lines) + "\n")

@@ -1,12 +1,12 @@
 """Tests for memory_reader.py — targeting 100% line coverage."""
 
 import pytest
-from memory_reader import BattleState, OverworldState, MemoryReader, CollisionMap
-
+from memory_reader import BattleState, CollisionMap, MemoryReader, OverworldState
 
 # ---------------------------------------------------------------------------
 # Dataclass default-value tests
 # ---------------------------------------------------------------------------
+
 
 class TestBattleStateDefaults:
     def test_defaults(self):
@@ -42,6 +42,7 @@ class TestOverworldStateDefaults:
 # ---------------------------------------------------------------------------
 # Low-level read helpers
 # ---------------------------------------------------------------------------
+
 
 class TestRead:
     def test_read_returns_byte(self, mock_pyboy, fake_memory):
@@ -97,6 +98,7 @@ class TestReadBCD:
 # read_battle_state
 # ---------------------------------------------------------------------------
 
+
 class TestReadBattleState:
     def test_no_battle_returns_early(self, mock_pyboy, fake_memory):
         """battle_type == 0 should return default BattleState immediately."""
@@ -132,9 +134,9 @@ class TestReadBattleState:
         mem[MemoryReader.ADDR_PLAYER_SPECIES] = 0xB0
 
         # Moves
-        mem[MemoryReader.ADDR_MOVE_1] = 33   # Tackle
-        mem[MemoryReader.ADDR_MOVE_2] = 45   # Growl
-        mem[MemoryReader.ADDR_MOVE_3] = 52   # Ember
+        mem[MemoryReader.ADDR_MOVE_1] = 33  # Tackle
+        mem[MemoryReader.ADDR_MOVE_2] = 45  # Growl
+        mem[MemoryReader.ADDR_MOVE_3] = 52  # Ember
         mem[MemoryReader.ADDR_MOVE_4] = 0
 
         # PP
@@ -181,6 +183,7 @@ class TestReadBattleState:
 # ---------------------------------------------------------------------------
 # read_overworld_state
 # ---------------------------------------------------------------------------
+
 
 class TestReadOverworldState:
     def test_full_overworld_read(self, mock_pyboy, fake_memory):
@@ -233,18 +236,19 @@ class TestReadOverworldState:
 # _is_text_or_script_active
 # ---------------------------------------------------------------------------
 
+
 class TestIsTextOrScriptActive:
     @pytest.mark.parametrize(
         "d730_val, expected",
         [
-            (0x00, False),   # no bits set
-            (0x02, True),    # bit 1 set (0x02 & 0x62 = 0x02)
-            (0x20, True),    # bit 5 set (0x20 & 0x62 = 0x20)
-            (0x40, True),    # bit 6 set (0x40 & 0x62 = 0x40)
-            (0x62, True),    # all relevant bits set
-            (0x01, False),   # bit 0 only — not in mask
-            (0x80, False),   # bit 7 only — not in mask
-            (0x9D, False),   # 0x9D = 10011101 — 0x9D & 0x62 = 0x00
+            (0x00, False),  # no bits set
+            (0x02, True),  # bit 1 set (0x02 & 0x62 = 0x02)
+            (0x20, True),  # bit 5 set (0x20 & 0x62 = 0x20)
+            (0x40, True),  # bit 6 set (0x40 & 0x62 = 0x40)
+            (0x62, True),  # all relevant bits set
+            (0x01, False),  # bit 0 only — not in mask
+            (0x80, False),  # bit 7 only — not in mask
+            (0x9D, False),  # 0x9D = 10011101 — 0x9D & 0x62 = 0x00
         ],
     )
     def test_text_or_script_flag(self, mock_pyboy, fake_memory, d730_val, expected):
@@ -256,6 +260,7 @@ class TestIsTextOrScriptActive:
 # ---------------------------------------------------------------------------
 # _read_party_hp
 # ---------------------------------------------------------------------------
+
 
 class TestReadPartyHP:
     def test_zero_party_members(self, mock_pyboy):
@@ -309,6 +314,7 @@ class TestReadPartyHP:
 # is_in_battle
 # ---------------------------------------------------------------------------
 
+
 class TestIsInBattle:
     def test_not_in_battle(self, mock_pyboy, fake_memory):
         reader = MemoryReader(mock_pyboy)
@@ -330,6 +336,7 @@ class TestIsInBattle:
 # player_whited_out
 # ---------------------------------------------------------------------------
 
+
 class TestPlayerWhitedOut:
     def test_all_fainted(self, mock_pyboy, fake_memory):
         """All party pokemon at 0 HP -> whited out."""
@@ -342,7 +349,6 @@ class TestPlayerWhitedOut:
         """At least one pokemon alive -> not whited out."""
         reader = MemoryReader(mock_pyboy)
         fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 2
-        base0 = MemoryReader.PARTY_BASE
         # First pokemon fainted (0 HP — default)
         # Second pokemon alive
         base1 = MemoryReader.PARTY_BASE + MemoryReader.PARTY_STRUCT_SIZE
@@ -369,6 +375,7 @@ class TestPlayerWhitedOut:
 # ---------------------------------------------------------------------------
 # CollisionMap
 # ---------------------------------------------------------------------------
+
 
 class TestCollisionMap:
     def test_init_defaults(self):

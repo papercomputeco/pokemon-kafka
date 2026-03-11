@@ -49,10 +49,7 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
     """Run DuckDB queries to extract cross-session insights."""
     # Load only fitness events
     try:
-        count = conn.execute(
-            f"SELECT count(*) FROM read_json_auto('{pattern}') "
-            "WHERE type = 'fitness'"
-        ).fetchone()[0]
+        count = conn.execute(f"SELECT count(*) FROM read_json_auto('{pattern}') WHERE type = 'fitness'").fetchone()[0]
     except Exception:
         return []
 
@@ -90,28 +87,34 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
         delta = last_score - first_score
 
         if delta > 0:
-            insights.append({
-                "priority": "important",
-                "content": (
-                    f"Fitness trend: improving over {len(rows)} runs "
-                    f"(score {first_score:.0f} -> {last_score:.0f}, "
-                    f"delta +{delta:.0f})"
-                ),
-            })
+            insights.append(
+                {
+                    "priority": "important",
+                    "content": (
+                        f"Fitness trend: improving over {len(rows)} runs "
+                        f"(score {first_score:.0f} -> {last_score:.0f}, "
+                        f"delta +{delta:.0f})"
+                    ),
+                }
+            )
         elif delta < 0:
-            insights.append({
-                "priority": "important",
-                "content": (
-                    f"Fitness trend: declining over {len(rows)} runs "
-                    f"(score {first_score:.0f} -> {last_score:.0f}, "
-                    f"delta {delta:.0f})"
-                ),
-            })
+            insights.append(
+                {
+                    "priority": "important",
+                    "content": (
+                        f"Fitness trend: declining over {len(rows)} runs "
+                        f"(score {first_score:.0f} -> {last_score:.0f}, "
+                        f"delta {delta:.0f})"
+                    ),
+                }
+            )
         else:
-            insights.append({
-                "priority": "informational",
-                "content": f"Fitness trend: flat over {len(rows)} runs (score {last_score:.0f})",
-            })
+            insights.append(
+                {
+                    "priority": "informational",
+                    "content": f"Fitness trend: flat over {len(rows)} runs (score {last_score:.0f})",
+                }
+            )
 
     # 2. Stuck count trend
     if len(rows) >= 2:
@@ -121,32 +124,38 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
         avg_stuck = sum(stuck_counts) / len(stuck_counts)
 
         if last_stuck < first_stuck:
-            insights.append({
-                "priority": "important",
-                "content": (
-                    f"Stuck count trend: decreasing ({first_stuck} -> {last_stuck}, "
-                    f"avg {avg_stuck:.1f} across {len(rows)} runs)"
-                ),
-            })
+            insights.append(
+                {
+                    "priority": "important",
+                    "content": (
+                        f"Stuck count trend: decreasing ({first_stuck} -> {last_stuck}, "
+                        f"avg {avg_stuck:.1f} across {len(rows)} runs)"
+                    ),
+                }
+            )
         elif last_stuck > first_stuck:
-            insights.append({
-                "priority": "important",
-                "content": (
-                    f"Stuck count trend: increasing ({first_stuck} -> {last_stuck}, "
-                    f"avg {avg_stuck:.1f}) -- navigation may be regressing"
-                ),
-            })
+            insights.append(
+                {
+                    "priority": "important",
+                    "content": (
+                        f"Stuck count trend: increasing ({first_stuck} -> {last_stuck}, "
+                        f"avg {avg_stuck:.1f}) -- navigation may be regressing"
+                    ),
+                }
+            )
 
     # 3. Best run summary
     if rows:
         best = max(rows, key=lambda r: r[2])
-        insights.append({
-            "priority": "informational",
-            "content": (
-                f"Best run: {best[1][:12]} with score {best[2]:.0f} "
-                f"(map {best[5]}, {best[4]} battles won, {best[3]} stuck events)"
-            ),
-        })
+        insights.append(
+            {
+                "priority": "informational",
+                "content": (
+                    f"Best run: {best[1][:12]} with score {best[2]:.0f} "
+                    f"(map {best[5]}, {best[4]} battles won, {best[3]} stuck events)"
+                ),
+            }
+        )
 
     # 4. Parameter effectiveness (if params are stored)
     try:
@@ -166,14 +175,16 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
 
         if len(param_rows) >= 2:
             best_param = param_rows[0]
-            insights.append({
-                "priority": "possible",
-                "content": (
-                    f"Parameter insight: stuck_threshold={best_param[0]} "
-                    f"had lowest avg stuck count ({best_param[1]:.1f} over "
-                    f"{best_param[2]} runs)"
-                ),
-            })
+            insights.append(
+                {
+                    "priority": "possible",
+                    "content": (
+                        f"Parameter insight: stuck_threshold={best_param[0]} "
+                        f"had lowest avg stuck count ({best_param[1]:.1f} over "
+                        f"{best_param[2]} runs)"
+                    ),
+                }
+            )
     except Exception:
         pass  # params may not have stuck_threshold in all events
 

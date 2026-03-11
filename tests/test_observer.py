@@ -2,19 +2,16 @@
 
 import json
 
-import pytest
-
-from tape_helpers import create_test_db, insert_test_node
 from observer import (
     Observation,
     Observer,
-    observe_session_inline,
+    _extract_traceback_summary,
     _first_user_message,
     _has_traceback,
-    _extract_traceback_summary,
+    observe_session_inline,
 )
-from tape_reader import TapeEntry, TapeSession, ToolResult, TokenUsage
-
+from tape_helpers import create_test_db, insert_test_node
+from tape_reader import TapeEntry, TapeSession, TokenUsage, ToolResult
 
 # ── Observation dataclass ────────────────────────────────────────────
 
@@ -154,9 +151,7 @@ class TestGetUnprocessedSessions:
 
         mem = tmp_path / "memory"
         mem.mkdir()
-        (mem / "observer_state.json").write_text(
-            json.dumps({"processed_sessions": ["aaa"]})
-        )
+        (mem / "observer_state.json").write_text(json.dumps({"processed_sessions": ["aaa"]}))
 
         obs = Observer(str(db_path), str(mem))
         assert obs.get_unprocessed_sessions() == ["bbb"]
@@ -168,9 +163,7 @@ class TestGetUnprocessedSessions:
 
         mem = tmp_path / "memory"
         mem.mkdir()
-        (mem / "observer_state.json").write_text(
-            json.dumps({"processed_sessions": ["aaa"]})
-        )
+        (mem / "observer_state.json").write_text(json.dumps({"processed_sessions": ["aaa"]}))
 
         obs = Observer(str(db_path), str(mem))
         assert obs.get_unprocessed_sessions() == []
@@ -194,9 +187,7 @@ class TestObserveSession:
     def test_extracts_session_goal(self, tmp_path):
         db_path = tmp_path / "tapes.sqlite"
         create_test_db(db_path)
-        session = self._make_session(
-            entries=[TapeEntry(type="user", text_content="fix the login bug")]
-        )
+        session = self._make_session(entries=[TapeEntry(type="user", text_content="fix the login bug")])
         obs = Observer(str(db_path), str(tmp_path / "mem"))
         results = obs.observe_session(session)
         goals = [o for o in results if "Session goal" in o.content]
@@ -254,9 +245,7 @@ class TestObserveSession:
                 TapeEntry(
                     type="assistant",
                     timestamp="2026-03-09T10:05:00Z",
-                    tool_uses=[
-                        ToolUse(id="tu-1", name="Write", input_summary="/new_file.py")
-                    ],
+                    tool_uses=[ToolUse(id="tu-1", name="Write", input_summary="/new_file.py")],
                 )
             ]
         )
@@ -331,9 +320,7 @@ class TestObserveSession:
             entries=[
                 TapeEntry(
                     type="assistant",
-                    tool_uses=[
-                        ToolUse(id="tu-1", name="Read", input_summary="/some.py")
-                    ],
+                    tool_uses=[ToolUse(id="tu-1", name="Read", input_summary="/some.py")],
                 )
             ]
         )
@@ -528,9 +515,7 @@ class TestLoadState:
         create_test_db(db_path)
         mem = tmp_path / "mem"
         mem.mkdir()
-        (mem / "observer_state.json").write_text(
-            json.dumps({"processed_sessions": ["a", "b"]})
-        )
+        (mem / "observer_state.json").write_text(json.dumps({"processed_sessions": ["a", "b"]}))
         obs = Observer(str(db_path), str(mem))
         state = obs.load_state()
         assert state["processed_sessions"] == ["a", "b"]
@@ -562,15 +547,24 @@ class TestRun:
         conn = create_test_db(db_path)
         mem = tmp_path / "memory"
 
-        insert_test_node(conn, "root1", role="user",
-                      content=[{"type": "text", "text": "fix the crash"}],
-                      created_at="2026-03-09T10:00:00Z")
-        insert_test_node(conn, "reply1", role="assistant",
-                      content=[{"type": "text", "text": "I see the error"}],
-                      created_at="2026-03-09T10:01:00Z",
-                      parent_hash="root1",
-                      prompt_tokens=500, completion_tokens=100,
-                      cache_read=400)
+        insert_test_node(
+            conn,
+            "root1",
+            role="user",
+            content=[{"type": "text", "text": "fix the crash"}],
+            created_at="2026-03-09T10:00:00Z",
+        )
+        insert_test_node(
+            conn,
+            "reply1",
+            role="assistant",
+            content=[{"type": "text", "text": "I see the error"}],
+            created_at="2026-03-09T10:01:00Z",
+            parent_hash="root1",
+            prompt_tokens=500,
+            completion_tokens=100,
+            cache_read=400,
+        )
 
         obs = Observer(str(db_path), str(mem))
         results = obs.run()
@@ -597,9 +591,9 @@ class TestRun:
         conn = create_test_db(db_path)
         mem = tmp_path / "memory"
 
-        insert_test_node(conn, "root1", role="user",
-                      content=[{"type": "text", "text": "hello"}],
-                      created_at="2026-03-09T10:00:00Z")
+        insert_test_node(
+            conn, "root1", role="user", content=[{"type": "text", "text": "hello"}], created_at="2026-03-09T10:00:00Z"
+        )
 
         obs = Observer(str(db_path), str(mem))
         obs.run()
@@ -614,14 +608,12 @@ class TestRun:
         mem = tmp_path / "memory"
         mem.mkdir()
 
-        insert_test_node(conn, "root1", role="user",
-                      content=[{"type": "text", "text": "hello"}],
-                      created_at="2026-03-09T10:00:00Z")
+        insert_test_node(
+            conn, "root1", role="user", content=[{"type": "text", "text": "hello"}], created_at="2026-03-09T10:00:00Z"
+        )
 
         # Seed state with a session that no longer exists in DB
-        (mem / "observer_state.json").write_text(
-            json.dumps({"processed_sessions": ["deleted_session", "root1"]})
-        )
+        (mem / "observer_state.json").write_text(json.dumps({"processed_sessions": ["deleted_session", "root1"]}))
 
         obs = Observer(str(db_path), str(mem))
         obs.run()
@@ -637,8 +629,7 @@ class TestRun:
         mem = tmp_path / "memory"
 
         # Empty-role node produces no observations
-        insert_test_node(conn, "root1", role="", content=[],
-                      created_at="2026-03-09T10:00:00Z")
+        insert_test_node(conn, "root1", role="", content=[], created_at="2026-03-09T10:00:00Z")
 
         obs = Observer(str(db_path), str(mem))
         results = obs.run()
@@ -653,15 +644,24 @@ class TestObserveSessionInline:
     def test_returns_dicts(self, tmp_path):
         db_path = tmp_path / "tapes.sqlite"
         conn = create_test_db(db_path)
-        insert_test_node(conn, "root1", role="user",
-                      content=[{"type": "text", "text": "fix the crash"}],
-                      created_at="2026-03-09T10:00:00Z")
-        insert_test_node(conn, "reply1", role="assistant",
-                      content=[{"type": "text", "text": "I see the error"}],
-                      created_at="2026-03-09T10:01:00Z",
-                      parent_hash="root1",
-                      prompt_tokens=500, completion_tokens=100,
-                      cache_read=400)
+        insert_test_node(
+            conn,
+            "root1",
+            role="user",
+            content=[{"type": "text", "text": "fix the crash"}],
+            created_at="2026-03-09T10:00:00Z",
+        )
+        insert_test_node(
+            conn,
+            "reply1",
+            role="assistant",
+            content=[{"type": "text", "text": "I see the error"}],
+            created_at="2026-03-09T10:01:00Z",
+            parent_hash="root1",
+            prompt_tokens=500,
+            completion_tokens=100,
+            cache_read=400,
+        )
 
         results = observe_session_inline(str(db_path), "root1")
         assert isinstance(results, list)
@@ -673,12 +673,12 @@ class TestObserveSessionInline:
     def test_latest_session_when_no_id(self, tmp_path):
         db_path = tmp_path / "tapes.sqlite"
         conn = create_test_db(db_path)
-        insert_test_node(conn, "aaa", role="user",
-                      content=[{"type": "text", "text": "hello"}],
-                      created_at="2026-03-09T10:00:00Z")
-        insert_test_node(conn, "bbb", role="user",
-                      content=[{"type": "text", "text": "world"}],
-                      created_at="2026-03-09T11:00:00Z")
+        insert_test_node(
+            conn, "aaa", role="user", content=[{"type": "text", "text": "hello"}], created_at="2026-03-09T10:00:00Z"
+        )
+        insert_test_node(
+            conn, "bbb", role="user", content=[{"type": "text", "text": "world"}], created_at="2026-03-09T11:00:00Z"
+        )
 
         results = observe_session_inline(str(db_path))
         # Should use the latest session (bbb)
@@ -694,13 +694,21 @@ class TestObserveSessionInline:
     def test_includes_error_observations(self, tmp_path):
         db_path = tmp_path / "tapes.sqlite"
         conn = create_test_db(db_path)
-        insert_test_node(conn, "root1", role="user",
-                      content=[{"type": "text", "text": "do something"}],
-                      created_at="2026-03-09T10:00:00Z")
-        insert_test_node(conn, "reply1", role="assistant",
-                      content=[{"type": "text", "text": "ValueError: bad"}],
-                      created_at="2026-03-09T10:01:00Z",
-                      parent_hash="root1")
+        insert_test_node(
+            conn,
+            "root1",
+            role="user",
+            content=[{"type": "text", "text": "do something"}],
+            created_at="2026-03-09T10:00:00Z",
+        )
+        insert_test_node(
+            conn,
+            "reply1",
+            role="assistant",
+            content=[{"type": "text", "text": "ValueError: bad"}],
+            created_at="2026-03-09T10:01:00Z",
+            parent_hash="root1",
+        )
 
         results = observe_session_inline(str(db_path), "root1")
         errors = [r for r in results if "Exception" in r["content"]]

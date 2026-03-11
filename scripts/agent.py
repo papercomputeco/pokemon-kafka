@@ -12,13 +12,12 @@ Usage:
 import argparse
 import io
 import json
+import os
 import sys
 import time
-import os
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-
 
 try:
     from pyboy import PyBoy
@@ -31,8 +30,8 @@ try:
 except ImportError:
     Image = None
 
-from memory_reader import MemoryReader, BattleState, OverworldState, CollisionMap
 from memory_file import MemoryFile
+from memory_reader import BattleState, CollisionMap, MemoryReader, OverworldState
 from pathfinding import astar_path
 
 # ---------------------------------------------------------------------------
@@ -97,6 +96,7 @@ def load_type_chart():
 # Input helpers
 # ---------------------------------------------------------------------------
 
+
 class GameController:
     """Send inputs to PyBoy with proper frame timing."""
 
@@ -143,6 +143,7 @@ class GameController:
 # ---------------------------------------------------------------------------
 # Battle strategy
 # ---------------------------------------------------------------------------
+
 
 class BattleStrategy:
     """Heuristic-based battle decision engine."""
@@ -197,11 +198,7 @@ class BattleStrategy:
             return {"action": "item", "item": "potion"}
 
         # Score all moves and pick the best
-        moves = [
-            (i, self.score_move(battle.moves[i], battle.move_pp[i]))
-            for i in range(4)
-            if battle.moves[i] != 0x00
-        ]
+        moves = [(i, self.score_move(battle.moves[i], battle.move_pp[i])) for i in range(4) if battle.moves[i] != 0x00]
 
         if not moves or all(score < 0 for _, score in moves):
             # No PP left — Struggle will auto-trigger, just press FIGHT
@@ -214,6 +211,7 @@ class BattleStrategy:
 # ---------------------------------------------------------------------------
 # Overworld navigation
 # ---------------------------------------------------------------------------
+
 
 class Navigator:
     """Simple overworld movement."""
@@ -286,7 +284,13 @@ class Navigator:
                 return result["directions"][0]
         return None
 
-    def next_direction(self, state: OverworldState, turn: int = 0, stuck_turns: int = 0, collision_grid: list | None = None) -> str | None:
+    def next_direction(
+        self,
+        state: OverworldState,
+        turn: int = 0,
+        stuck_turns: int = 0,
+        collision_grid: list | None = None,
+    ) -> str | None:
         """Get the next direction to move based on current position and route plan."""
         map_key = str(state.map_id)
 
@@ -335,7 +339,11 @@ class Navigator:
 
         # Skip waypoint if close enough but stuck too long
         dist = abs(state.x - tx) + abs(state.y - ty)
-        if stuck_turns >= self.stuck_threshold and dist <= self.skip_distance and self.current_waypoint < len(waypoints) - 1:
+        if (
+            stuck_turns >= self.stuck_threshold
+            and dist <= self.skip_distance
+            and self.current_waypoint < len(waypoints) - 1
+        ):
             self.current_waypoint += 1
             return self.next_direction(state, turn=turn, stuck_turns=0, collision_grid=collision_grid)
 
@@ -433,6 +441,7 @@ class StrategyEngine:
 # Main agent loop
 # ---------------------------------------------------------------------------
 
+
 class PokemonAgent:
     """Autonomous Pokemon player."""
 
@@ -516,7 +525,7 @@ class PokemonAgent:
         print(f"[agent] Strategy: {strategy}")
         if self.evolve_params:
             print(f"[agent] Evolve params: {json.dumps(self.evolve_params)}")
-        print(f"[agent] Running headless — no display")
+        print("[agent] Running headless — no display")
 
     def update_overworld_progress(self, state: OverworldState):
         """Track whether the last overworld action moved the player."""
@@ -540,10 +549,7 @@ class PokemonAgent:
             prev = self.last_overworld_state.map_id
             if prev in (37, 38, 40) and state.map_id == 0:
                 self.door_cooldown = self._evolve_door_cooldown
-            self.log(
-                f"MAP CHANGE | {prev} -> {state.map_id} | "
-                f"Pos: ({state.x}, {state.y})"
-            )
+            self.log(f"MAP CHANGE | {prev} -> {state.map_id} | Pos: ({state.x}, {state.y})")
             return
 
         # Detect oscillation: if current position was visited recently,
@@ -586,17 +592,16 @@ class PokemonAgent:
         # Interact from y=4 facing UP.
         if state.map_id == 40 and state.party_count == 0:
             lab_script = self.memory._read(0xD5F1)
-            if not hasattr(self, '_lab_turns'):
+            if not hasattr(self, "_lab_turns"):
                 self._lab_turns = 0
             self._lab_turns += 1
 
             if self.turn_count % 50 == 0:
-                self.log(f"LAB | script={lab_script} pos=({state.x},{state.y}) "
-                         f"turn={self.turn_count}")
+                self.log(f"LAB | script={lab_script} pos=({state.x},{state.y}) turn={self.turn_count}")
                 if self.turn_count % 200 == 0:
                     self.take_screenshot(f"lab_t{self.turn_count}", force=True)
 
-            if not hasattr(self, '_lab_phase'):
+            if not hasattr(self, "_lab_phase"):
                 self._lab_phase = 0
 
             if self._lab_phase == 0:
@@ -629,7 +634,7 @@ class PokemonAgent:
         # from the table area, so go left first, then south.
         # The exit door is at roughly (4, 11).
         if state.map_id == 40 and state.party_count > 0:
-            if not hasattr(self, '_lab_exit_turns'):
+            if not hasattr(self, "_lab_exit_turns"):
                 self._lab_exit_turns = 0
             self._lab_exit_turns += 1
 
@@ -779,7 +784,7 @@ class PokemonAgent:
         # The lab has multiple scripted sequences (picking starter, rival battle)
         # that look "stuck" but are progressing.  Restoring mid-sequence
         # undoes progress even after the player picks up a Pokemon.
-        in_oaks_lab = (state.map_id == 40)
+        in_oaks_lab = state.map_id == 40
 
         # Snapshot on map change (skip in Oak's Lab)
         if not in_oaks_lab:
@@ -788,16 +793,20 @@ class PokemonAgent:
         self._bt_last_map_id = state.map_id
 
         # Periodic snapshot when making progress (skip in Oak's Lab)
-        if (not in_oaks_lab
-                and self._bt_snapshot_interval > 0
-                and self.turn_count > 0
-                and self.turn_count % self._bt_snapshot_interval == 0
-                and self.stuck_turns == 0):
+        if (
+            not in_oaks_lab
+            and self._bt_snapshot_interval > 0
+            and self.turn_count > 0
+            and self.turn_count % self._bt_snapshot_interval == 0
+            and self.stuck_turns == 0
+        ):
             last_snap = self.backtrack.snapshots[-1] if self.backtrack.snapshots else None
-            if (last_snap is None
-                    or last_snap.map_id != state.map_id
-                    or last_snap.x != state.x
-                    or last_snap.y != state.y):
+            if (
+                last_snap is None
+                or last_snap.map_id != state.map_id
+                or last_snap.x != state.x
+                or last_snap.y != state.y
+            ):
                 self.backtrack.save_snapshot(self.pyboy, state, self.turn_count)
 
         # Restore when stuck too long (skip in Oak's Lab)
@@ -807,9 +816,14 @@ class PokemonAgent:
                 self.stuck_turns = 0
                 self.recent_positions.clear()
                 # Reset script-gate flags so one-time sequences can re-trigger
-                for attr in ('_oak_wait_done', '_pallet_diag_done',
-                             '_house_diag_done', '_lab_phase', '_lab_turns',
-                             '_lab_exit_turns'):
+                for attr in (
+                    "_oak_wait_done",
+                    "_pallet_diag_done",
+                    "_house_diag_done",
+                    "_lab_phase",
+                    "_lab_turns",
+                    "_lab_exit_turns",
+                ):
                     if hasattr(self, attr):
                         delattr(self, attr)
                 state = self.memory.read_overworld_state()
@@ -820,7 +834,7 @@ class PokemonAgent:
                 )
 
         # Diagnostic: capture screen and collision data at key positions
-        if state.map_id == 37 and not hasattr(self, '_house_diag_done'):
+        if state.map_id == 37 and not hasattr(self, "_house_diag_done"):
             self._house_diag_done = True
             self.take_screenshot("house_1f", force=True)
             self.log(f"DIAG | House 1F at ({state.x},{state.y}) collision map:")
@@ -833,17 +847,16 @@ class PokemonAgent:
             cur_script = self.memory._read(0xD625)
             if self.turn_count % 5 == 0:
                 self.log(
-                    f"DIAG | Pallet y={state.y} x={state.x} "
-                    f"wd730=0x{wd730:02X} wd74b=0x{wd74b:02X} script={cur_script}"
+                    f"DIAG | Pallet y={state.y} x={state.x} wd730=0x{wd730:02X} wd74b=0x{wd74b:02X} script={cur_script}"
                 )
-            if not hasattr(self, '_pallet_diag_done'):
+            if not hasattr(self, "_pallet_diag_done"):
                 self._pallet_diag_done = True
                 self.take_screenshot("pallet_north", force=True)
 
             # At y<=1, Oak's PalletTownScript0 triggers. Stop movement and
             # wait for Oak to walk to the player, then mash A through dialogue.
             if state.y <= 1:
-                if not hasattr(self, '_oak_wait_done'):
+                if not hasattr(self, "_oak_wait_done"):
                     self._oak_wait_done = True
                     self.log(f"OAK TRIGGER | At y={state.y} x={state.x}. Waiting for Oak script...")
                     self.take_screenshot("oak_trigger", force=True)
@@ -860,8 +873,10 @@ class PokemonAgent:
                         self.controller.wait(300)
                     s = self.memory.read_overworld_state()
                     wd730 = self.memory._read(0xD730)
-                    self.log(f"OAK TRIGGER | After wait: map={s.map_id} ({s.x},{s.y}) "
-                             f"party={s.party_count} wd730=0x{wd730:02X}")
+                    self.log(
+                        f"OAK TRIGGER | After wait: map={s.map_id} ({s.x},{s.y}) "
+                        f"party={s.party_count} wd730=0x{wd730:02X}"
+                    )
                     self.take_screenshot("oak_after_wait", force=True)
 
         action = self.choose_overworld_action(state)
@@ -939,8 +954,10 @@ class PokemonAgent:
         self.take_screenshot("post_intro", force=True)
         wd730 = self.memory._read(0xD730)
         wd74b = self.memory._read(0xD74B)
-        self.log(f"DIAG | Post-intro: map={intro_state.map_id} pos=({intro_state.x},{intro_state.y}) "
-                 f"party={intro_state.party_count} wd730=0x{wd730:02X} wd74b=0x{wd74b:02X}")
+        self.log(
+            f"DIAG | Post-intro: map={intro_state.map_id} pos=({intro_state.x},{intro_state.y}) "
+            f"party={intro_state.party_count} wd730=0x{wd730:02X} wd74b=0x{wd74b:02X}"
+        )
 
         for _ in range(max_turns):
             battle = self.memory.read_battle_state()
@@ -974,6 +991,7 @@ class PokemonAgent:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Pokemon Agent — autonomous RPG player")
@@ -1025,18 +1043,20 @@ def main():
             from publisher import make_publisher
 
             pub = make_publisher(telemetry_dir=args.telemetry_dir)
-            pub.publish({
-                "schema": "tapes.node.v1",
-                "type": "fitness",
-                "root_hash": f"local-{Path(args.rom).stem}",
-                "node": {
-                    "bucket": {"role": "agent", "model": "pokemon-agent"},
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                    "project": "pokemon-kafka",
-                },
-                "fitness": fitness,
-                "params": json.loads(os.environ.get("EVOLVE_PARAMS", "{}")),
-            })
+            pub.publish(
+                {
+                    "schema": "tapes.node.v1",
+                    "type": "fitness",
+                    "root_hash": f"local-{Path(args.rom).stem}",
+                    "node": {
+                        "bucket": {"role": "agent", "model": "pokemon-agent"},
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "project": "pokemon-kafka",
+                    },
+                    "fitness": fitness,
+                    "params": json.loads(os.environ.get("EVOLVE_PARAMS", "{}")),
+                }
+            )
             pub.close()
         except Exception as exc:
             print(f"[agent] telemetry publish failed: {exc}")

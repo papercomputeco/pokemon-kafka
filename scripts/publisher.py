@@ -39,9 +39,7 @@ class JSONLPublisher:
     def __init__(self, telemetry_dir: str):
         import sys
 
-        writer_dir = str(
-            Path(__file__).resolve().parent.parent / "docker" / "telemetry-consumer"
-        )
+        writer_dir = str(Path(__file__).resolve().parent.parent / "docker" / "telemetry-consumer")
         if writer_dir not in sys.path:
             sys.path.insert(0, writer_dir)
         from jsonl_writer import JSONLWriter

@@ -26,15 +26,36 @@ def create_test_db(path):
     return conn
 
 
-def insert_test_node(conn, hash_val, role="user", content=None, created_at="2026-03-09T10:00:00Z",
-                     prompt_tokens=None, completion_tokens=None, cache_creation=None,
-                     cache_read=None, parent_hash=None, model=None, agent_name=None):
+def insert_test_node(
+    conn,
+    hash_val,
+    role="user",
+    content=None,
+    created_at="2026-03-09T10:00:00Z",
+    prompt_tokens=None,
+    completion_tokens=None,
+    cache_creation=None,
+    cache_read=None,
+    parent_hash=None,
+    model=None,
+    agent_name=None,
+):
     """Insert a node into the test database."""
     content_json = json.dumps(content) if content is not None else None
     conn.execute(
         "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (hash_val, role, content_json, created_at,
-         prompt_tokens, completion_tokens, cache_creation, cache_read,
-         parent_hash, model, agent_name),
+        (
+            hash_val,
+            role,
+            content_json,
+            created_at,
+            prompt_tokens,
+            completion_tokens,
+            cache_creation,
+            cache_read,
+            parent_hash,
+            model,
+            agent_name,
+        ),
     )
     conn.commit()

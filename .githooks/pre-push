@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# Pre-push hook: run tests with coverage before pushing
+#
+# Install:  git config core.hooksPath .githooks
+# Bypass:   git push --no-verify
+#
+
+set -e
+
+echo "Running pre-push tests..."
+
+if ! command -v uv &> /dev/null; then
+    echo "Error: uv is not installed."
+    exit 1
+fi
+
+uv sync --group dev --quiet
+
+if ! uv run pytest --cov --cov-report=term-missing -q --tb=short; then
+    echo "Tests failed. Fix issues before pushing."
+    exit 1
+fi
+
+echo "Pre-push checks passed."

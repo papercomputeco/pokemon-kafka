@@ -44,11 +44,12 @@ def main():
 
     consumer = Consumer(conf)
     consumer.subscribe([TOPIC])
-    print(f"[consumer] Subscribed. Waiting for messages...", flush=True)
+    print("[consumer] Subscribed. Waiting for messages...", flush=True)
 
     sink = None
     if SINK_DIR:
         from jsonl_writer import JSONLWriter
+
         sink = JSONLWriter(SINK_DIR)
         print(f"[consumer] JSONL sink: {SINK_DIR}", flush=True)
 

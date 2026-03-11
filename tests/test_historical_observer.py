@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 try:
-    import duckdb
+    import duckdb  # noqa: F401
 except ImportError:
     pytest.skip("duckdb not installed", allow_module_level=True)
 
@@ -33,9 +33,14 @@ def telemetry_dir(tmp_path):
             "root_hash": "run-001",
             "occurred_at": "2026-03-09T10:00:00Z",
             "fitness": {
-                "turns": 200, "battles_won": 1, "maps_visited": 2,
-                "final_map_id": 1, "badges": 0, "party_size": 1,
-                "stuck_count": 15, "backtrack_restores": 2,
+                "turns": 200,
+                "battles_won": 1,
+                "maps_visited": 2,
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 1,
+                "stuck_count": 15,
+                "backtrack_restores": 2,
             },
             "params": {"stuck_threshold": 8},
         },
@@ -45,9 +50,14 @@ def telemetry_dir(tmp_path):
             "root_hash": "run-002",
             "occurred_at": "2026-03-09T14:00:00Z",
             "fitness": {
-                "turns": 180, "battles_won": 2, "maps_visited": 3,
-                "final_map_id": 1, "badges": 0, "party_size": 2,
-                "stuck_count": 8, "backtrack_restores": 1,
+                "turns": 180,
+                "battles_won": 2,
+                "maps_visited": 3,
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 2,
+                "stuck_count": 8,
+                "backtrack_restores": 1,
             },
             "params": {"stuck_threshold": 6},
         },
@@ -57,9 +67,14 @@ def telemetry_dir(tmp_path):
             "root_hash": "run-003",
             "occurred_at": "2026-03-10T09:00:00Z",
             "fitness": {
-                "turns": 150, "battles_won": 3, "maps_visited": 4,
-                "final_map_id": 2, "badges": 1, "party_size": 3,
-                "stuck_count": 3, "backtrack_restores": 0,
+                "turns": 150,
+                "battles_won": 3,
+                "maps_visited": 4,
+                "final_map_id": 2,
+                "badges": 1,
+                "party_size": 3,
+                "stuck_count": 3,
+                "backtrack_restores": 0,
             },
             "params": {"stuck_threshold": 5},
         },

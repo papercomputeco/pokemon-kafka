@@ -1,12 +1,9 @@
 """Tests for tape_writer.py — TapeWriter class."""
 
-import json
 import sqlite3
 
-import pytest
-
-from tape_writer import TapeWriter
 from tape_reader import TapeReader
+from tape_writer import TapeWriter
 
 
 class TestEnsureSchema:
@@ -16,9 +13,7 @@ class TestEnsureSchema:
         writer.ensure_schema()
 
         conn = sqlite3.connect(str(db))
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         conn.close()
         assert ("nodes",) in tables
 

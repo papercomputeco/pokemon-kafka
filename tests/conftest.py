@@ -1,7 +1,8 @@
 """Shared fixtures for Pokemon agent tests."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 class FakeMemory:

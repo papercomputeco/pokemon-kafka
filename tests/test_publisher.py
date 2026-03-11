@@ -3,7 +3,6 @@
 
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -67,7 +66,7 @@ def test_noop_publisher_does_nothing():
 
 def test_make_publisher_returns_jsonl_when_dir_set(tmp_path):
     """make_publisher returns JSONLPublisher when telemetry_dir is set."""
-    from publisher import make_publisher, JSONLPublisher
+    from publisher import JSONLPublisher, make_publisher
 
     pub = make_publisher(telemetry_dir=str(tmp_path))
     assert isinstance(pub, JSONLPublisher)
@@ -76,7 +75,7 @@ def test_make_publisher_returns_jsonl_when_dir_set(tmp_path):
 
 def test_make_publisher_returns_noop_when_no_dir():
     """make_publisher returns NoopPublisher when telemetry_dir is None."""
-    from publisher import make_publisher, NoopPublisher
+    from publisher import NoopPublisher, make_publisher
 
     pub = make_publisher(telemetry_dir=None)
     assert isinstance(pub, NoopPublisher)

@@ -123,11 +123,7 @@ class TapeReader:
         """Return hashes of root nodes (conversation starts) ordered by time."""
         conn = self._get_conn()
         try:
-            rows = conn.execute(
-                "SELECT hash FROM nodes "
-                "WHERE parent_hash IS NULL "
-                "ORDER BY created_at"
-            ).fetchall()
+            rows = conn.execute("SELECT hash FROM nodes WHERE parent_hash IS NULL ORDER BY created_at").fetchall()
             return [r[0] for r in rows]
         finally:
             self._release_conn(conn)
@@ -163,10 +159,17 @@ class TapeReader:
     def _row_to_entry(self, row: tuple) -> TapeEntry:
         """Convert a database row into a TapeEntry."""
         (
-            hash_val, role, content_blob, created_at,
-            prompt_tokens, completion_tokens,
-            cache_creation, cache_read,
-            parent_hash, model, agent_name,
+            hash_val,
+            role,
+            content_blob,
+            created_at,
+            prompt_tokens,
+            completion_tokens,
+            cache_creation,
+            cache_read,
+            parent_hash,
+            model,
+            agent_name,
         ) = row
 
         role = role or ""
@@ -217,11 +220,7 @@ class TapeReader:
                 elif block.get("type") == "tool_result":
                     result_content = block.get("content", "")
                     if isinstance(result_content, list):
-                        parts = [
-                            p.get("text", "")
-                            for p in result_content
-                            if isinstance(p, dict)
-                        ]
+                        parts = [p.get("text", "") for p in result_content if isinstance(p, dict)]
                         result_content = "\n".join(parts)
                     entry.tool_results.append(
                         ToolResult(

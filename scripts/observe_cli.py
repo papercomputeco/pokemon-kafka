@@ -24,9 +24,7 @@ def detect_memory_dir() -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Distill Tapes sessions into observational memory"
-    )
+    parser = argparse.ArgumentParser(description="Distill Tapes sessions into observational memory")
     parser.add_argument(
         "--db",
         help="Path to tapes.sqlite (default: .tapes/tapes.sqlite)",
@@ -70,10 +68,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Wrote {len(observations)} observation(s) to {observer.observations_path}")
         else:
             for obs in observations:
-                print(
-                    f"[{obs.priority}] {obs.content} "
-                    f"(session: {obs.source_session[:8]})"
-                )
+                print(f"[{obs.priority}] {obs.content} (session: {obs.source_session[:8]})")
             print(f"\n{len(observations)} observation(s) found.")
     elif args.dry_run:
         sessions = observer.get_unprocessed_sessions()
@@ -82,10 +77,7 @@ def main(argv: list[str] | None = None) -> None:
             session = observer.reader.read_session(sid)
             observations.extend(observer.observe_session(session))
         for obs in observations:
-            print(
-                f"[{obs.priority}] {obs.content} "
-                f"(session: {obs.source_session[:8]})"
-            )
+            print(f"[{obs.priority}] {obs.content} (session: {obs.source_session[:8]})")
         print(f"\n{len(observations)} observation(s) found.")
     else:
         observations = observer.run()

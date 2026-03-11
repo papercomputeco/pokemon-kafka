@@ -1,6 +1,5 @@
 """Tests for MemoryFile — agent note-taking system."""
 
-import pytest
 from memory_file import MemoryFile
 
 

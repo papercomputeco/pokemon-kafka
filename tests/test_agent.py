@@ -6,33 +6,29 @@ import json
 import os
 import runpy
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
-
-import pytest
-
-from memory_reader import BattleState, OverworldState
+from unittest.mock import MagicMock, call, patch
 
 # Import the agent module — pyboy is available in this env via deps
 import agent
+import pytest
 from agent import (
     EARLY_GAME_TARGETS,
     MOVE_DATA,
+    ROUTES_PATH,
     SCRIPT_DIR,
     TYPE_CHART_PATH,
-    ROUTES_PATH,
-    load_type_chart,
-    GameController,
-    BattleStrategy,
-    Navigator,
-    Snapshot,
     BacktrackManager,
-    StrategyEngine,
+    BattleStrategy,
+    GameController,
+    Navigator,
     PokemonAgent,
+    Snapshot,
+    StrategyEngine,
+    load_type_chart,
     main,
 )
-
+from memory_reader import BattleState, OverworldState
 
 # ===================================================================
 # Module-level import branches (lines 19-28)
@@ -55,6 +51,7 @@ class TestModuleImportBranches:
         try:
             # Make pyboy import fail
             import builtins
+
             original_import = builtins.__import__
 
             def fail_pyboy(name, *args, **kwargs):
@@ -84,6 +81,7 @@ class TestModuleImportBranches:
 
         try:
             import builtins
+
             original_import = builtins.__import__
 
             def fail_pil(name, *args, **kwargs):
@@ -760,10 +758,14 @@ class TestBacktrackIntegration:
 
     def test_evolve_params_flow_to_backtrack(self, tmp_path):
         params = {
-            "stuck_threshold": 8, "door_cooldown": 8,
-            "waypoint_skip_distance": 3, "axis_preference_map_0": "y",
-            "bt_max_snapshots": 4, "bt_restore_threshold": 10,
-            "bt_max_attempts": 5, "bt_snapshot_interval": 25,
+            "stuck_threshold": 8,
+            "door_cooldown": 8,
+            "waypoint_skip_distance": 3,
+            "axis_preference_map_0": "y",
+            "bt_max_snapshots": 4,
+            "bt_restore_threshold": 10,
+            "bt_max_attempts": 5,
+            "bt_snapshot_interval": 25,
         }
         ag = _make_agent_with_evolve(tmp_path, evolve_params=params)
         assert ag.backtrack.max_snapshots == 4
@@ -827,9 +829,7 @@ class TestBacktrackIntegration:
     def test_compute_fitness_includes_backtrack_restores(self, tmp_path):
         ag = _make_agent(tmp_path)
         ag.backtrack.total_restores = 7
-        ag.memory.read_overworld_state = MagicMock(
-            return_value=OverworldState(map_id=0, x=0, y=0)
-        )
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
         fitness = ag.compute_fitness()
         assert fitness["backtrack_restores"] == 7
 
@@ -863,9 +863,9 @@ class TestBacktrackIntegration:
 
         ag.run_overworld()
 
-        assert not hasattr(ag, '_oak_wait_done')
-        assert not hasattr(ag, '_pallet_diag_done')
-        assert not hasattr(ag, '_house_diag_done')
+        assert not hasattr(ag, "_oak_wait_done")
+        assert not hasattr(ag, "_pallet_diag_done")
+        assert not hasattr(ag, "_house_diag_done")
 
     def test_backtrack_skipped_in_oaks_lab(self, tmp_path):
         """Backtrack should NOT trigger in Oak's Lab (map 40) at all."""
@@ -1184,9 +1184,7 @@ class TestWritePokedexEntry:
     def test_increments_log_number(self, tmp_path):
         ag = _make_agent(tmp_path)
         (ag.pokedex_dir / "log1.md").write_text("old")
-        ag.memory.read_overworld_state = MagicMock(
-            return_value=OverworldState(map_id=0, x=0, y=0)
-        )
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
         ag.write_pokedex_entry()
         assert (ag.pokedex_dir / "log2.md").exists()
 
@@ -1237,9 +1235,7 @@ class TestRunBattleTurn:
         return ag
 
     def test_fight_action(self, tmp_path):
-        ag = self._setup_agent_for_battle(
-            tmp_path, {"action": "fight", "move_index": 2}
-        )
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 2})
         initial_turns = ag.turn_count
         ag.run_battle_turn()
         assert ag.turn_count == initial_turns + 1
@@ -1251,23 +1247,17 @@ class TestRunBattleTurn:
         assert ag.turn_count == 1
 
     def test_item_action(self, tmp_path):
-        ag = self._setup_agent_for_battle(
-            tmp_path, {"action": "item", "item": "potion"}
-        )
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "potion"})
         ag.run_battle_turn()
         assert ag.turn_count == 1
 
     def test_switch_action(self, tmp_path):
-        ag = self._setup_agent_for_battle(
-            tmp_path, {"action": "switch", "slot": 2}
-        )
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "switch", "slot": 2})
         ag.run_battle_turn()
         assert ag.turn_count == 1
 
     def test_switch_action_default_slot(self, tmp_path):
-        ag = self._setup_agent_for_battle(
-            tmp_path, {"action": "switch"}
-        )
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "switch"})
         ag.run_battle_turn()
         assert ag.turn_count == 1
 
@@ -1362,9 +1352,7 @@ class TestRun:
         # Turn 1: battle -> run_battle_turn (reads battle_active inside),
         #   post-battle check reads battle_none -> battles_won++
         # Turn 2: reads battle_none -> run_overworld
-        ag.memory.read_battle_state = MagicMock(
-            side_effect=[battle_active, battle_active, battle_none, battle_none]
-        )
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
         ag.memory.read_overworld_state = MagicMock(return_value=overworld)
 
         with patch.object(agent, "Image", None):
@@ -1471,9 +1459,10 @@ class TestMain:
 
         mock_agent = MagicMock()
 
-        with patch(
-            "sys.argv", ["agent.py", str(rom), "--strategy", "low", "--max-turns", "5"]
-        ), patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls:
+        with (
+            patch("sys.argv", ["agent.py", str(rom), "--strategy", "low", "--max-turns", "5"]),
+            patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls,
+        ):
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
@@ -1493,10 +1482,13 @@ class TestMain:
 
         mock_agent = MagicMock()
 
-        with patch(
-            "sys.argv",
-            ["agent.py", str(rom), "--save-screenshots", "--max-turns", "10"],
-        ), patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls:
+        with (
+            patch(
+                "sys.argv",
+                ["agent.py", str(rom), "--save-screenshots", "--max-turns", "10"],
+            ),
+            patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls,
+        ):
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=True)
@@ -1508,9 +1500,10 @@ class TestMain:
 
         mock_agent = MagicMock()
 
-        with patch("sys.argv", ["agent.py", str(rom)]), patch(
-            "agent.PokemonAgent", return_value=mock_agent
-        ) as mock_cls:
+        with (
+            patch("sys.argv", ["agent.py", str(rom)]),
+            patch("agent.PokemonAgent", return_value=mock_agent) as mock_cls,
+        ):
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
@@ -1532,6 +1525,7 @@ class TestMainGuard:
         # The mock PyBoy instance needs memory that returns int(0)
         # for any address so MemoryReader works correctly.
         from collections import defaultdict
+
         fake_mem = defaultdict(int)  # returns 0 for any key
 
         mock_pyboy_mod = MagicMock()
@@ -1548,6 +1542,7 @@ class TestMainGuard:
         saved_pil = sys.modules.pop("PIL", None)
         saved_pil_image = sys.modules.pop("PIL.Image", None)
         import builtins
+
         original_import = builtins.__import__
 
         def fail_pil(name, *args, **kwargs):
@@ -1556,8 +1551,10 @@ class TestMainGuard:
             return original_import(name, *args, **kwargs)
 
         # Use --max-turns 0 so the main loop body never executes.
-        with patch("sys.argv", ["agent.py", str(rom), "--max-turns", "0"]), \
-             patch.object(builtins, "__import__", side_effect=fail_pil):
+        with (
+            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "0"]),
+            patch.object(builtins, "__import__", side_effect=fail_pil),
+        ):
             saved_pyboy = sys.modules.get("pyboy")
             sys.modules["pyboy"] = mock_pyboy_mod
             try:
@@ -1761,6 +1758,7 @@ class TestPokemonAgentCollisionMap:
         ag = _make_agent(tmp_path)
         assert hasattr(ag, "collision_map")
         from memory_reader import CollisionMap
+
         assert isinstance(ag.collision_map, CollisionMap)
 
     def test_run_overworld_updates_collision_map(self, tmp_path):
@@ -2131,7 +2129,7 @@ class TestRunOverworldHouseDiag:
         with patch.object(agent, "Image", None):
             ag.run_overworld()
 
-        assert hasattr(ag, '_house_diag_done')
+        assert hasattr(ag, "_house_diag_done")
         assert ag._house_diag_done is True
         assert any("DIAG | House 1F" in e for e in ag.events)
 
@@ -2173,7 +2171,7 @@ class TestRunOverworldOakTrigger:
         with patch.object(agent, "Image", None):
             ag.run_overworld()
 
-        assert hasattr(ag, '_pallet_diag_done')
+        assert hasattr(ag, "_pallet_diag_done")
         assert ag._pallet_diag_done is True
         assert any("DIAG | Pallet" in e for e in ag.events)
 
@@ -2183,8 +2181,7 @@ class TestRunOverworldOakTrigger:
         state = OverworldState(map_id=0, x=5, y=1, party_count=0)
         post_wait_state = OverworldState(map_id=40, x=5, y=3, party_count=0)
         # read_overworld_state called: (1) top of run_overworld, (2) inside oak trigger
-        ag.memory.read_overworld_state = MagicMock(
-            side_effect=[state, post_wait_state])
+        ag.memory.read_overworld_state = MagicMock(side_effect=[state, post_wait_state])
         ag.controller = MagicMock()
         ag.collision_map = MagicMock()
         ag.collision_map.grid = [[1] * 10 for _ in range(9)]
@@ -2193,7 +2190,7 @@ class TestRunOverworldOakTrigger:
         with patch.object(agent, "Image", None):
             ag.run_overworld()
 
-        assert hasattr(ag, '_oak_wait_done')
+        assert hasattr(ag, "_oak_wait_done")
         assert ag._oak_wait_done is True
         assert any("OAK TRIGGER" in e for e in ag.events)
         # Should have called wait(600) for initial Oak walk
@@ -2368,9 +2365,7 @@ class TestComputeFitness:
         ag.maps_visited = {0, 1, 40}
         ag.events = ["[t] STUCK | some info", "[t] other", "[t] STUCK again"]
         ag.memory.read_overworld_state = MagicMock(
-            return_value=OverworldState(
-                map_id=1, x=5, y=10, badges=1, party_count=2
-            )
+            return_value=OverworldState(map_id=1, x=5, y=10, badges=1, party_count=2)
         )
 
         result = ag.compute_fitness()
@@ -2386,9 +2381,7 @@ class TestComputeFitness:
 
     def test_empty_state(self, tmp_path):
         ag = _make_agent(tmp_path)
-        ag.memory.read_overworld_state = MagicMock(
-            return_value=OverworldState()
-        )
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState())
         result = ag.compute_fitness()
         assert result["turns"] == 0
         assert result["stuck_count"] == 0
@@ -2431,11 +2424,13 @@ class TestOutputJsonFlag:
         mock_agent = MagicMock()
         mock_agent.run.return_value = {"turns": 10, "battles_won": 0}
 
-        with patch(
-            "sys.argv",
-            ["agent.py", str(rom), "--max-turns", "5",
-             "--output-json", str(output)],
-        ), patch("agent.PokemonAgent", return_value=mock_agent):
+        with (
+            patch(
+                "sys.argv",
+                ["agent.py", str(rom), "--max-turns", "5", "--output-json", str(output)],
+            ),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+        ):
             main()
 
         data = json.loads(output.read_text())
@@ -2449,10 +2444,13 @@ class TestOutputJsonFlag:
         mock_agent = MagicMock()
         mock_agent.run.return_value = {"turns": 5, "battles_won": 1}
 
-        with patch(
-            "sys.argv",
-            ["agent.py", str(rom), "--output-json", str(output)],
-        ), patch("agent.PokemonAgent", return_value=mock_agent):
+        with (
+            patch(
+                "sys.argv",
+                ["agent.py", str(rom), "--output-json", str(output)],
+            ),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+        ):
             main()
 
         assert output.exists()
@@ -2464,9 +2462,10 @@ class TestOutputJsonFlag:
         mock_agent = MagicMock()
         mock_agent.run.return_value = {"turns": 5}
 
-        with patch(
-            "sys.argv", ["agent.py", str(rom), "--max-turns", "5"]
-        ), patch("agent.PokemonAgent", return_value=mock_agent):
+        with (
+            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "5"]),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+        ):
             main()
 
         # No fitness.json created anywhere in tmp_path
@@ -2521,8 +2520,7 @@ def _make_agent_with_evolve(tmp_path, evolve_params=None, routes=None):
 class TestEvolveParams:
     def test_valid_evolve_params_applied(self, tmp_path):
         """Lines 411-416: valid JSON sets evolve_params and door_cooldown."""
-        params = {"stuck_threshold": 5, "door_cooldown": 12,
-                  "waypoint_skip_distance": 2, "axis_preference_map_0": "x"}
+        params = {"stuck_threshold": 5, "door_cooldown": 12, "waypoint_skip_distance": 2, "axis_preference_map_0": "x"}
         ag = _make_agent_with_evolve(tmp_path, evolve_params=params)
         assert ag.evolve_params == params
         assert ag._evolve_door_cooldown == 12
@@ -2532,6 +2530,7 @@ class TestEvolveParams:
     def test_invalid_json_ignored(self, tmp_path):
         """Lines 413-414: invalid JSON -> evolve_params stays empty."""
         from collections import defaultdict
+
         mock_pb = MagicMock()
         mock_pb.memory = defaultdict(int)
         tc_path = tmp_path / "tc.json"
@@ -2564,8 +2563,7 @@ class TestEvolveParams:
 
     def test_evolve_params_print_logged(self, tmp_path, capsys):
         """Line 431: evolve params are printed when set."""
-        params = {"stuck_threshold": 5, "door_cooldown": 10,
-                  "waypoint_skip_distance": 2, "axis_preference_map_0": "y"}
+        params = {"stuck_threshold": 5, "door_cooldown": 10, "waypoint_skip_distance": 2, "axis_preference_map_0": "y"}
         _make_agent_with_evolve(tmp_path, evolve_params=params)
         output = capsys.readouterr().out
         assert "Evolve params" in output
@@ -2573,10 +2571,14 @@ class TestEvolveParams:
     def test_battle_params_flow_to_strategy(self, tmp_path):
         """Battle params from EVOLVE_PARAMS flow to BattleStrategy."""
         params = {
-            "stuck_threshold": 8, "door_cooldown": 8,
-            "waypoint_skip_distance": 3, "axis_preference_map_0": "y",
-            "hp_run_threshold": 0.35, "hp_heal_threshold": 0.4,
-            "unknown_move_score": 20.0, "status_move_score": 5.0,
+            "stuck_threshold": 8,
+            "door_cooldown": 8,
+            "waypoint_skip_distance": 3,
+            "axis_preference_map_0": "y",
+            "hp_run_threshold": 0.35,
+            "hp_heal_threshold": 0.4,
+            "unknown_move_score": 20.0,
+            "status_move_score": 5.0,
         }
         ag = _make_agent_with_evolve(tmp_path, evolve_params=params)
         assert ag.battle_strategy.hp_run_threshold == 0.35
@@ -2615,7 +2617,9 @@ class TestLabPokemonSelection:
 
         def read_overworld():
             return OverworldState(
-                map_id=40, x=state["x"], y=state["y"],
+                map_id=40,
+                x=state["x"],
+                y=state["y"],
                 party_count=state["party_count"],
             )
 
@@ -2634,9 +2638,7 @@ class TestLabPokemonSelection:
                 state["x"] += 1
 
         def on_press(button, **kwargs):
-            if (button == "a"
-                    and state["x"] >= 6 and state["y"] >= 3
-                    and state["y"] <= 4 and state["party_count"] == 0):
+            if button == "a" and state["x"] >= 6 and state["y"] >= 3 and state["y"] <= 4 and state["party_count"] == 0:
                 state["a_at_ball"] += 1
                 if state["a_at_ball"] >= 3:
                     state["party_count"] = 1
@@ -2652,6 +2654,4 @@ class TestLabPokemonSelection:
         with patch.object(agent, "Image", None):
             fitness = ag.run(max_turns=1000)
 
-        assert fitness["party_size"] == 1, (
-            f"Pokemon not selected. Final pos: ({state['x']}, {state['y']})"
-        )
+        assert fitness["party_size"] == 1, f"Pokemon not selected. Final pos: ({state['x']}, {state['y']})"

@@ -81,4 +81,3 @@ class TestAStarPath:
         result = astar_path(grid, (4, 4), (4, 6), sprites=[(4, 5)])
         assert result["status"] == "success"
         assert len(result["directions"]) > 2
-

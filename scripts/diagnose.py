@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Diagnostic: check if button inputs actually move the player."""
+
 import sys
-from pathlib import Path
 
 try:
     from pyboy import PyBoy
@@ -26,6 +26,7 @@ for i in range(600):
     for _ in range(10):
         pyboy.tick()
 
+
 # Now read position
 def pos():
     x = pyboy.memory[0xD362]
@@ -36,7 +37,11 @@ def pos():
     joypad_disabled = pyboy.memory[0xD730]
     text_progress = pyboy.memory[0xC4F2]
     warp_flag = pyboy.memory[0xD736]
-    return f"Map:{map_id} Pos:({x},{y}) Party:{party} JoyDisabled:0x{joypad_disabled:02X} TextProg:0x{text_progress:02X} Warp:0x{warp_flag:02X}"
+    return (
+        f"Map:{map_id} Pos:({x},{y}) Party:{party} JoyDisabled:0x{joypad_disabled:02X}"
+        f" TextProg:0x{text_progress:02X} Warp:0x{warp_flag:02X}"
+    )
+
 
 print(f"After intro: {pos()}")
 
@@ -51,7 +56,7 @@ for attempt in range(10):
         pyboy.tick()
     print(f"  After DOWN: {pos()}")
 
-    print(f"  pressing A...")
+    print("  pressing A...")
     pyboy.button("a")
     for _ in range(20):
         pyboy.tick()

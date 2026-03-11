@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 try:
-    import duckdb
+    import duckdb  # noqa: F401
 except ImportError:
     pytest.skip("duckdb not installed", allow_module_level=True)
 
@@ -92,7 +92,5 @@ def test_filter_by_role(telemetry_dir):
     from query_telemetry import create_connection
 
     conn = create_connection(telemetry_dir)
-    result = conn.execute(
-        "SELECT count(*) FROM events WHERE node.bucket.role = 'assistant'"
-    ).fetchone()
+    result = conn.execute("SELECT count(*) FROM events WHERE node.bucket.role = 'assistant'").fetchone()
     assert result[0] == 1

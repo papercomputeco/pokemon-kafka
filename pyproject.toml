@@ -14,6 +14,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-cov",
+    "ruff",
 ]
 
 [tool.pytest.ini_options]
@@ -27,3 +28,10 @@ omit = ["scripts/diagnose.py", "scripts/install.sh", "scripts/observe_cli.py", "
 [tool.coverage.report]
 show_missing = true
 fail_under = 100
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

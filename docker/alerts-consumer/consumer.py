@@ -37,7 +37,7 @@ def main():
 
     consumer = Consumer(conf)
     consumer.subscribe([TOPIC])
-    print(f"[alerts] Subscribed. Waiting for alerts...", flush=True)
+    print("[alerts] Subscribed. Waiting for alerts...", flush=True)
 
     tape_writer = None
     if TAPES_DB:

@@ -21,75 +21,175 @@ SCRIPT_DIR = Path(__file__).parent
 AGENT_SCRIPT = SCRIPT_DIR / "agent.py"
 
 # Re-use the canonical scoring function from evolve.py
-from evolve import score
+from evolve import score  # noqa: E402
 
 # 10 parameter variants to try — tuned for reaching rival battle
 # Previous winner: door_cooldown=4 beat baseline for Pokemon selection
 _BT_DEFAULTS = {
-    "bt_max_snapshots": 8, "bt_restore_threshold": 15,
-    "bt_max_attempts": 3, "bt_snapshot_interval": 50,
+    "bt_max_snapshots": 8,
+    "bt_restore_threshold": 15,
+    "bt_max_attempts": 3,
+    "bt_snapshot_interval": 50,
 }
 
 PARAM_VARIANTS = [
     # Baseline (previous winner door_cooldown=4)
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "baseline_4dc"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "baseline_4dc",
+    },
     # Original defaults
-    {"stuck_threshold": 8, "door_cooldown": 8, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "original"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 8,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "original",
+    },
     # Very short door cooldown
-    {"stuck_threshold": 8, "door_cooldown": 2, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "dc2"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 2,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "dc2",
+    },
     # Low stuck + short door
-    {"stuck_threshold": 4, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "low_stuck_dc4"},
+    {
+        "stuck_threshold": 4,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "low_stuck_dc4",
+    },
     # High stuck + short door
-    {"stuck_threshold": 12, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "high_stuck_dc4"},
+    {
+        "stuck_threshold": 12,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "high_stuck_dc4",
+    },
     # Wide skip + short door
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 6,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "wide_skip_dc4"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 6,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "wide_skip_dc4",
+    },
     # Narrow skip + short door
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 1,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "narrow_dc4"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 1,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "narrow_dc4",
+    },
     # X-axis + short door
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "x", **_BT_DEFAULTS, "label": "x_axis_dc4"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "x",
+        **_BT_DEFAULTS,
+        "label": "x_axis_dc4",
+    },
     # Aggressive: low stuck + very short door + wide skip
-    {"stuck_threshold": 3, "door_cooldown": 2, "waypoint_skip_distance": 5,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "aggressive"},
+    {
+        "stuck_threshold": 3,
+        "door_cooldown": 2,
+        "waypoint_skip_distance": 5,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "aggressive",
+    },
     # Moderate: medium stuck + short door
-    {"stuck_threshold": 6, "door_cooldown": 6, "waypoint_skip_distance": 4,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS, "label": "moderate"},
+    {
+        "stuck_threshold": 6,
+        "door_cooldown": 6,
+        "waypoint_skip_distance": 4,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "label": "moderate",
+    },
     # Aggressive backtracking: low restore threshold, high retries
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "bt_max_snapshots": 8,
-     "bt_restore_threshold": 10, "bt_max_attempts": 5,
-     "bt_snapshot_interval": 50, "label": "aggressive_bt"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        "bt_max_snapshots": 8,
+        "bt_restore_threshold": 10,
+        "bt_max_attempts": 5,
+        "bt_snapshot_interval": 50,
+        "label": "aggressive_bt",
+    },
     # Backtracking disabled
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", "bt_max_snapshots": 0,
-     "bt_restore_threshold": 999, "bt_max_attempts": 3,
-     "bt_snapshot_interval": 50, "label": "no_bt"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        "bt_max_snapshots": 0,
+        "bt_restore_threshold": 999,
+        "bt_max_attempts": 3,
+        "bt_snapshot_interval": 50,
+        "label": "no_bt",
+    },
     # Aggressive battle: fight longer before running/healing
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS,
-     "hp_run_threshold": 0.1, "hp_heal_threshold": 0.15,
-     "label": "aggressive_battle"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "hp_run_threshold": 0.1,
+        "hp_heal_threshold": 0.15,
+        "label": "aggressive_battle",
+    },
     # Cautious battle: heal early and run early
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS,
-     "hp_run_threshold": 0.35, "hp_heal_threshold": 0.4,
-     "label": "cautious_battle"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "hp_run_threshold": 0.35,
+        "hp_heal_threshold": 0.4,
+        "label": "cautious_battle",
+    },
     # Status moves: higher priority for status moves
-    {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS,
-     "status_move_score": 5.0, "label": "status_moves"},
+    {
+        "stuck_threshold": 8,
+        "door_cooldown": 4,
+        "waypoint_skip_distance": 3,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "status_move_score": 5.0,
+        "label": "status_moves",
+    },
     # Full aggressive: aggressive nav + aggressive battle
-    {"stuck_threshold": 3, "door_cooldown": 2, "waypoint_skip_distance": 5,
-     "axis_preference_map_0": "y", **_BT_DEFAULTS,
-     "hp_run_threshold": 0.1, "hp_heal_threshold": 0.15,
-     "label": "full_aggressive"},
+    {
+        "stuck_threshold": 3,
+        "door_cooldown": 2,
+        "waypoint_skip_distance": 5,
+        "axis_preference_map_0": "y",
+        **_BT_DEFAULTS,
+        "hp_run_threshold": 0.1,
+        "hp_heal_threshold": 0.15,
+        "label": "full_aggressive",
+    },
 ]
 
 MAX_TURNS = 5000  # Intro + Pokemon selection + rival scripted sequence + battle + exit
@@ -98,9 +198,7 @@ MAX_TURNS = 5000  # Intro + Pokemon selection + rival scripted sequence + battle
 def run_one_agent(rom_path: str, params: dict, agent_id: int) -> dict:
     """Run a single agent and return results."""
     label = params.get("label", f"agent_{agent_id}")
-    output_file = tempfile.NamedTemporaryFile(
-        suffix=".json", prefix=f"fitness_{label}_", delete=False
-    )
+    output_file = tempfile.NamedTemporaryFile(suffix=".json", prefix=f"fitness_{label}_", delete=False)
     output_path = output_file.name
     output_file.close()
 
@@ -113,15 +211,15 @@ def run_one_agent(rom_path: str, params: dict, agent_id: int) -> dict:
         sys.executable,
         str(AGENT_SCRIPT),
         rom_path,
-        "--max-turns", str(MAX_TURNS),
-        "--output-json", output_path,
+        "--max-turns",
+        str(MAX_TURNS),
+        "--output-json",
+        output_path,
     ]
 
     start = time.time()
     try:
-        result = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=300
-        )
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
         elapsed = time.time() - start
 
         fitness = json.loads(Path(output_path).read_text())
@@ -164,16 +262,13 @@ def main():
 
     print(f"[run_10] Launching {len(PARAM_VARIANTS)} agents with {MAX_TURNS} max turns each")
     print(f"[run_10] ROM: {rom_path}")
-    print(f"[run_10] Running 5 at a time...\n")
+    print("[run_10] Running 5 at a time...\n")
 
     all_results = []
     start_time = time.time()
 
     with ProcessPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(run_one_agent, rom_path, params, i): i
-            for i, params in enumerate(PARAM_VARIANTS)
-        }
+        futures = {executor.submit(run_one_agent, rom_path, params, i): i for i, params in enumerate(PARAM_VARIANTS)}
 
         for future in as_completed(futures):
             result = future.result()
@@ -198,11 +293,10 @@ def main():
     # Sort by score
     all_results.sort(key=lambda r: r["score"], reverse=True)
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"[run_10] All {len(all_results)} agents complete in {total_time:.1f}s")
-    print(f"{'='*70}\n")
-    print(f"{'Rank':>4} {'Label':14s} {'Score':>8} {'Map':>4} {'Party':>5} "
-          f"{'Stuck':>5} {'Turns':>5} {'Time':>6}")
+    print(f"{'=' * 70}\n")
+    print(f"{'Rank':>4} {'Label':14s} {'Score':>8} {'Map':>4} {'Party':>5} {'Stuck':>5} {'Turns':>5} {'Time':>6}")
     print("-" * 60)
 
     for rank, r in enumerate(all_results, 1):

@@ -61,9 +61,7 @@ LIMIT 20
 def create_connection(data_dir: Path) -> duckdb.DuckDBPyConnection:
     pattern = str(data_dir / "*.jsonl")
     conn = duckdb.connect()
-    conn.execute(
-        f"CREATE VIEW events AS SELECT * FROM read_json_auto('{pattern}')"
-    )
+    conn.execute(f"CREATE VIEW events AS SELECT * FROM read_json_auto('{pattern}')")
     return conn
 
 

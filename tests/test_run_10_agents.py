@@ -1,25 +1,20 @@
 """Tests for run_10_agents.py — 100% coverage."""
 
 import json
-import os
 import runpy
 import subprocess as sp
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 import run_10_agents as mod
 from run_10_agents import (
     PARAM_VARIANTS,
-    MAX_TURNS,
-    score,  # re-exported from evolve
-    run_one_agent,
     main,
+    run_one_agent,
+    score,  # re-exported from evolve
 )
-
 
 # ── PARAM_VARIANTS validation ────────────────────────────────────────
 
@@ -29,10 +24,17 @@ class TestParamVariants:
         assert len(PARAM_VARIANTS) == 16
 
     def test_all_variants_have_required_keys(self):
-        required = {"stuck_threshold", "door_cooldown", "waypoint_skip_distance",
-                     "axis_preference_map_0", "label",
-                     "bt_max_snapshots", "bt_restore_threshold",
-                     "bt_max_attempts", "bt_snapshot_interval"}
+        required = {
+            "stuck_threshold",
+            "door_cooldown",
+            "waypoint_skip_distance",
+            "axis_preference_map_0",
+            "label",
+            "bt_max_snapshots",
+            "bt_restore_threshold",
+            "bt_max_attempts",
+            "bt_snapshot_interval",
+        }
         for i, variant in enumerate(PARAM_VARIANTS):
             missing = required - set(variant.keys())
             assert not missing, f"Variant {i} ({variant.get('label', '?')}) missing: {missing}"
@@ -72,8 +74,7 @@ class TestScore:
 
 class TestRunOneAgent:
     def _make_fitness(self, **overrides):
-        f = {"final_map_id": 1, "badges": 0, "party_size": 1,
-             "battles_won": 3, "stuck_count": 2, "turns": 50}
+        f = {"final_map_id": 1, "badges": 0, "party_size": 1, "battles_won": 3, "stuck_count": 2, "turns": 50}
         f.update(overrides)
         return f
 
@@ -85,9 +86,13 @@ class TestRunOneAgent:
             Path(output_path).write_text(json.dumps(fitness))
             return MagicMock(returncode=0)
 
-        params = {"stuck_threshold": 8, "door_cooldown": 4,
-                  "waypoint_skip_distance": 3, "axis_preference_map_0": "y",
-                  "label": "test_label"}
+        params = {
+            "stuck_threshold": 8,
+            "door_cooldown": 4,
+            "waypoint_skip_distance": 3,
+            "axis_preference_map_0": "y",
+            "label": "test_label",
+        }
 
         with patch("run_10_agents.subprocess.run", side_effect=mock_run):
             result = run_one_agent("/fake/rom.gb", params, 0)
@@ -109,8 +114,7 @@ class TestRunOneAgent:
             Path(output_path).write_text(json.dumps(fitness))
             return MagicMock(returncode=0)
 
-        params = {"stuck_threshold": 8, "door_cooldown": 4,
-                  "waypoint_skip_distance": 3, "axis_preference_map_0": "y"}
+        params = {"stuck_threshold": 8, "door_cooldown": 4, "waypoint_skip_distance": 3, "axis_preference_map_0": "y"}
 
         with patch("run_10_agents.subprocess.run", side_effect=mock_run):
             result = run_one_agent("/fake/rom.gb", params, 7)
@@ -120,8 +124,7 @@ class TestRunOneAgent:
     def test_timeout_returns_error(self):
         params = {"stuck_threshold": 8, "label": "timeout_test"}
 
-        with patch("run_10_agents.subprocess.run",
-                   side_effect=sp.TimeoutExpired("cmd", 300)):
+        with patch("run_10_agents.subprocess.run", side_effect=sp.TimeoutExpired("cmd", 300)):
             result = run_one_agent("/fake/rom.gb", params, 1)
 
         assert result["score"] == -999
@@ -131,8 +134,7 @@ class TestRunOneAgent:
     def test_file_not_found_returns_error(self):
         params = {"stuck_threshold": 8, "label": "fnf_test"}
 
-        with patch("run_10_agents.subprocess.run",
-                   side_effect=FileNotFoundError("no python")):
+        with patch("run_10_agents.subprocess.run", side_effect=FileNotFoundError("no python")):
             result = run_one_agent("/fake/rom.gb", params, 2)
 
         assert result["score"] == -999
@@ -182,8 +184,10 @@ class TestRunOneAgent:
 
         params = {"stuck_threshold": 8, "label": "cleanup_test"}
 
-        with patch("run_10_agents.subprocess.run", side_effect=mock_run), \
-             patch("run_10_agents.os.unlink", side_effect=OSError("perm")):
+        with (
+            patch("run_10_agents.subprocess.run", side_effect=mock_run),
+            patch("run_10_agents.os.unlink", side_effect=OSError("perm")),
+        ):
             result = run_one_agent("/fake/rom.gb", params, 0)
 
         assert result["fitness"] == fitness
@@ -215,24 +219,31 @@ class TestMain:
             "agent_id": 0,
             "label": "test",
             "params": {},
-            "fitness": {"final_map_id": 1, "badges": 0, "party_size": 1,
-                        "battles_won": 3, "stuck_count": 2, "turns": 50},
+            "fitness": {
+                "final_map_id": 1,
+                "badges": 0,
+                "party_size": 1,
+                "battles_won": 3,
+                "stuck_count": 2,
+                "turns": 50,
+            },
             "score": 1530.0,
             "elapsed": 1.0,
             "returncode": 0,
         }
 
         def mock_run_one_agent(rom_path, params, agent_id):
-            return dict(fake_result, agent_id=agent_id,
-                        label=params.get("label", f"agent_{agent_id}"))
+            return dict(fake_result, agent_id=agent_id, label=params.get("label", f"agent_{agent_id}"))
 
         scripts_dir = tmp_path / "scripts"
         scripts_dir.mkdir()
 
-        with patch("sys.argv", ["run_10_agents.py", str(rom)]), \
-             patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent), \
-             patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor), \
-             patch.object(mod, "SCRIPT_DIR", scripts_dir):
+        with (
+            patch("sys.argv", ["run_10_agents.py", str(rom)]),
+            patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent),
+            patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch.object(mod, "SCRIPT_DIR", scripts_dir),
+        ):
             main()
 
         output = capsys.readouterr().out
@@ -262,10 +273,12 @@ class TestMain:
         scripts_dir = tmp_path / "scripts"
         scripts_dir.mkdir()
 
-        with patch("sys.argv", ["run_10_agents.py", str(rom)]), \
-             patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent), \
-             patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor), \
-             patch.object(mod, "SCRIPT_DIR", scripts_dir):
+        with (
+            patch("sys.argv", ["run_10_agents.py", str(rom)]),
+            patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent),
+            patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch.object(mod, "SCRIPT_DIR", scripts_dir),
+        ):
             main()
 
         output = capsys.readouterr().out
@@ -281,22 +294,27 @@ class TestMainGuard:
         rom.write_bytes(b"\x00" * 100)
 
         fake_result = {
-            "agent_id": 0, "label": "test", "params": {},
-            "fitness": {"final_map_id": 0}, "score": 0.0,
-            "elapsed": 0.1, "returncode": 0,
+            "agent_id": 0,
+            "label": "test",
+            "params": {},
+            "fitness": {"final_map_id": 0},
+            "score": 0.0,
+            "elapsed": 0.1,
+            "returncode": 0,
         }
 
         def mock_run_one_agent(rom_path, params, agent_id):
-            return dict(fake_result, agent_id=agent_id,
-                        label=params.get("label", f"agent_{agent_id}"))
+            return dict(fake_result, agent_id=agent_id, label=params.get("label", f"agent_{agent_id}"))
 
         scripts_dir = tmp_path / "scripts"
         scripts_dir.mkdir()
 
-        with patch("sys.argv", ["run_10_agents.py", str(rom)]), \
-             patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent), \
-             patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor), \
-             patch.object(mod, "SCRIPT_DIR", scripts_dir):
+        with (
+            patch("sys.argv", ["run_10_agents.py", str(rom)]),
+            patch("run_10_agents.run_one_agent", side_effect=mock_run_one_agent),
+            patch("run_10_agents.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch.object(mod, "SCRIPT_DIR", scripts_dir),
+        ):
             runpy.run_path(
                 str(Path(mod.__file__).resolve()),
                 run_name="__main__",

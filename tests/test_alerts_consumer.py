@@ -38,9 +38,11 @@ def _import_consumer(tapes_db=None):
     # Remove stale module to pick up new env
     sys.modules.pop("consumer", None)
     with patch.dict("os.environ", env_patch, clear=False):
-        import consumer
         # Reload to re-read module-level env vars
         import importlib
+
+        import consumer
+
         importlib.reload(consumer)
         return consumer
 

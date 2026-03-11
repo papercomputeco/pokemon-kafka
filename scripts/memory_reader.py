@@ -12,7 +12,8 @@ from typing import List
 @dataclass
 class BattleState:
     """Current battle context."""
-    battle_type: int = 0        # 0=none, 1=wild, 2=trainer
+
+    battle_type: int = 0  # 0=none, 1=wild, 2=trainer
     enemy_hp: int = 0
     enemy_max_hp: int = 0
     enemy_level: int = 0
@@ -30,6 +31,7 @@ class BattleState:
 @dataclass
 class OverworldState:
     """Current overworld context."""
+
     map_id: int = 0
     x: int = 0
     y: int = 0
@@ -51,58 +53,58 @@ class MemoryReader:
     # --- Address constants (Pokemon Red/Blue US) ---
 
     # Battle
-    ADDR_BATTLE_TYPE       = 0xD057
-    ADDR_ENEMY_HP_HI       = 0xCFE6
-    ADDR_ENEMY_HP_LO       = 0xCFE7
-    ADDR_ENEMY_MAX_HP_HI   = 0xCFF4
-    ADDR_ENEMY_MAX_HP_LO   = 0xCFF5
-    ADDR_ENEMY_LEVEL       = 0xCFF3
-    ADDR_ENEMY_SPECIES     = 0xCFE5
+    ADDR_BATTLE_TYPE = 0xD057
+    ADDR_ENEMY_HP_HI = 0xCFE6
+    ADDR_ENEMY_HP_LO = 0xCFE7
+    ADDR_ENEMY_MAX_HP_HI = 0xCFF4
+    ADDR_ENEMY_MAX_HP_LO = 0xCFF5
+    ADDR_ENEMY_LEVEL = 0xCFF3
+    ADDR_ENEMY_SPECIES = 0xCFE5
 
     # Player party (lead pokemon)
-    ADDR_PLAYER_HP_HI      = 0xD015
-    ADDR_PLAYER_HP_LO      = 0xD016
-    ADDR_PLAYER_MAX_HP_HI  = 0xD023
-    ADDR_PLAYER_MAX_HP_LO  = 0xD024
-    ADDR_PLAYER_LEVEL      = 0xD022
-    ADDR_PLAYER_SPECIES    = 0xD014
+    ADDR_PLAYER_HP_HI = 0xD015
+    ADDR_PLAYER_HP_LO = 0xD016
+    ADDR_PLAYER_MAX_HP_HI = 0xD023
+    ADDR_PLAYER_MAX_HP_LO = 0xD024
+    ADDR_PLAYER_LEVEL = 0xD022
+    ADDR_PLAYER_SPECIES = 0xD014
 
     # Moves (lead pokemon)
-    ADDR_MOVE_1            = 0xD01C
-    ADDR_MOVE_2            = 0xD01D
-    ADDR_MOVE_3            = 0xD01E
-    ADDR_MOVE_4            = 0xD01F
+    ADDR_MOVE_1 = 0xD01C
+    ADDR_MOVE_2 = 0xD01D
+    ADDR_MOVE_3 = 0xD01E
+    ADDR_MOVE_4 = 0xD01F
 
     # Move PP (lead pokemon)
-    ADDR_PP_1              = 0xD02C
-    ADDR_PP_2              = 0xD02D
-    ADDR_PP_3              = 0xD02E
-    ADDR_PP_4              = 0xD02F
+    ADDR_PP_1 = 0xD02C
+    ADDR_PP_2 = 0xD02D
+    ADDR_PP_3 = 0xD02E
+    ADDR_PP_4 = 0xD02F
 
     # Party
-    ADDR_PARTY_COUNT       = 0xD163
+    ADDR_PARTY_COUNT = 0xD163
 
     # Party pokemon HP addresses (6 pokemon, 44 bytes apart)
-    PARTY_BASE             = 0xD16B
-    PARTY_STRUCT_SIZE      = 44
-    PARTY_HP_OFFSET        = 1   # Offset to current HP within party struct
+    PARTY_BASE = 0xD16B
+    PARTY_STRUCT_SIZE = 44
+    PARTY_HP_OFFSET = 1  # Offset to current HP within party struct
 
     # Overworld
-    ADDR_MAP_ID            = 0xD35E
-    ADDR_PLAYER_X          = 0xD362
-    ADDR_PLAYER_Y          = 0xD361
-    ADDR_BADGES            = 0xD356
+    ADDR_MAP_ID = 0xD35E
+    ADDR_PLAYER_X = 0xD362
+    ADDR_PLAYER_Y = 0xD361
+    ADDR_BADGES = 0xD356
 
     # Money (BCD encoded, 3 bytes)
-    ADDR_MONEY_1           = 0xD347
-    ADDR_MONEY_2           = 0xD348
-    ADDR_MONEY_3           = 0xD349
+    ADDR_MONEY_1 = 0xD347
+    ADDR_MONEY_2 = 0xD348
+    ADDR_MONEY_3 = 0xD349
 
     # Game state flags (pokered wd730)
     # bit 1: d-pad input disabled (text boxes, menus)
     # bit 5: simulated joypad active (scripted movement, e.g. Oak walking)
     # bit 6: text/script display active (set by DisplayTextID)
-    ADDR_WD730             = 0xD730
+    ADDR_WD730 = 0xD730
 
     def __init__(self, pyboy):
         self.pyboy = pyboy

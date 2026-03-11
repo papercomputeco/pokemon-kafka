@@ -82,9 +82,7 @@ class TapeWriter:
 
         now = datetime.now(timezone.utc).isoformat()
         content_json = json.dumps(content_blocks)
-        node_hash = hashlib.sha256(
-            (content_json + now).encode()
-        ).hexdigest()
+        node_hash = hashlib.sha256((content_json + now).encode()).hexdigest()
 
         conn = self._get_conn()
         conn.execute(
