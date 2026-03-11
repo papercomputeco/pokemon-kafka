@@ -56,10 +56,25 @@ class EvolutionResult:
 # ---------------------------------------------------------------------------
 
 
+MAP_PROGRESS = {
+    37: 1,   # Player house 1F
+    38: 2,   # Player house 2F
+    40: 3,   # Oak's Lab
+    0: 4,    # Pallet Town
+    12: 5,   # Route 1
+    1: 6,    # Viridian City
+    13: 7,   # Route 2
+    51: 8,   # Viridian Forest
+    2: 9,    # Pewter City
+}
+
+
 def score(fitness: dict) -> float:
     """Composite fitness score weighted toward navigation progress."""
+    map_id = fitness.get("final_map_id", 0)
+    progress = MAP_PROGRESS.get(map_id, 0)
     return (
-        fitness.get("final_map_id", 0) * 1000
+        progress * 1000
         + fitness.get("badges", 0) * 5000
         + fitness.get("party_size", 0) * 500
         + fitness.get("battles_won", 0) * 100

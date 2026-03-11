@@ -47,18 +47,20 @@ class TestParamVariants:
 
 class TestScore:
     def test_zero_fitness(self):
-        assert score({}) == 0.0
+        # Empty dict defaults final_map_id to 0 (Pallet Town, progress 4)
+        assert score({}) == 4000.0
 
     def test_positive_score(self):
         f = {
-            "final_map_id": 1,
+            "final_map_id": 1,  # Viridian City, progress = 6
             "badges": 1,
             "party_size": 1,
             "battles_won": 5,
             "stuck_count": 2,
             "turns": 100,
         }
-        expected = 1000 + 5000 + 500 + 500 - 10 - 10.0
+        # 6*1000 + 1*5000 + 1*500 + 5*100 - 2*5 - 100*0.1
+        expected = 6000 + 5000 + 500 + 500 - 10 - 10.0
         assert score(f) == expected
 
     def test_stuck_penalizes(self):

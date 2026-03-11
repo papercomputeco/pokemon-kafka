@@ -62,8 +62,9 @@ class TestDefaultParams:
 
 class TestScore:
     def test_zero_fitness(self):
+        # Map ID 255 (unknown) has no progress entry, so progress = 0
         f = {
-            "final_map_id": 0,
+            "final_map_id": 255,
             "badges": 0,
             "party_size": 0,
             "battles_won": 0,
@@ -72,21 +73,43 @@ class TestScore:
         }
         assert score(f) == 0.0
 
+    def test_pallet_town_has_progress(self):
+        # Map ID 0 (Pallet Town) should have progress 4, not 0
+        f = {
+            "final_map_id": 0,
+            "badges": 0,
+            "party_size": 0,
+            "battles_won": 0,
+            "stuck_count": 0,
+            "turns": 0,
+        }
+        assert score(f) == 4000.0
+
     def test_positive_score(self):
         f = {
-            "final_map_id": 1,
+            "final_map_id": 1,  # Viridian City, progress = 6
             "badges": 1,
             "party_size": 1,
             "battles_won": 5,
             "stuck_count": 2,
             "turns": 100,
         }
-        # 1*1000 + 1*5000 + 1*500 + 5*100 - 2*5 - 100*0.1
-        expected = 1000 + 5000 + 500 + 500 - 10 - 10.0
+        # 6*1000 + 1*5000 + 1*500 + 5*100 - 2*5 - 100*0.1
+        expected = 6000 + 5000 + 500 + 500 - 10 - 10.0
         assert score(f) == expected
 
-    def test_missing_keys_default_zero(self):
-        assert score({}) == 0.0
+    def test_viridian_beats_oaks_lab(self):
+        # Viridian City (map 1, progress 6) should score higher than
+        # Oak's Lab (map 40, progress 3) since it's further in the game
+        oaks = {"final_map_id": 40, "badges": 0, "party_size": 0,
+                "battles_won": 0, "stuck_count": 0, "turns": 0}
+        viridian = {"final_map_id": 1, "badges": 0, "party_size": 0,
+                    "battles_won": 0, "stuck_count": 0, "turns": 0}
+        assert score(viridian) > score(oaks)
+
+    def test_missing_keys_uses_map_zero(self):
+        # Empty dict defaults final_map_id to 0 (Pallet Town, progress 4)
+        assert score({}) == 4000.0
 
     def test_high_stuck_penalizes(self):
         base = {"final_map_id": 1, "badges": 0, "party_size": 0,
