@@ -57,15 +57,15 @@ class EvolutionResult:
 
 
 MAP_PROGRESS = {
-    37: 1,   # Player house 1F
-    38: 2,   # Player house 2F
-    40: 3,   # Oak's Lab
-    0: 4,    # Pallet Town
-    12: 5,   # Route 1
-    1: 6,    # Viridian City
-    13: 7,   # Route 2
-    51: 8,   # Viridian Forest
-    2: 9,    # Pewter City
+    37: 1,  # Player house 1F
+    38: 2,  # Player house 2F
+    40: 3,  # Oak's Lab
+    0: 4,  # Pallet Town
+    12: 5,  # Route 1
+    1: 6,  # Viridian City
+    13: 7,  # Route 2
+    51: 8,  # Viridian Forest
+    2: 9,  # Pewter City
 }
 
 
@@ -141,7 +141,9 @@ def run_agent(rom_path: str, max_turns: int, params: dict) -> dict:
 
 
 def build_mutation_prompt(
-    params: dict, fitness: dict, observations: list[dict] | None = None,
+    params: dict,
+    fitness: dict,
+    observations: list[dict] | None = None,
     historical: list[dict] | None = None,
 ) -> str:
     """Build a prompt asking the LLM to propose a parameter variant."""
@@ -255,9 +257,7 @@ def evolve(
 
         # Propose variant
         if llm_fn:
-            prompt = build_mutation_prompt(
-                current_params, baseline_fitness, observations, historical
-            )
+            prompt = build_mutation_prompt(current_params, baseline_fitness, observations, historical)
             response = llm_fn(prompt)
             variant_params = parse_llm_response(response)
             if variant_params is None:
@@ -313,13 +313,19 @@ def _perturb(params: dict) -> dict:
     import random
 
     INT_KEYS = [
-        "stuck_threshold", "door_cooldown", "waypoint_skip_distance",
-        "bt_max_snapshots", "bt_restore_threshold", "bt_max_attempts",
+        "stuck_threshold",
+        "door_cooldown",
+        "waypoint_skip_distance",
+        "bt_max_snapshots",
+        "bt_restore_threshold",
+        "bt_max_attempts",
         "bt_snapshot_interval",
     ]
     FLOAT_KEYS = [
-        "hp_run_threshold", "hp_heal_threshold",
-        "unknown_move_score", "status_move_score",
+        "hp_run_threshold",
+        "hp_heal_threshold",
+        "unknown_move_score",
+        "status_move_score",
     ]
 
     new = dict(params)
@@ -452,8 +458,14 @@ def main():
     observer_fn = None if args.no_observer else _make_observer_fn(args.tapes_db)
     historical_fn = None if args.no_historical else _make_historical_fn(args.telemetry_dir)
 
-    results = evolve(args.rom, max_generations=args.generations, max_turns=args.max_turns,
-                     llm_fn=llm_fn, observer_fn=observer_fn, historical_fn=historical_fn)
+    results = evolve(
+        args.rom,
+        max_generations=args.generations,
+        max_turns=args.max_turns,
+        llm_fn=llm_fn,
+        observer_fn=observer_fn,
+        historical_fn=historical_fn,
+    )
 
     # Summary
     improvements = [r for r in results if r.improved]
