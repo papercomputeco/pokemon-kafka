@@ -155,28 +155,68 @@ img = Image.fromarray(screen)
 img.save("current_frame.png")
 ```
 
-## Running on stereOS
+## Verification
 
-This skill is designed to run inside a stereOS VM via Master Blaster. See `references/jcard.toml` for the VM configuration.
+Before deploying or after making changes, verify the agent works end-to-end:
 
 ```bash
-mb init pokemon-agent
-# Copy skill files into the project
-mb up
-mb attach  # watch the agent play
+# Unit tests (205 tests, 100% coverage required)
+uv run pytest
+
+# Live integration: run 1000 turns, confirm Pokemon selected
+PYTHONPATH=scripts .venv/bin/python scripts/agent.py "rom/Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb" --max-turns 1000
+```
+
+**What to look for in live output:**
+- `Party: 1` appears around turn 100 — starter Pokemon selected
+- `Battle ended. Total wins: 1` — rival battle won
+- `MAP CHANGE | 40 -> 0` — exited Oak's Lab to Pallet Town
+- Output streams in real-time with `[HH:MM:SS]` timestamps
+
+A healthy run navigates: Red's bedroom (map 38) → house 1F (map 37) → Pallet Town (map 0) → Oak trigger → Oak's Lab (map 40) → pick starter → fight rival → exit.
+
+### Evolution and parameter tuning
+
+```bash
+# Run 10 parameter variants in parallel and rank by fitness
+uv run scripts/run_10_agents.py "rom/Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb"
+
+# Run evolution harness (mutate + evaluate over generations)
+uv run scripts/evolve.py "rom/Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb" --generations 5 --max-turns 1000
+```
+
+## Running on stereOS
+
+This skill is designed to run inside a stereOS VM via Master Blaster. See `jcard.toml` for the VM configuration.
+
+```bash
+mb up       # boot VM, install deps, start agent through Tapes
+mb attach   # watch the agent play
 ```
 
 ### Shared Mount Permissions
 
 The `[[shared]]` mount maps the host repo to `/workspace` inside the VM. Host files retain their original ownership (UID 501 on macOS), but the VM runs as `admin` (UID 1000). Output directories (`frames/`, `pokedex/`, `.tapes/`) need world-writable permissions so the agent can write data that persists back to the host. The install script handles this automatically with `chmod a+rwx`.
 
-### Tapes Telemetry
+### Tapes + Kafka Telemetry
 
-Tapes captures all LLM API calls made by the agent transparently — no instrumentation needed. Every battle decision, every route choice, every item use is logged with cryptographic audit trails.
+Tapes proxies all LLM API calls and publishes `tapes.node.v1` events to Kafka. The agent just sets `ANTHROPIC_API_BASE` to the Tapes proxy — zero code changes.
 
-The install script sets up Tapes automatically (`tapes init --preset anthropic`). The agent runs through `tapes start`, which proxies API calls and stores sessions in `.tapes/`.
+```
+Agent → Tapes proxy (port 8080) → Kafka (agent.telemetry.raw)
+                                      ↓
+                                 Flink SQL jobs (anomaly detection)
+                                      ↓
+                              Kafka (agent.telemetry.alerts)
+```
 
-After a run, inspect sessions:
+Start the full local stack:
+
+```bash
+docker compose up -d   # Kafka + Zookeeper + Tapes proxy + Flink + consumers
+```
+
+Inspect sessions:
 
 ```bash
 tapes deck           # Terminal UI for session exploration
@@ -222,17 +262,28 @@ For long speed runs, the pattern is:
 pokemon-agent/
 ├── SKILL.md              # This file
 ├── jcard.toml            # stereOS VM config
+├── docker-compose.yml    # Kafka + Flink + Tapes proxy stack
 ├── .tapes/               # Tapes telemetry DB + config (gitignored)
 │   └── memory/           # Observational memory output
 ├── scripts/
 │   ├── install.sh        # Setup script (installs PyBoy + Tapes)
-│   ├── agent.py          # Main agent loop
-│   ├── memory_reader.py  # Memory address utilities
+│   ├── agent.py          # Main agent loop (1000 lines)
+│   ├── memory_reader.py  # Memory address definitions
+│   ├── memory_file.py    # Agent memory management
+│   ├── pathfinding.py    # A* pathfinding + collision maps
+│   ├── evolve.py         # AlphaEvolve parameter evolution
+│   ├── run_10_agents.py  # Parallel multi-agent evaluation
 │   ├── tape_reader.py    # Tapes SQLite reader
 │   ├── observer.py       # Observation extraction heuristics
 │   └── observe_cli.py    # Observer CLI
+├── docker/
+│   ├── tapes-proxy/      # Tapes proxy Dockerfile
+│   ├── telemetry-consumer/ # Raw telemetry event consumer
+│   ├── alerts-consumer/  # Flink anomaly alert consumer
+│   └── flink-sql/        # Flink SQL anomaly detection jobs
+├── tests/                # 100% coverage test suite (205 tests)
 └── references/
-    ├── routes.json        # Overworld route plans
+    ├── routes.json        # Overworld waypoints by map ID
     └── type_chart.json    # Pokemon type effectiveness
 ```
 
