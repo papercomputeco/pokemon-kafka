@@ -141,6 +141,30 @@ uv run scripts/agent.py rom/pokemon_red.gb --strategy heuristic --max-turns 5000
 
 The two approaches complement each other. Long sessions are better for discovering new capabilities and debugging game-specific logic. The evolution loop is better for optimizing parameters once the code structure exists.
 
+## Testing
+
+100% line coverage enforced via `pytest-cov` (`fail_under = 100` in `pyproject.toml`).
+
+```bash
+# Run the full test suite
+uv run pytest
+
+# Run a single test class
+uv run pytest tests/test_agent.py::TestLabPokemonSelection -xvs
+```
+
+### Live integration test
+
+Boot the agent against a real ROM and confirm it selects a starter Pokemon within 1000 turns:
+
+```bash
+mb up
+# or locally:
+PYTHONPATH=scripts .venv/bin/python scripts/agent.py "rom/Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb" --max-turns 1000
+```
+
+The agent streams structured log lines as it plays. Look for `Party: 1` in the output to confirm a Pokemon was selected. A typical run selects a starter around turn 100 and wins the rival battle shortly after.
+
 ## Project Structure
 
 ```

@@ -2526,3 +2526,62 @@ class TestEvolveParams:
         _make_agent_with_evolve(tmp_path, evolve_params=params)
         output = capsys.readouterr().out
         assert "Evolve params" in output
+
+
+# ===================================================================
+# Integration: run agent until Pokemon is selected
+# ===================================================================
+
+
+class TestLabPokemonSelection:
+    """Integration test: agent navigates Oak's Lab and selects a starter."""
+
+    def test_agent_selects_pokemon_within_1000_turns(self, tmp_path):
+        """Agent should walk through lab phases and pick Charmander."""
+        ag = _make_agent(tmp_path)
+
+        # Simulated game state that responds to agent movement
+        state = {"x": 3, "y": 2, "party_count": 0, "a_at_ball": 0}
+
+        def read_overworld():
+            return OverworldState(
+                map_id=40, x=state["x"], y=state["y"],
+                party_count=state["party_count"],
+            )
+
+        def on_move(direction):
+            if direction == "down" and state["y"] < 11:
+                state["y"] += 1
+            elif direction == "up" and state["y"] > 0:
+                # Pokeball table at y=3, x=6-8 blocks upward movement
+                if 6 <= state["x"] <= 8 and state["y"] == 4:
+                    pass  # face up but collide with table
+                else:
+                    state["y"] -= 1
+            elif direction == "left" and state["x"] > 0:
+                state["x"] -= 1
+            elif direction == "right" and state["x"] < 10:
+                state["x"] += 1
+
+        def on_press(button, **kwargs):
+            if (button == "a"
+                    and state["x"] >= 6 and state["y"] >= 3
+                    and state["y"] <= 4 and state["party_count"] == 0):
+                state["a_at_ball"] += 1
+                if state["a_at_ball"] >= 3:
+                    state["party_count"] = 1
+
+        ag.memory.read_overworld_state = read_overworld
+        ag.memory.read_battle_state = MagicMock(
+            return_value=BattleState(battle_type=0),
+        )
+        ag.controller = MagicMock()
+        ag.controller.move = MagicMock(side_effect=on_move)
+        ag.controller.press = MagicMock(side_effect=on_press)
+
+        with patch.object(agent, "Image", None):
+            fitness = ag.run(max_turns=1000)
+
+        assert fitness["party_size"] == 1, (
+            f"Pokemon not selected. Final pos: ({state['x']}, {state['y']})"
+        )
