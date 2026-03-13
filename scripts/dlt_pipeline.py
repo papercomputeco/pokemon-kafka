@@ -28,7 +28,7 @@ DEFAULT_DATA_DIR = Path("data/telemetry")
 DEFAULT_DB_PATH = Path("data/telemetry.duckdb")
 
 
-@dlt.resource(write_disposition="merge", merge_key="occurred_at")
+@dlt.resource(write_disposition="merge", merge_key="node__hash")
 def telemetry_events(data_dir: Path = DEFAULT_DATA_DIR):
     """Yield telemetry event dicts from JSONL files in *data_dir*."""
     data_dir = Path(data_dir)
@@ -51,7 +51,7 @@ def create_pipeline(destination: str = "duckdb", db_path: Path = DEFAULT_DB_PATH
     return dlt.pipeline(
         pipeline_name="pokemon_telemetry",
         destination=dest,
-        dataset_name="telemetry",
+        dataset_name="raw",
     )
 
 

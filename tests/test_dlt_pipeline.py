@@ -100,7 +100,7 @@ def test_create_pipeline_duckdb(tmp_path):
     db_path = tmp_path / "test.duckdb"
     pipeline = create_pipeline(destination="duckdb", db_path=db_path)
     assert pipeline.pipeline_name == "pokemon_telemetry"
-    assert pipeline.dataset_name == "telemetry"
+    assert pipeline.dataset_name == "raw"
 
 
 def test_create_pipeline_non_duckdb(tmp_path):
@@ -121,13 +121,13 @@ def test_full_pipeline_loads_into_duckdb(telemetry_dir, tmp_path):
     pipeline.run(telemetry_events(data_dir=telemetry_dir), table_name="events")
 
     conn = ddb.connect(str(db_path), read_only=True)
-    count = conn.execute("SELECT count(*) FROM telemetry.events").fetchone()[0]
+    count = conn.execute("SELECT count(*) FROM raw.events").fetchone()[0]
     assert count == 2
     conn.close()
 
 
 def test_incremental_skips_duplicates(telemetry_dir, tmp_path):
-    """Running the pipeline twice does not duplicate rows (merge on occurred_at)."""
+    """Running the pipeline twice does not duplicate rows (merge on node__hash)."""
     import duckdb as ddb
     from dlt_pipeline import create_pipeline, telemetry_events
 
@@ -138,7 +138,7 @@ def test_incremental_skips_duplicates(telemetry_dir, tmp_path):
     pipeline.run(telemetry_events(data_dir=telemetry_dir), table_name="events")
 
     conn = ddb.connect(str(db_path), read_only=True)
-    count = conn.execute("SELECT count(*) FROM telemetry.events").fetchone()[0]
+    count = conn.execute("SELECT count(*) FROM raw.events").fetchone()[0]
     assert count == 2
     conn.close()
 
