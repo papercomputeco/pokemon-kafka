@@ -940,6 +940,15 @@ class PokemonAgent:
         self.controller.press("start")
         self.controller.wait(60)
 
+        # Handle save file: when a .gb.ram exists, the title screen shows
+        # CONTINUE / NEW GAME with CONTINUE pre-selected. Press DOWN to
+        # select NEW GAME, then A to confirm. When no save exists, START
+        # goes directly to Oak's intro and these presses are harmless.
+        self.controller.press("down")
+        self.controller.wait(30)
+        self.controller.press("a")
+        self.controller.wait(60)
+
         # Mash through Oak's entire intro, name selection, rival naming.
         # Need long frame waits — the game has slow text scroll and animations.
         # This takes ~600 A presses with proper wait times.
@@ -958,6 +967,16 @@ class PokemonAgent:
             f"DIAG | Post-intro: map={intro_state.map_id} pos=({intro_state.x},{intro_state.y}) "
             f"party={intro_state.party_count} wd730=0x{wd730:02X} wd74b=0x{wd74b:02X}"
         )
+
+        # Validate intro completed correctly — player should be in Red's
+        # bedroom (map 38). map=0 pos=(0,0) means the game never started,
+        # likely because a .gb.ram save file changed the title screen menu.
+        if intro_state.map_id == 0 and intro_state.x == 0 and intro_state.y == 0:
+            self.log(
+                "WARN | Intro failed: still at map=0 (0,0). "
+                "A .gb.ram save file may have caused CONTINUE instead of NEW GAME. "
+                "Delete the .ram file or check intro sequence."
+            )
 
         for _ in range(max_turns):
             battle = self.memory.read_battle_state()
