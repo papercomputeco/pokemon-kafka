@@ -956,6 +956,12 @@ class PokemonAgent:
             self.controller.press("a")
             self.controller.wait(30)  # Longer waits for text to scroll
 
+        # Dismiss any leftover text boxes (e.g. SNES console dialogue in
+        # Red's bedroom) that the intro A-mashing may have triggered.
+        for _ in range(10):
+            self.controller.press("b")
+            self.controller.wait(15)
+
         self.log("Intro complete. Entering game loop.")
 
         # Diagnostic: capture game state right after intro
