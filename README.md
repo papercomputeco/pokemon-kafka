@@ -204,6 +204,20 @@ uv run scripts/run_10_agents.py rom/pokemon_red.gb
 
 The observer feeds failure context (stuck events, tool errors) into the LLM mutation prompt so variants target actual problems rather than making blind changes.
 
+### Closing the loop: bounds, history, and stagnation detection
+
+The case study below showed a clear gap: every run hit a plateau where the LLM proposed near-identical variants for multiple consecutive generations. Three mechanisms now close that loop:
+
+**Parameter bounds enforcement.** `PARAM_BOUNDS` defines valid ranges for every evolvable parameter. `clamp_params()` enforces type coercion and clamping on all mutations, whether from the LLM or random perturbation. The LLM can no longer propose `stuck_threshold: -5` or `hp_run_threshold: 99.0`. Invalid enum values fall back to defaults. This replaced scattered ad-hoc `max(1, ...)` guards with a single source of truth.
+
+**Variant history in the LLM prompt.** Each generation's outcome (score, improvement status, parameter diffs from defaults) is fed back into the next mutation prompt. The LLM sees a compact log of the last 10 generations and is instructed to avoid repeating failed combinations. In the case study, Run 4's Gen 8 breakthrough happened *despite* having no memory of prior attempts. Now the LLM starts every generation with full context of what has already been tried.
+
+**Convergence detection with forced exploration.** `detect_stagnation()` fires when the last 3 generations all fail to improve. When triggered:
+- The LLM receives a WARNING directive to make larger, multi-parameter changes
+- The no-LLM fallback switches from `_perturb()` (1 param, small delta) to `_forced_exploration_perturb()` (3-4 params, 2x deltas, axis flip)
+
+This is the mechanism that was missing in the case study. Run 1 locked into one axis preference for 9 stale generations. With stagnation detection, generation 4 would have triggered forced exploration, potentially finding the Gen 8-style breakthrough 4 generations earlier.
+
 **First finding:** `door_cooldown=2` beats the default of 8. Shorter cooldown means fewer wasted turns walking away from doors before retrying. Confirmed across two milestones (Pokemon selection and rival battle) with 10 independent runs each.
 
 ### Long-session mode
@@ -366,9 +380,11 @@ The feedback loop (agent runs, telemetry persists, historical observer surfaces 
 - **Product engineering** — DuckDB queries across sprint telemetry reveal which modules have the highest revision rates or where debugging tokens concentrate.
 - **Day-to-day AI coding** — every `claude code` session writes telemetry. The historical observer turns that into quantified patterns rather than starting each session cold.
 
-### The gap
+### The gap (now closed)
 
-Every run hit a plateau where the LLM proposed near-identical variants for multiple consecutive generations. The historical observer recorded convergence but nothing acted on it. Run 4's Gen 8 breakthrough happened despite this gap, not because of a designed escape mechanism. The next step is closing that loop: detect convergence and inject a diversification signal automatically.
+Every run hit a plateau where the LLM proposed near-identical variants for multiple consecutive generations. The historical observer recorded convergence but nothing acted on it. Run 4's Gen 8 breakthrough happened despite this gap, not because of a designed escape mechanism.
+
+This gap is now closed. The evolution loop enforces parameter bounds, feeds variant history into every LLM prompt, and detects stagnation to trigger forced exploration. See [Closing the loop](#closing-the-loop-bounds-history-and-stagnation-detection) above for the full mechanism.
 
 All four runs were entirely local — JSONL files and DuckDB, no Kafka broker or managed services required. Raw telemetry lives in `data/telemetry/` and is queryable with `scripts/query_telemetry.py`.
 

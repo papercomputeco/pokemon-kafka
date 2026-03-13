@@ -9,12 +9,17 @@ import evolve as evolve_mod
 import pytest
 from evolve import (
     DEFAULT_PARAMS,
+    PARAM_BOUNDS,
+    STALE_THRESHOLD,
     EvolutionResult,
+    _forced_exploration_perturb,
     _make_historical_fn,
     _make_llm_fn,
     _make_observer_fn,
     _perturb,
     build_mutation_prompt,
+    clamp_params,
+    detect_stagnation,
     evolve,
     main,
     parse_llm_response,
@@ -52,6 +57,68 @@ class TestDefaultParams:
         assert "hp_heal_threshold" in DEFAULT_PARAMS
         assert "unknown_move_score" in DEFAULT_PARAMS
         assert "status_move_score" in DEFAULT_PARAMS
+
+
+# ── clamp_params() ─────────────────────────────────────────────────────
+
+
+class TestClampParams:
+    def test_valid_passthrough(self):
+        result = clamp_params(dict(DEFAULT_PARAMS))
+        assert result == DEFAULT_PARAMS
+
+    def test_clamp_int_above(self):
+        params = dict(DEFAULT_PARAMS, stuck_threshold=999)
+        result = clamp_params(params)
+        assert result["stuck_threshold"] == 20  # max bound
+
+    def test_clamp_int_below(self):
+        params = dict(DEFAULT_PARAMS, stuck_threshold=0)
+        result = clamp_params(params)
+        assert result["stuck_threshold"] == 3  # min bound
+
+    def test_clamp_float_above(self):
+        params = dict(DEFAULT_PARAMS, hp_run_threshold=1.0)
+        result = clamp_params(params)
+        assert result["hp_run_threshold"] == 0.5
+
+    def test_clamp_float_below(self):
+        params = dict(DEFAULT_PARAMS, hp_run_threshold=0.001)
+        result = clamp_params(params)
+        assert result["hp_run_threshold"] == 0.05
+
+    def test_type_coercion_float_to_int(self):
+        params = dict(DEFAULT_PARAMS, stuck_threshold=8.7)
+        result = clamp_params(params)
+        assert result["stuck_threshold"] == 8
+        assert isinstance(result["stuck_threshold"], int)
+
+    def test_type_coercion_int_to_float(self):
+        params = dict(DEFAULT_PARAMS, hp_run_threshold=0)
+        result = clamp_params(params)
+        assert isinstance(result["hp_run_threshold"], float)
+        assert result["hp_run_threshold"] == 0.05  # clamped to min
+
+    def test_invalid_enum_uses_default(self):
+        params = dict(DEFAULT_PARAMS, axis_preference_map_0="z")
+        result = clamp_params(params)
+        assert result["axis_preference_map_0"] == DEFAULT_PARAMS["axis_preference_map_0"]
+
+    def test_valid_enum_passes(self):
+        params = dict(DEFAULT_PARAMS, axis_preference_map_0="x")
+        result = clamp_params(params)
+        assert result["axis_preference_map_0"] == "x"
+
+    def test_unconvertible_value_uses_default(self):
+        params = dict(DEFAULT_PARAMS, stuck_threshold="abc")
+        result = clamp_params(params)
+        assert result["stuck_threshold"] == DEFAULT_PARAMS["stuck_threshold"]
+
+    def test_missing_key_ignored(self):
+        params = {"stuck_threshold": 10}
+        result = clamp_params(params)
+        assert result["stuck_threshold"] == 10
+        assert "door_cooldown" not in result
 
 
 # ── score() ────────────────────────────────────────────────────────────
@@ -285,6 +352,52 @@ class TestBuildMutationPrompt:
         assert "[important]" in prompt
         assert "historical" in prompt.lower() or "Cross-session" in prompt
 
+    def test_includes_evolution_history(self):
+        history = [
+            EvolutionResult(generation=1, params=dict(DEFAULT_PARAMS, stuck_threshold=5), score=4000.0, improved=True),
+        ]
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, evolution_history=history)
+        assert "gen 1" in prompt
+        assert "improved" in prompt
+        assert "Previous generations" in prompt
+
+    def test_evolution_history_diff_format(self):
+        """Only params that differ from defaults appear in the diff."""
+        params = dict(DEFAULT_PARAMS, stuck_threshold=5)
+        history = [EvolutionResult(generation=1, params=params, score=100.0, improved=False)]
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, evolution_history=history)
+        assert '"stuck_threshold": 5' in prompt
+        # bt_max_snapshots is default so shouldn't appear in diffs
+        assert '"bt_max_snapshots"' not in prompt.split("Previous generations")[1]
+
+    def test_evolution_history_none_omits_section(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, evolution_history=None)
+        assert "Previous generations" not in prompt
+
+    def test_evolution_history_empty_omits_section(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, evolution_history=[])
+        assert "Previous generations" not in prompt
+
+    def test_evolution_history_capped_at_10(self):
+        history = [
+            EvolutionResult(generation=i, params=dict(DEFAULT_PARAMS, stuck_threshold=i + 3), score=float(i * 100))
+            for i in range(1, 15)
+        ]
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, evolution_history=history)
+        # Should only include generations 5-14 (last 10)
+        assert "gen 5" in prompt
+        assert "gen 14" in prompt
+        assert "gen 4" not in prompt
+
+    def test_stagnant_flag_adds_warning(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, stagnant=True)
+        assert "WARNING" in prompt
+        assert "LARGER" in prompt
+
+    def test_stagnant_false_no_warning(self):
+        prompt = build_mutation_prompt(DEFAULT_PARAMS, {}, stagnant=False)
+        assert "WARNING" not in prompt
+
 
 # ── parse_llm_response() ──────────────────────────────────────────────
 
@@ -308,6 +421,13 @@ class TestParseLlmResponse:
         resp = f"  \n{json.dumps(DEFAULT_PARAMS)}\n  "
         assert parse_llm_response(resp) == DEFAULT_PARAMS
 
+    def test_clamps_out_of_bounds(self):
+        params = dict(DEFAULT_PARAMS, stuck_threshold=999, hp_run_threshold=5.0)
+        resp = json.dumps(params)
+        result = parse_llm_response(resp)
+        assert result["stuck_threshold"] == 20
+        assert result["hp_run_threshold"] == 0.5
+
 
 # ── _perturb() ─────────────────────────────────────────────────────────
 
@@ -329,33 +449,29 @@ class TestPerturb:
                 diffs += 1
         assert diffs > 0
 
-    def test_minimum_value_clamp(self):
-        """Numeric params should never go below 1."""
+    def test_respects_param_bounds(self):
+        """Numeric params should stay within PARAM_BOUNDS."""
         import random
 
         random.seed(0)
         params = dict(
             DEFAULT_PARAMS,
-            stuck_threshold=1,
-            door_cooldown=1,
+            stuck_threshold=3,
+            door_cooldown=4,
             waypoint_skip_distance=1,
-            bt_max_snapshots=1,
-            bt_restore_threshold=1,
+            bt_max_snapshots=2,
+            bt_restore_threshold=8,
             bt_max_attempts=1,
-            bt_snapshot_interval=1,
+            bt_snapshot_interval=20,
         )
         for _ in range(50):
             result = _perturb(params)
-            for key in (
-                "stuck_threshold",
-                "door_cooldown",
-                "waypoint_skip_distance",
-                "bt_max_snapshots",
-                "bt_restore_threshold",
-                "bt_max_attempts",
-                "bt_snapshot_interval",
-            ):
-                assert result[key] >= 1
+            for key, bounds in PARAM_BOUNDS.items():
+                if all(isinstance(v, str) for v in bounds):
+                    assert result[key] in bounds
+                else:
+                    lo, hi, _ = bounds
+                    assert lo <= result[key] <= hi, f"{key}={result[key]} outside [{lo}, {hi}]"
 
     def test_can_perturb_bt_keys(self):
         """bt_* keys should be reachable by perturbation."""
@@ -383,18 +499,84 @@ class TestPerturb:
                     changed.add(key)
         assert len(changed) > 0
 
-    def test_float_perturbation_clamps_at_zero(self):
-        """Float params should never go below 0."""
+    def test_float_perturbation_respects_bounds(self):
+        """Float params should stay within PARAM_BOUNDS."""
         import random
 
         random.seed(0)
         params = dict(
-            DEFAULT_PARAMS, hp_run_threshold=0.0, hp_heal_threshold=0.0, unknown_move_score=0.0, status_move_score=0.0
+            DEFAULT_PARAMS, hp_run_threshold=0.05, hp_heal_threshold=0.1, unknown_move_score=1.0, status_move_score=0.0
         )
         for _ in range(50):
             result = _perturb(params)
             for key in ("hp_run_threshold", "hp_heal_threshold", "unknown_move_score", "status_move_score"):
-                assert result[key] >= 0.0
+                lo, hi, _ = PARAM_BOUNDS[key]
+                assert lo <= result[key] <= hi, f"{key}={result[key]} outside [{lo}, {hi}]"
+
+
+# ── detect_stagnation() ────────────────────────────────────────────────
+
+
+class TestDetectStagnation:
+    def test_empty_results(self):
+        assert detect_stagnation([]) is False
+
+    def test_below_threshold(self):
+        results = [EvolutionResult(generation=1, improved=False)]
+        assert detect_stagnation(results) is False
+
+    def test_at_threshold_all_failed(self):
+        results = [EvolutionResult(generation=i, improved=False) for i in range(1, STALE_THRESHOLD + 1)]
+        assert detect_stagnation(results) is True
+
+    def test_improvement_resets_streak(self):
+        results = [
+            EvolutionResult(generation=1, improved=False),
+            EvolutionResult(generation=2, improved=True),
+            EvolutionResult(generation=3, improved=False),
+            EvolutionResult(generation=4, improved=False),
+        ]
+        assert detect_stagnation(results) is False
+
+    def test_custom_threshold(self):
+        results = [EvolutionResult(generation=i, improved=False) for i in range(1, 3)]
+        assert detect_stagnation(results, threshold=2) is True
+        assert detect_stagnation(results, threshold=3) is False
+
+
+# ── _forced_exploration_perturb() ─────────────────────────────────────
+
+
+class TestForcedExplorationPerturb:
+    def test_multiple_params_changed(self):
+        import random
+
+        random.seed(42)
+        result = _forced_exploration_perturb(DEFAULT_PARAMS)
+        changed = [k for k in DEFAULT_PARAMS if result[k] != DEFAULT_PARAMS[k]]
+        # Should change at least 3 params (3-4 numeric + axis flip)
+        assert len(changed) >= 3
+
+    def test_respects_bounds(self):
+        import random
+
+        random.seed(0)
+        for _ in range(50):
+            result = _forced_exploration_perturb(DEFAULT_PARAMS)
+            for key, bounds in PARAM_BOUNDS.items():
+                if all(isinstance(v, str) for v in bounds):
+                    assert result[key] in bounds
+                else:
+                    lo, hi, _ = bounds
+                    assert lo <= result[key] <= hi, f"{key}={result[key]} outside [{lo}, {hi}]"
+
+    def test_flips_axis_preference(self):
+        import random
+
+        random.seed(42)
+        result = _forced_exploration_perturb(DEFAULT_PARAMS)
+        # DEFAULT_PARAMS has "y", forced exploration always flips
+        assert result["axis_preference_map_0"] == "x"
 
 
 # ── evolve() ───────────────────────────────────────────────────────────
@@ -482,6 +664,54 @@ class TestEvolve:
         # LLM prompt should include observations
         prompt_arg = llm_fn.call_args[0][0]
         assert "Stuck at map 0" in prompt_arg
+
+    def test_gen2_prompt_contains_gen1_result(self):
+        baseline = {"final_map_id": 0, "badges": 0, "party_size": 1, "battles_won": 0, "stuck_count": 5, "turns": 100}
+        worse = {"final_map_id": 0, "badges": 0, "party_size": 0, "battles_won": 0, "stuck_count": 10, "turns": 200}
+
+        variant_params = dict(DEFAULT_PARAMS, stuck_threshold=5)
+        llm_fn = MagicMock(return_value=json.dumps(variant_params))
+        mock_run = self._mock_run_agent([baseline, worse, worse])
+
+        with patch("evolve.run_agent", side_effect=mock_run):
+            evolve("/fake.gb", max_generations=2, max_turns=100, llm_fn=llm_fn)
+
+        # Second call to llm_fn should have gen 1 result in prompt
+        assert llm_fn.call_count == 2
+        gen2_prompt = llm_fn.call_args_list[1][0][0]
+        assert "gen 1" in gen2_prompt
+        assert "Previous generations" in gen2_prompt
+
+    def test_stagnation_triggers_exploration_no_llm(self):
+        baseline = {"final_map_id": 0, "badges": 0, "party_size": 1, "battles_won": 0, "stuck_count": 5, "turns": 100}
+        worse = {"final_map_id": 0, "badges": 0, "party_size": 0, "battles_won": 0, "stuck_count": 10, "turns": 200}
+
+        # Run enough generations to trigger stagnation (STALE_THRESHOLD = 3)
+        mock_run = self._mock_run_agent([baseline] + [worse] * 5)
+
+        with (
+            patch("evolve.run_agent", side_effect=mock_run),
+            patch("evolve._forced_exploration_perturb", wraps=_forced_exploration_perturb) as mock_forced,
+        ):
+            evolve("/fake.gb", max_generations=5, max_turns=100)
+
+        # After 3 non-improving gens, forced exploration kicks in for gens 4 and 5
+        assert mock_forced.call_count >= 1
+
+    def test_stagnation_triggers_warning_in_llm_prompt(self):
+        baseline = {"final_map_id": 0, "badges": 0, "party_size": 1, "battles_won": 0, "stuck_count": 5, "turns": 100}
+        worse = {"final_map_id": 0, "badges": 0, "party_size": 0, "battles_won": 0, "stuck_count": 10, "turns": 200}
+
+        variant_params = dict(DEFAULT_PARAMS, stuck_threshold=5)
+        llm_fn = MagicMock(return_value=json.dumps(variant_params))
+        mock_run = self._mock_run_agent([baseline] + [worse] * 5)
+
+        with patch("evolve.run_agent", side_effect=mock_run):
+            evolve("/fake.gb", max_generations=5, max_turns=100, llm_fn=llm_fn)
+
+        # Gen 4 prompt (index 3) should contain WARNING since gens 1-3 all failed
+        gen4_prompt = llm_fn.call_args_list[3][0][0]
+        assert "WARNING" in gen4_prompt
 
     def test_multiple_generations(self):
         fitness_seq = [

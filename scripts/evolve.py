@@ -39,6 +39,43 @@ DEFAULT_PARAMS = {
     "status_move_score": 1.0,
 }
 
+# Bounds for each evolvable parameter: (min, max, type) or tuple of valid values for enums
+PARAM_BOUNDS = {
+    "stuck_threshold": (3, 20, int),
+    "door_cooldown": (4, 16, int),
+    "waypoint_skip_distance": (1, 8, int),
+    "axis_preference_map_0": ("x", "y"),
+    "bt_max_snapshots": (2, 16, int),
+    "bt_restore_threshold": (8, 30, int),
+    "bt_max_attempts": (1, 5, int),
+    "bt_snapshot_interval": (20, 100, int),
+    "hp_run_threshold": (0.05, 0.5, float),
+    "hp_heal_threshold": (0.1, 0.6, float),
+    "unknown_move_score": (1.0, 30.0, float),
+    "status_move_score": (0.0, 10.0, float),
+}
+
+
+def clamp_params(params: dict) -> dict:
+    """Clamp parameters to their defined bounds. Pure function."""
+    clamped = dict(params)
+    for key, bounds in PARAM_BOUNDS.items():
+        if key not in clamped:
+            continue
+        # Enum parameter: validate against allowed values
+        if all(isinstance(v, str) for v in bounds):
+            if clamped[key] not in bounds:
+                clamped[key] = DEFAULT_PARAMS[key]
+        else:
+            lo, hi, typ = bounds
+            try:
+                clamped[key] = typ(clamped[key])
+            except (ValueError, TypeError):
+                clamped[key] = DEFAULT_PARAMS[key]
+                continue
+            clamped[key] = max(lo, min(hi, clamped[key]))
+    return clamped
+
 
 @dataclass
 class EvolutionResult:
@@ -145,6 +182,8 @@ def build_mutation_prompt(
     fitness: dict,
     observations: list[dict] | None = None,
     historical: list[dict] | None = None,
+    evolution_history: list[EvolutionResult] | None = None,
+    stagnant: bool = False,
 ) -> str:
     """Build a prompt asking the LLM to propose a parameter variant."""
     obs_section = ""
@@ -161,6 +200,23 @@ def build_mutation_prompt(
             hist_lines.append(f"  - [{h['priority']}] {h['content']}")
         hist_section = "\nCross-session historical insights:\n" + "\n".join(hist_lines) + "\n"
 
+    evo_section = ""
+    if evolution_history:
+        evo_lines = []
+        for r in evolution_history[-10:]:
+            diffs = {k: v for k, v in r.params.items() if v != DEFAULT_PARAMS.get(k)}
+            status = "improved" if r.improved else "no improvement"
+            evo_lines.append(f"  gen {r.generation}: score={r.score:.1f} ({status}) diffs={json.dumps(diffs)}")
+        evo_section = "\nPrevious generations (avoid repeating failed combinations):\n" + "\n".join(evo_lines) + "\n"
+
+    stagnant_section = ""
+    if stagnant:
+        stagnant_section = (
+            "\nWARNING: The last several generations showed NO improvement. "
+            "Make LARGER changes to escape this plateau. "
+            "Try changing 3-4 parameters simultaneously with bigger deltas.\n"
+        )
+
     return f"""You are tuning navigation parameters for a Pokemon Red AI agent.
 
 Current parameters:
@@ -170,7 +226,7 @@ Current fitness:
 {json.dumps(fitness, indent=2)}
 
 Current score: {score(fitness):.1f}
-{obs_section}{hist_section}
+{obs_section}{hist_section}{evo_section}{stagnant_section}
 Parameter descriptions:
 - stuck_threshold: how many stuck turns before skipping a waypoint (int, 3-20)
 - door_cooldown: frames to walk away from a door after exiting (int, 4-16)
@@ -210,7 +266,7 @@ def parse_llm_response(response: str) -> dict | None:
         if key not in params:
             return None
 
-    return params
+    return clamp_params(params)
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +311,19 @@ def evolve(
         observations = observer_fn() if observer_fn else None
         historical = historical_fn() if historical_fn else None
 
+        # Detect stagnation
+        stagnant = detect_stagnation(results)
+
         # Propose variant
         if llm_fn:
-            prompt = build_mutation_prompt(current_params, baseline_fitness, observations, historical)
+            prompt = build_mutation_prompt(
+                current_params,
+                baseline_fitness,
+                observations,
+                historical,
+                evolution_history=results,
+                stagnant=stagnant,
+            )
             response = llm_fn(prompt)
             variant_params = parse_llm_response(response)
             if variant_params is None:
@@ -273,8 +339,11 @@ def evolve(
                 )
                 continue
         else:
-            # No LLM: use simple perturbation for testing
-            variant_params = _perturb(current_params)
+            # No LLM: use forced exploration when stagnant, else simple perturbation
+            if stagnant:
+                variant_params = _forced_exploration_perturb(current_params)
+            else:
+                variant_params = _perturb(current_params)
 
         print(f"[evolve] Variant params: {json.dumps(variant_params)}")
 
@@ -308,6 +377,51 @@ def evolve(
     return results
 
 
+STALE_THRESHOLD = 3
+
+
+def detect_stagnation(results: list[EvolutionResult], threshold: int = STALE_THRESHOLD) -> bool:
+    """Return True if the last `threshold` results all failed to improve."""
+    if len(results) < threshold:
+        return False
+    return all(not r.improved for r in results[-threshold:])
+
+
+def _forced_exploration_perturb(params: dict) -> dict:
+    """Aggressive perturbation: mutate 3-4 params with 2x deltas."""
+    import random
+
+    INT_KEYS = [
+        "stuck_threshold",
+        "door_cooldown",
+        "waypoint_skip_distance",
+        "bt_max_snapshots",
+        "bt_restore_threshold",
+        "bt_max_attempts",
+        "bt_snapshot_interval",
+    ]
+    FLOAT_KEYS = [
+        "hp_run_threshold",
+        "hp_heal_threshold",
+        "unknown_move_score",
+        "status_move_score",
+    ]
+
+    new = dict(params)
+    num_changes = random.choice([3, 4])
+    keys = random.sample(INT_KEYS + FLOAT_KEYS, min(num_changes, len(INT_KEYS + FLOAT_KEYS)))
+    for key in keys:
+        if key in FLOAT_KEYS:
+            delta = random.choice([-0.2, -0.1, 0.1, 0.2])
+            new[key] = round(new[key] + delta, 4)
+        else:
+            delta = random.choice([-4, -3, -2, 2, 3, 4])
+            new[key] = new[key] + delta
+    # Always flip axis preference during forced exploration
+    new["axis_preference_map_0"] = "x" if new["axis_preference_map_0"] == "y" else "y"
+    return clamp_params(new)
+
+
 def _perturb(params: dict) -> dict:
     """Simple random perturbation of numeric params (no LLM needed)."""
     import random
@@ -332,14 +446,14 @@ def _perturb(params: dict) -> dict:
     key = random.choice(INT_KEYS + FLOAT_KEYS)
     if key in FLOAT_KEYS:
         delta = random.choice([-0.1, -0.05, 0.05, 0.1])
-        new[key] = max(0.0, round(new[key] + delta, 4))
+        new[key] = round(new[key] + delta, 4)
     else:
         delta = random.choice([-2, -1, 1, 2])
-        new[key] = max(1, new[key] + delta)
+        new[key] = new[key] + delta
     # Randomly flip axis preference
     if random.random() < 0.3:
         new["axis_preference_map_0"] = "x" if new["axis_preference_map_0"] == "y" else "y"
-    return new
+    return clamp_params(new)
 
 
 # ---------------------------------------------------------------------------
