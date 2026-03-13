@@ -51,5 +51,12 @@ pokedex/evolve_results.json
 # Telemetry data (generated at runtime)
 data/telemetry/*.jsonl
 
+# DuckDB warehouse files
+data/*.duckdb
+data/*.duckdb.wal
+
+# dlt pipeline state
+.dlt/
+
 # Docker
 docker-compose.override.yml

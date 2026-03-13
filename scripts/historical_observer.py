@@ -27,29 +27,37 @@ except ImportError:  # pragma: no cover
     sys.exit(1)
 
 
-def observe(telemetry_dir: str) -> list[dict]:
+def observe(telemetry_dir: str, db_path: str | None = None) -> list[dict]:
     """Extract cross-session insights from JSONL fitness events.
 
     Returns list of {"priority": str, "content": str} dicts.
-    """
-    data_dir = Path(telemetry_dir)
-    if not data_dir.exists() or not list(data_dir.glob("*.jsonl")):
-        return []
 
-    pattern = str(data_dir / "*.jsonl")
-    conn = duckdb.connect()
+    If *db_path* points to a persistent DuckDB warehouse (e.g. one created
+    by ``dlt_pipeline.py``), queries run against the ``telemetry.events``
+    table instead of scanning JSONL files on disk.
+    """
+    if db_path and Path(db_path).exists():
+        table_expr = "telemetry.events"
+        conn = duckdb.connect(str(db_path), read_only=True)
+    else:
+        data_dir = Path(telemetry_dir)
+        if not data_dir.exists() or not list(data_dir.glob("*.jsonl")):
+            return []
+        pattern = str(data_dir / "*.jsonl")
+        table_expr = f"read_json_auto('{pattern}')"
+        conn = duckdb.connect()
 
     try:
-        return _extract_insights(conn, pattern)
+        return _extract_insights(conn, table_expr)
     finally:
         conn.close()
 
 
-def _extract_insights(conn, pattern: str) -> list[dict]:
+def _extract_insights(conn, table_expr: str) -> list[dict]:
     """Run DuckDB queries to extract cross-session insights."""
     # Load only fitness events
     try:
-        count = conn.execute(f"SELECT count(*) FROM read_json_auto('{pattern}') WHERE type = 'fitness'").fetchone()[0]
+        count = conn.execute(f"SELECT count(*) FROM {table_expr} WHERE type = 'fitness'").fetchone()[0]
     except Exception:
         return []
 
@@ -74,7 +82,7 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
             COALESCE(fitness.stuck_count, 0),
             COALESCE(fitness.battles_won, 0),
             COALESCE(fitness.final_map_id, 0)
-        FROM read_json_auto('{pattern}')
+        FROM {table_expr}
         WHERE type = 'fitness'
         ORDER BY occurred_at
         """
@@ -165,7 +173,7 @@ def _extract_insights(conn, pattern: str) -> list[dict]:
                 params.stuck_threshold,
                 AVG(fitness.stuck_count) as avg_stuck,
                 COUNT(*) as runs
-            FROM read_json_auto('{pattern}')
+            FROM {table_expr}
             WHERE type = 'fitness' AND params.stuck_threshold IS NOT NULL
             GROUP BY params.stuck_threshold
             HAVING COUNT(*) >= 1
@@ -222,13 +230,18 @@ def main():
         help="Output markdown path (default: .tapes/memory/historical_insights.md)",
     )
     parser.add_argument(
+        "--db",
+        default=None,
+        help="Path to persistent DuckDB warehouse (e.g. data/telemetry.duckdb)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print insights without writing to file",
     )
     args = parser.parse_args()
 
-    insights = observe(args.telemetry_dir)
+    insights = observe(args.telemetry_dir, db_path=args.db)
     if not insights:
         print("[historical] No fitness events found.")
         return

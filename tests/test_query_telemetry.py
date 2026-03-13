@@ -258,6 +258,93 @@ def test_main_interactive_keyboard_interrupt(telemetry_dir):
         main()
 
 
+def _build_warehouse(db_path, events):
+    """Create a DuckDB warehouse with a telemetry.events table."""
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
+    conn.execute(
+        """
+        CREATE TABLE telemetry.events AS
+        SELECT * FROM (VALUES
+            (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+        ) AS t(schema, root_hash, occurred_at, node, type, fitness, params, stop_reason, project, hash)
+        WHERE false
+        """
+    )
+    # Insert events as JSON-parsed rows
+    import json
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        for e in events:
+            f.write(json.dumps(e) + "\n")
+        f.flush()
+        conn.execute(f"INSERT INTO telemetry.events SELECT * FROM read_json_auto('{f.name}')")
+    conn.close()
+
+
+@pytest.fixture
+def warehouse_db(tmp_path, telemetry_dir):
+    """Create a persistent DuckDB warehouse from telemetry JSONL."""
+    db_path = tmp_path / "warehouse.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
+    pattern = str(telemetry_dir / "*.jsonl")
+    conn.execute(f"CREATE TABLE telemetry.events AS SELECT * FROM read_json_auto('{pattern}')")
+    conn.close()
+    return db_path
+
+
+def test_create_connection_warehouse(warehouse_db):
+    """create_connection with db_path queries the warehouse table."""
+    from query_telemetry import create_connection
+
+    conn = create_connection(Path("/nonexistent"), db_path=warehouse_db)
+    result = conn.execute("SELECT count(*) FROM events").fetchone()
+    assert result[0] == 2
+
+
+def test_main_db_flag(warehouse_db):
+    """--db flag queries the warehouse instead of JSONL files."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--db", str(warehouse_db)]),
+        patch("duckdb.DuckDBPyConnection.execute") as mock_exec,
+    ):
+        mock_exec.return_value.fetchdf = _mock_fetchdf
+        main()
+
+
+def test_main_db_flag_interactive(warehouse_db):
+    """--db flag works in interactive mode."""
+    from query_telemetry import main
+
+    with (
+        patch("sys.argv", ["query_telemetry.py", "--interactive", "--db", str(warehouse_db)]),
+        patch("builtins.input", return_value=""),
+    ):
+        main()
+
+
+def test_parse_db_flag():
+    """_parse_db_flag extracts --db from raw args."""
+    from query_telemetry import _parse_db_flag
+
+    remaining, db_path = _parse_db_flag(["--db", "/some/path.duckdb", "--sessions"])
+    assert db_path == Path("/some/path.duckdb")
+    assert remaining == ["--sessions"]
+
+
+def test_parse_db_flag_absent():
+    """_parse_db_flag returns None when --db not present."""
+    from query_telemetry import _parse_db_flag
+
+    remaining, db_path = _parse_db_flag(["--sessions", "data/telemetry"])
+    assert db_path is None
+    assert remaining == ["--sessions", "data/telemetry"]
+
+
 def test_dunder_main_guard(telemetry_dir):
     """if __name__ == '__main__': main()"""
     import query_telemetry as qt_mod

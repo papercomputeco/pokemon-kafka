@@ -58,27 +58,50 @@ LIMIT 20
 """
 
 
-def create_connection(data_dir: Path) -> duckdb.DuckDBPyConnection:
-    pattern = str(data_dir / "*.jsonl")
-    conn = duckdb.connect()
-    conn.execute(f"CREATE VIEW events AS SELECT * FROM read_json_auto('{pattern}')")
+def create_connection(data_dir: Path, db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
+    if db_path and db_path.exists():
+        conn = duckdb.connect()
+        conn.execute(f"ATTACH '{db_path}' AS warehouse (READ_ONLY)")
+        conn.execute("CREATE VIEW events AS SELECT * FROM warehouse.telemetry.events")
+    else:
+        pattern = str(data_dir / "*.jsonl")
+        conn = duckdb.connect()
+        conn.execute(f"CREATE VIEW events AS SELECT * FROM read_json_auto('{pattern}')")
     return conn
 
 
-def main():
-    args = sys.argv[1:]
+def _parse_db_flag(args: list[str]) -> tuple[list[str], Path | None]:
+    """Extract --db PATH from raw argv, return remaining args and db_path."""
+    db_path = None
+    remaining = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--db" and i + 1 < len(args):
+            db_path = Path(args[i + 1])
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return remaining, db_path
 
-    if "--help" in args or "-h" in args:
+
+def main():
+    raw_args = sys.argv[1:]
+
+    if "--help" in raw_args or "-h" in raw_args:
         print(__doc__)
         sys.exit(0)
+
+    args, db_path = _parse_db_flag(raw_args)
 
     data_dir = DEFAULT_DIR
     query = SUMMARY_QUERY
 
     if args and args[0] == "--interactive":
         data_dir = Path(args[1]) if len(args) > 1 else DEFAULT_DIR
-        conn = create_connection(data_dir)
-        print(f"DuckDB connected to {data_dir}/*.jsonl")
+        conn = create_connection(data_dir, db_path=db_path)
+        source = str(db_path) if db_path and db_path.exists() else f"{data_dir}/*.jsonl"
+        print(f"DuckDB connected to {source}")
         print("Table: events | Type SQL queries, empty line to quit.\n")
         while True:
             try:
@@ -100,6 +123,12 @@ def main():
         data_dir = Path(args[0])
         if len(args) > 1:
             query = args[1]
+
+    # In warehouse mode, skip JSONL existence checks
+    if db_path and db_path.exists():
+        conn = create_connection(data_dir, db_path=db_path)
+        print(conn.execute(query).fetchdf().to_string())
+        return
 
     if not data_dir.exists():
         print(f"No data directory at {data_dir}", file=sys.stderr)

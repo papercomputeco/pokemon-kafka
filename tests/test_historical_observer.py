@@ -288,6 +288,46 @@ def test_extract_insights_no_params(tmp_path):
     assert isinstance(insights, list)
 
 
+@pytest.fixture
+def warehouse_db(tmp_path, telemetry_dir):
+    """Create a persistent DuckDB warehouse from fitness JSONL."""
+    db_path = tmp_path / "warehouse.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
+    pattern = str(telemetry_dir / "*.jsonl")
+    conn.execute(f"CREATE TABLE telemetry.events AS SELECT * FROM read_json_auto('{pattern}')")
+    conn.close()
+    return db_path
+
+
+def test_observe_warehouse_mode(warehouse_db):
+    """observe() with db_path queries the warehouse instead of JSONL."""
+    from historical_observer import observe
+
+    insights = observe("nonexistent_dir", db_path=str(warehouse_db))
+    assert len(insights) > 0
+    contents = " ".join(i["content"] for i in insights)
+    assert "trend" in contents.lower()
+
+
+def test_main_db_flag(warehouse_db, tmp_path):
+    """--db flag queries the warehouse."""
+    from historical_observer import main
+
+    output = tmp_path / "insights.md"
+    with patch("sys.argv", ["historical_observer.py", "--db", str(warehouse_db), "--output", str(output)]):
+        main()
+    assert output.exists()
+
+
+def test_observe_db_path_nonexistent_falls_back(tmp_path):
+    """When db_path doesn't exist, falls back to JSONL mode (empty dir -> [])."""
+    from historical_observer import observe
+
+    insights = observe(str(tmp_path), db_path=str(tmp_path / "nonexistent.duckdb"))
+    assert insights == []
+
+
 def test_main_dry_run(telemetry_dir):
     """--dry-run prints insights but does not write file."""
     from historical_observer import main

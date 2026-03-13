@@ -124,6 +124,10 @@ Agent → Tapes Proxy → Kafka (agent.telemetry.raw)
                           │    └→ Kafka (agent.telemetry.alerts)
                           │         └→ alerts-consumer (prints + writes Tapes nodes)
                           └→ DuckDB (ad-hoc queries on JSONL sink)
+
+JSONL sink (data/telemetry/*.jsonl)
+  └→ dlt pipeline → DuckDB warehouse (local)
+                  → Snowflake / Confluent Cloud (production)
 ```
 
 Each event contains the conversation root hash, node role (assistant/user/tool), model, token usage, and timestamp. Content arrays are excluded from the Flink schema since anomaly detection only needs metadata.
@@ -158,6 +162,31 @@ Apache Flink (1.18) runs two SQL jobs against the telemetry stream:
 Both jobs write alerts to the `agent.telemetry.alerts` Kafka topic. The alerts consumer picks them up and optionally writes them as Tapes nodes back into `.tapes/tapes.sqlite`, feeding anomalies into the observational memory system.
 
 Flink SQL definitions live in `docker/flink-sql/init.sql`. The connector JAR is downloaded automatically at startup.
+
+## Data Warehouse
+
+The JSONL files in `data/telemetry/` serve as the universal interchange format -- the same files whether a Kafka consumer or the local publisher wrote them. The dlt pipeline is the load step that moves those files into a persistent, queryable warehouse.
+
+dlt handles schema normalization and incremental loading. The destination is a one-line swap: `duckdb` for local development, `snowflake` for production. Both `query_telemetry.py` and `historical_observer.py` work against either source via the `--db` flag.
+
+```bash
+# Install dlt (optional dependency group)
+uv sync --group dlt
+
+# Load JSONL into a local DuckDB warehouse
+uv run scripts/dlt_pipeline.py
+
+# Load into Snowflake instead
+uv run scripts/dlt_pipeline.py --destination snowflake
+
+# Query the warehouse directly
+uv run scripts/query_telemetry.py --db data/telemetry.duckdb
+
+# Historical insights from the warehouse
+uv run scripts/historical_observer.py --db data/telemetry.duckdb
+```
+
+Without `--db`, both query scripts fall back to scanning JSONL files directly -- nothing changes for existing workflows.
 
 ## AlphaEvolve Strategy Evolution
 
@@ -240,6 +269,7 @@ pokemon-agent/
 │   ├── observer.py          # heuristic observation extractor
 │   ├── observe_cli.py       # CLI for running the observer
 │   ├── publisher.py         # local-first JSONL telemetry publisher
+│   ├── dlt_pipeline.py      # dlt warehouse loader (JSONL → DuckDB/Snowflake)
 │   ├── historical_observer.py # cross-session insights via DuckDB
 │   ├── query_telemetry.py   # ad-hoc telemetry queries
 │   ├── tape_writer.py       # writes synthetic Tapes nodes to SQLite
