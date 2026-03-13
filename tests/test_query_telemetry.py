@@ -258,39 +258,25 @@ def test_main_interactive_keyboard_interrupt(telemetry_dir):
         main()
 
 
-def _build_warehouse(db_path, events):
-    """Create a DuckDB warehouse with a telemetry.events table."""
-    conn = duckdb.connect(str(db_path))
-    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
-    conn.execute(
-        """
-        CREATE TABLE telemetry.events AS
-        SELECT * FROM (VALUES
-            (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
-        ) AS t(schema, root_hash, occurred_at, node, type, fitness, params, stop_reason, project, hash)
-        WHERE false
-        """
-    )
-    # Insert events as JSON-parsed rows
-    import json
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        for e in events:
-            f.write(json.dumps(e) + "\n")
-        f.flush()
-        conn.execute(f"INSERT INTO telemetry.events SELECT * FROM read_json_auto('{f.name}')")
-    conn.close()
-
-
 @pytest.fixture
 def warehouse_db(tmp_path, telemetry_dir):
-    """Create a persistent DuckDB warehouse from telemetry JSONL."""
+    """Create a persistent DuckDB warehouse with dlt-style flattened columns."""
     db_path = tmp_path / "warehouse.duckdb"
     conn = duckdb.connect(str(db_path))
-    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
     pattern = str(telemetry_dir / "*.jsonl")
-    conn.execute(f"CREATE TABLE telemetry.events AS SELECT * FROM read_json_auto('{pattern}')")
+    conn.execute(
+        f"""
+        CREATE TABLE raw.events AS SELECT
+            schema, root_hash, occurred_at,
+            node.bucket.role AS node__bucket__role,
+            node.bucket.model AS node__bucket__model,
+            node.usage.input_tokens AS node__usage__input_tokens,
+            node.usage.output_tokens AS node__usage__output_tokens,
+            node.project AS node__project
+        FROM read_json_auto('{pattern}')
+        """
+    )
     conn.close()
     return db_path
 

@@ -58,11 +58,23 @@ LIMIT 20
 """
 
 
+_WAREHOUSE_VIEW = """\
+CREATE VIEW events AS SELECT
+    *,
+    {
+        'bucket': {'role': node__bucket__role, 'model': node__bucket__model},
+        'usage': {'input_tokens': node__usage__input_tokens, 'output_tokens': node__usage__output_tokens},
+        'project': node__project
+    } AS node
+FROM warehouse.raw.events
+"""
+
+
 def create_connection(data_dir: Path, db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
     if db_path and db_path.exists():
         conn = duckdb.connect()
         conn.execute(f"ATTACH '{db_path}' AS warehouse (READ_ONLY)")
-        conn.execute("CREATE VIEW events AS SELECT * FROM warehouse.telemetry.events")
+        conn.execute(_WAREHOUSE_VIEW)
     else:
         pattern = str(data_dir / "*.jsonl")
         conn = duckdb.connect()

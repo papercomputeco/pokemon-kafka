@@ -37,8 +37,26 @@ def observe(telemetry_dir: str, db_path: str | None = None) -> list[dict]:
     table instead of scanning JSONL files on disk.
     """
     if db_path and Path(db_path).exists():
-        table_expr = "telemetry.events"
-        conn = duckdb.connect(str(db_path), read_only=True)
+        conn = duckdb.connect()
+        conn.execute(f"ATTACH '{db_path}' AS warehouse (READ_ONLY)")
+        conn.execute(
+            """
+            CREATE VIEW wh_events AS SELECT
+                *,
+                {
+                    'turns': fitness__turns,
+                    'battles_won': fitness__battles_won,
+                    'maps_visited': fitness__maps_visited,
+                    'final_map_id': fitness__final_map_id,
+                    'badges': fitness__badges,
+                    'party_size': fitness__party_size,
+                    'stuck_count': fitness__stuck_count,
+                    'backtrack_restores': fitness__backtrack_restores
+                } AS fitness
+            FROM warehouse.raw.events
+            """
+        )
+        table_expr = "wh_events"
     else:
         data_dir = Path(telemetry_dir)
         if not data_dir.exists() or not list(data_dir.glob("*.jsonl")):

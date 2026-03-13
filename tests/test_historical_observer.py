@@ -290,12 +290,26 @@ def test_extract_insights_no_params(tmp_path):
 
 @pytest.fixture
 def warehouse_db(tmp_path, telemetry_dir):
-    """Create a persistent DuckDB warehouse from fitness JSONL."""
+    """Create a persistent DuckDB warehouse with dlt-style flattened columns."""
     db_path = tmp_path / "warehouse.duckdb"
     conn = duckdb.connect(str(db_path))
-    conn.execute("CREATE SCHEMA IF NOT EXISTS telemetry")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
     pattern = str(telemetry_dir / "*.jsonl")
-    conn.execute(f"CREATE TABLE telemetry.events AS SELECT * FROM read_json_auto('{pattern}')")
+    conn.execute(
+        f"""
+        CREATE TABLE raw.events AS SELECT
+            schema, type, root_hash, occurred_at,
+            fitness.turns AS fitness__turns,
+            fitness.battles_won AS fitness__battles_won,
+            fitness.maps_visited AS fitness__maps_visited,
+            fitness.final_map_id AS fitness__final_map_id,
+            fitness.badges AS fitness__badges,
+            fitness.party_size AS fitness__party_size,
+            fitness.stuck_count AS fitness__stuck_count,
+            fitness.backtrack_restores AS fitness__backtrack_restores
+        FROM read_json_auto('{pattern}')
+        """
+    )
     conn.close()
     return db_path
 
