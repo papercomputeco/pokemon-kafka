@@ -147,6 +147,24 @@ class GameController:
         self.press("a")
         self.wait(20)
 
+    def navigate_battle_menu(self, target_index: int):
+        """Navigate the 2x2 battle menu: 0=FIGHT, 1=BAG, 2=POKEMON, 3=RUN.
+
+        The battle menu layout is:
+            FIGHT(0)   BAG(1)
+            POKEMON(2) RUN(3)
+
+        Cursor starts at FIGHT (top-left).
+        """
+        if target_index in (2, 3):  # Bottom row
+            self.press("down")
+            self.wait(8)
+        if target_index in (1, 3):  # Right column
+            self.press("right")
+            self.wait(8)
+        self.press("a")
+        self.wait(20)
+
 
 # ---------------------------------------------------------------------------
 # Battle strategy
@@ -240,7 +258,7 @@ class BattleStrategy:
 class Navigator:
     """Simple overworld movement."""
 
-    def __init__(self, routes: dict, stuck_threshold: int = 8, skip_distance: int = 3):
+    def __init__(self, routes: dict, stuck_threshold: int = 8, skip_distance: int = 2):
         self.routes = routes
         self.current_waypoint = 0
         self.current_map = None
@@ -284,8 +302,11 @@ class Navigator:
         for direction in secondary:
             self._add_direction(ordered, direction)
 
-        # Only add backward directions after being stuck a while
-        if stuck_turns >= 8:
+        # Add lateral/backward directions after being stuck a while.
+        # If only one forward direction exists (e.g. x already matches target),
+        # try alternatives sooner since there's nothing else to cycle.
+        lateral_threshold = 3 if len(ordered) <= 1 else 8
+        if stuck_turns >= lateral_threshold:
             for direction in ("up", "right", "down", "left"):
                 self._add_direction(ordered, direction)
 
@@ -499,6 +520,10 @@ class PokemonAgent:
         self.evolution_log: list[dict] = []
         self.level_ups: int = 0
 
+        # Parcel quest state tracking
+        self._parcel_obtained = False  # Set when agent exits Viridian Mart (map 42)
+        self._parcel_delivered = False  # Set when agent exits Oak's Lab second time
+
         # Screenshot output directory
         self.frames_dir = SCRIPT_DIR.parent / "frames"
         if self.screenshots:
@@ -586,6 +611,16 @@ class PokemonAgent:
                 self.door_cooldown = self._evolve_door_cooldown
             elif prev == 40 and state.map_id == 0:
                 self.door_cooldown = 3  # sidestep left to clear lab door
+            # Reset Mart waypoint index when entering Viridian City
+            if state.map_id == 1 and not self._parcel_obtained:
+                self._mart_wp_idx = 0
+            # Track Parcel quest progression via map transitions
+            if prev == 42 and state.map_id == 1:
+                self._parcel_obtained = True
+                self.log("QUEST | Got Oak's Parcel from Viridian Mart — heading south")
+            if prev == 40 and state.map_id == 0 and self._parcel_obtained and not self._parcel_delivered:
+                self._parcel_delivered = True
+                self.log("QUEST | Delivered Parcel to Oak — Pokedex obtained, heading north")
             self.log(f"MAP CHANGE | {prev} -> {state.map_id} | Pos: ({state.x}, {state.y})")
             return
 
@@ -665,6 +700,17 @@ class PokemonAgent:
                     return "up"
                 return "a"
 
+        # --- Oak's Lab: delivering Parcel (must come before general lab handler) ---
+        if state.map_id == 40 and state.party_count > 0 and self._parcel_obtained and not self._parcel_delivered:
+            if not hasattr(self, "_delivery_turns"):
+                self._delivery_turns = 0
+            self._delivery_turns += 1
+            if self._delivery_turns <= 80:
+                if self._delivery_turns % 3 == 0:
+                    return "up"  # approach Oak
+                return "a"  # advance delivery dialogue
+            return "down"  # walk south to exit
+
         # In Oak's Lab with a Pokemon: navigate to exit and trigger rival.
         # After picking a starter, the rival picks his, then challenges when
         # the player walks toward the exit.  NPCs can block the path south
@@ -691,13 +737,199 @@ class PokemonAgent:
                 return "a"  # interact with rival when intercepted / clear text
             return "down"
 
+        # --- Route 1 southbound: returning with Parcel ---
+        # Route 1 has obstacles (trees, not ledges) that block southward
+        # movement at certain x ranges.  Must route through gaps.
+        if state.map_id == 12 and self._parcel_obtained and not self._parcel_delivered:
+            if state.y >= 35:
+                return "down"  # exit south to Pallet Town
+            # Southbound waypoints through gaps (collision-verified):
+            #   ledge2 gap at x=13-15 (y=23-24 blocks x≤11)
+            #   ledge1 gap at x=4-6  (y=27 blocks x=7-14)
+            southbound_wps = [
+                (13, 22),  # right to ledge2 gap before y=23
+                (13, 26),  # south through gap
+                (5, 26),   # left to ledge1 gap before y=27
+                (5, 30),   # south through gap
+                (10, 35),  # south-center to exit
+            ]
+            if not hasattr(self, "_south_wp"):
+                self._south_wp = 0
+            # Advance past waypoints we're already beyond
+            while self._south_wp < len(southbound_wps):
+                wx, wy = southbound_wps[self._south_wp]
+                dist = abs(state.x - wx) + abs(state.y - wy)
+                if dist <= 2 and state.y >= wy:
+                    self._south_wp += 1
+                else:
+                    break
+            if self._south_wp >= len(southbound_wps):
+                return "down"
+            tx, ty = southbound_wps[self._south_wp]
+            # Use x-first when we need to jog laterally, y-first otherwise
+            axis = "x" if abs(state.x - tx) > 1 else "y"
+            return self.navigator._direction_toward_target(
+                state, tx, ty, axis_preference=axis, stuck_turns=self.stuck_turns
+            )
+
+        # --- Viridian City: Parcel quest routing ---
+        # Before delivering Oak's Parcel, the Old Man blocks Route 2.
+        # Agent must: visit Mart → return to Pallet → deliver Parcel to Oak.
+        if state.map_id == 1 and not self._parcel_delivered:
+            if not hasattr(self, "_parcel_quest_logged"):
+                self._parcel_quest_logged = True
+                self.log("QUEST | Parcel quest active — routing to Viridian Mart")
+            return self._viridian_parcel_quest(state)
+
+        # --- Viridian Mart interior (map 42) ---
+        # On first visit the clerk walks to you and gives Oak's Parcel.
+        # Press A through the long Parcel handoff dialogue, then alternate
+        # A and down to clear remaining text while walking to the exit.
+        if state.map_id == 42:
+            if not hasattr(self, "_mart_turns"):
+                self._mart_turns = 0
+            self._mart_turns += 1
+            if self._mart_turns <= 80:
+                return "a"  # advance Parcel handoff dialogue (long cutscene)
+            # Cycle: A (clear text), down (walk to exit), A, right (find aisle)
+            phase = self._mart_turns % 4
+            if phase == 0:
+                return "a"
+            if phase == 1:
+                return "down"
+            if phase == 2:
+                return "a"
+            return "right"  # find center aisle if stuck against wall
+
+        # --- Pallet Town: deliver Parcel to Oak ---
+        # With Parcel but no Pokedex, head to Oak's Lab instead of Route 1.
+        if state.map_id == 0 and state.party_count > 0 and self._parcel_obtained and not self._parcel_delivered:
+            target_x, target_y = 12, 11  # Oak's Lab entrance
+            if state.x == target_x and state.y == target_y:
+                return "up"  # enter lab
+            return self.navigator._direction_toward_target(state, target_x, target_y, stuck_turns=self.stuck_turns)
+
+        # Only pass collision grid for maps with defined routes (exterior maps).
+        # Interior maps (houses, labs) have door transitions that look like walls
+        # in the collision data, so A* would steer away from exits.
+        map_key = str(state.map_id)
+        use_grid = self.collision_map.grid if map_key in self.navigator.routes else None
         direction = self.navigator.next_direction(
             state,
             turn=self.turn_count,
             stuck_turns=self.stuck_turns,
-            collision_grid=self.collision_map.grid,
+            collision_grid=use_grid,
         )
+        if direction is None and state.y <= 1:
+            # Route complete at north edge — keep pressing up to trigger map transition
+            return "up"
         return direction or "a"
+
+    # Waypoints to navigate to Viridian Mart (door at 29,19 per pokered).
+    # Collision data at y=28 shows a barrier at y=26-27 across most of the city.
+    # Gap at x=18-19 confirmed by collision grids from 4 viewpoints + collision_19_26.txt.
+    # Route: jog left to x=19, north through gap, then east to Mart.
+    _MART_WAYPOINTS = [
+        (19, 30),  # slight left jog — x=20 is blocked at y=26-27, gap is at x=18-19
+        (19, 26),  # north through gap — confirmed walkable from collision_19_26.txt
+        (22, 22),  # northeast through building gap at x=22
+        (29, 19),  # east to Mart door
+    ]
+
+    def _viridian_parcel_quest(self, state: OverworldState) -> str:
+        """Handle Viridian City routing before Oak's Parcel delivery.
+
+        Phase 1: Navigate to Viridian Mart entrance via waypoints (avoid barrier).
+        Phase 2: After getting Parcel, head south back to Route 1.
+        """
+        has_parcel = self._parcel_obtained
+
+        if not has_parcel:
+            if not hasattr(self, "_mart_wp_idx"):
+                self._mart_wp_idx = 0
+
+            # Navigate through Mart waypoints
+            if self._mart_wp_idx < len(self._MART_WAYPOINTS):
+                tx, ty = self._MART_WAYPOINTS[self._mart_wp_idx]
+                dist = abs(state.x - tx) + abs(state.y - ty)
+                # Advance when reached (within 1 tile for intermediate waypoints)
+                if dist <= 1 and self._mart_wp_idx < len(self._MART_WAYPOINTS) - 1:
+                    self._mart_wp_idx += 1
+                    return self._viridian_parcel_quest(state)
+                if state.x == tx and state.y == ty:
+                    self._mart_wp_idx += 1
+                    return self._viridian_parcel_quest(state)
+                # Only skip if VERY stuck and close — but not the final waypoint
+                if self.stuck_turns >= 8 and dist <= 2 and self._mart_wp_idx < len(self._MART_WAYPOINTS) - 1:
+                    self._mart_wp_idx += 1
+                    return self._viridian_parcel_quest(state)
+                # Use y-axis preference for north/south legs, x-axis for east/west
+                axis_pref = "y" if abs(state.y - ty) > abs(state.x - tx) else "x"
+                return self.navigator._direction_toward_target(
+                    state, tx, ty, axis_preference=axis_pref, stuck_turns=self.stuck_turns
+                )
+
+            # Past all waypoints — head to Mart door
+            mart_x, mart_y = 29, 19
+            if state.x == mart_x and state.y == mart_y:
+                return "up"  # enter Mart
+            return self.navigator._direction_toward_target(
+                state, mart_x, mart_y, stuck_turns=self.stuck_turns
+            )
+        else:
+            # Have Parcel — head south to Route 1 exit.
+            exit_x, exit_y = 17, 35
+            if state.y >= 35:
+                return "down"  # exit south to Route 1
+            return self.navigator._direction_toward_target(
+                state, exit_x, exit_y, axis_preference="y", stuck_turns=self.stuck_turns
+            )
+
+    def _reset_mart_wp(self, state: OverworldState) -> None:
+        """Reset _mart_wp_idx to the best waypoint for the current position.
+
+        After a backtrack, the game state is restored but _mart_wp_idx may
+        point to an already-skipped waypoint.  Find the first waypoint we
+        haven't clearly passed yet.
+        """
+        best_idx = 0
+        best_dist = 9999
+        for i, (wx, wy) in enumerate(self._MART_WAYPOINTS):
+            d = abs(state.x - wx) + abs(state.y - wy)
+            if d < best_dist:
+                best_dist = d
+                best_idx = i
+        self._mart_wp_idx = best_idx
+
+    def _reset_navigator_to_nearest(self, state: OverworldState):
+        """Reset navigator waypoint to the nearest one by Manhattan distance.
+
+        After a backtrack, find the closest waypoint the agent still needs
+        to reach.  Uses Manhattan distance (not just y) to correctly handle
+        lateral jogs around ledges.  On ties, prefer the lower index so the
+        agent doesn't skip past required detour waypoints.
+        """
+        map_key = str(state.map_id)
+        if map_key not in self.navigator.routes:
+            self.navigator.current_waypoint = 0
+            return
+
+        route = self.navigator.routes[map_key]
+        waypoints = route["waypoints"] if isinstance(route, dict) and "waypoints" in route else route
+        if not waypoints:
+            self.navigator.current_waypoint = 0
+            return
+
+        best_idx = 0
+        best_dist = 9999
+        for i, wp in enumerate(waypoints):
+            d = abs(state.x - wp["x"]) + abs(state.y - wp["y"])
+            if d < best_dist:
+                best_dist = d
+                best_idx = i
+
+        self.navigator.current_waypoint = best_idx
+        self.navigator.current_map = map_key
 
     def log(self, msg: str):
         """Structured log line for Tapes to capture."""
@@ -804,33 +1036,33 @@ class PokemonAgent:
             f"Action: {action['action']}"
         )
         if action["action"] == "fight":
-            # Navigate to FIGHT menu
-            self.controller.press("a")  # Select FIGHT
-            self.controller.wait(20)
-            # Select move
+            # Navigate to FIGHT in 2x2 battle menu (index 0)
+            self.controller.navigate_battle_menu(0)
+            self.controller.wait(10)
+            # Select move from vertical move list
             self.controller.navigate_menu(action["move_index"])
             self.controller.wait(60)  # Wait for attack animation
             self.controller.mash_a(3)  # Clear text boxes
 
         elif action["action"] == "run":
-            # Navigate to RUN (index 3 in battle menu)
-            self.controller.navigate_menu(3)
+            # Navigate to RUN in 2x2 battle menu (index 3 = bottom-right)
+            self.controller.navigate_battle_menu(3)
             self.controller.wait(40)
             self.controller.mash_a(3)
 
         elif action["action"] == "item":
-            # Navigate to BAG (index 1 in battle menu)
-            self.controller.navigate_menu(1)
+            # Navigate to BAG in 2x2 battle menu (index 1 = top-right)
+            self.controller.navigate_battle_menu(1)
             self.controller.wait(20)
-            # Navigate to the correct item slot
+            # Navigate to the correct item slot in bag (vertical list)
             bag_index = action.get("bag_index", 0)
             self.controller.navigate_menu(bag_index)
             self.controller.wait(40)
             self.controller.mash_a(3)
 
         elif action["action"] == "switch":
-            # Navigate to POKEMON (index 2 in battle menu)
-            self.controller.navigate_menu(2)
+            # Navigate to POKEMON in 2x2 battle menu (index 2 = bottom-left)
+            self.controller.navigate_battle_menu(2)
             self.controller.wait(20)
             self.controller.navigate_menu(action.get("slot", 1))
             self.controller.wait(40)
@@ -853,16 +1085,17 @@ class PokemonAgent:
         # that look "stuck" but are progressing.  Restoring mid-sequence
         # undoes progress even after the player picks up a Pokemon.
         in_oaks_lab = state.map_id == 40
+        in_mart = state.map_id == 42  # Viridian Mart — dialogue zone, no backtrack
 
-        # Snapshot on map change (skip in Oak's Lab)
-        if not in_oaks_lab:
+        # Snapshot on map change (skip in Oak's Lab and Mart)
+        if not in_oaks_lab and not in_mart:
             if self._bt_last_map_id is not None and state.map_id != self._bt_last_map_id:
                 self.backtrack.save_snapshot(self.pyboy, state, self.turn_count)
         self._bt_last_map_id = state.map_id
 
-        # Periodic snapshot when making progress (skip in Oak's Lab)
+        # Periodic snapshot when making progress (skip in Oak's Lab and Mart)
         if (
-            not in_oaks_lab
+            not in_oaks_lab and not in_mart
             and self._bt_snapshot_interval > 0
             and self.turn_count > 0
             and self.turn_count % self._bt_snapshot_interval == 0
@@ -877,12 +1110,17 @@ class PokemonAgent:
             ):
                 self.backtrack.save_snapshot(self.pyboy, state, self.turn_count)
 
-        # Restore when stuck too long (skip in Oak's Lab)
-        if not in_oaks_lab and self.backtrack.should_restore(self.stuck_turns):
+        # Restore when stuck too long (skip in Oak's Lab and Mart)
+        if not in_oaks_lab and not in_mart and self.backtrack.should_restore(self.stuck_turns):
             snap = self.backtrack.restore(self.pyboy)
             if snap is not None:
                 self.stuck_turns = 0
                 self.recent_positions.clear()
+                # Reset navigator waypoint to the closest one ahead of the
+                # restored position, so the agent doesn't backtrack south
+                # through ledges it already crossed.
+                restored_state = self.memory.read_overworld_state()
+                self._reset_navigator_to_nearest(restored_state)
                 # Reset script-gate flags so one-time sequences can re-trigger
                 for attr in (
                     "_oak_wait_done",
@@ -891,10 +1129,16 @@ class PokemonAgent:
                     "_lab_phase",
                     "_lab_turns",
                     "_lab_exit_turns",
+                    "_mart_turns",
+                    "_south_wp",
+                    "_delivery_turns",
                 ):
                     if hasattr(self, attr):
                         delattr(self, attr)
                 state = self.memory.read_overworld_state()
+                # Reset Mart waypoint to nearest after backtrack
+                if state.map_id == 1 and hasattr(self, "_mart_wp_idx"):
+                    self._reset_mart_wp(state)
                 self.log(
                     f"BACKTRACK | Restored to turn {snap.turn} "
                     f"map={snap.map_id} ({snap.x},{snap.y}) "
@@ -907,6 +1151,40 @@ class PokemonAgent:
             self.take_screenshot("house_1f", force=True)
             self.log(f"DIAG | House 1F at ({state.x},{state.y}) collision map:")
             self.log(self.collision_map.to_ascii())
+
+        # Viridian City diagnostic — dump collision at stuck positions near barrier
+        if state.map_id == 1 and 25 <= state.y <= 32:
+            diag_key = f"_vcdiag_{state.x}_{state.y}"
+            if not hasattr(self, diag_key):
+                setattr(self, diag_key, True)
+                try:
+                    self.take_screenshot(f"viridian_{state.x}_{state.y}", force=True)
+                except Exception:
+                    pass
+                # Write collision grid to a file for analysis
+                try:
+                    grid_text = self.collision_map.to_ascii()
+                    with open(f"frames/collision_{state.x}_{state.y}.txt", "w") as f:
+                        f.write(f"Map: 1 Pos: ({state.x},{state.y})\n")
+                        f.write(f"Mart WP idx: {getattr(self, '_mart_wp_idx', 'N/A')}\n")
+                        f.write(grid_text + "\n")
+                except Exception:
+                    pass
+
+        # Route 1 diagnostic — dump collision at stuck positions
+        if state.map_id == 12 and state.y <= 25:
+            diag_key = f"_r1diag_{state.x}_{state.y}"
+            if not hasattr(self, diag_key):
+                setattr(self, diag_key, True)
+                try:
+                    self.take_screenshot(f"route1_{state.x}_{state.y}", force=True)
+                except Exception:
+                    pass
+                self.log(
+                    f"DIAG | Route 1 at ({state.x},{state.y}) "
+                    f"wp={self.navigator.current_waypoint} collision:"
+                )
+                self.log(self.collision_map.to_ascii())
 
         if state.map_id == 0 and state.y <= 3 and state.party_count == 0:
             # Log game state near the Oak trigger zone

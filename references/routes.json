@@ -14,21 +14,29 @@
   "12": {
     "name": "Route 1",
     "waypoints": [
-      {"x": 5, "y": 33, "note": "Enter from Pallet Town"},
-      {"x": 5, "y": 29, "note": "Walk north toward first bend"},
-      {"x": 7, "y": 27, "note": "Dodge right around ledge/obstacle at y=28"},
-      {"x": 7, "y": 21, "note": "Continue north on right side"},
-      {"x": 5, "y": 15, "note": "Shift back to center"},
-      {"x": 5, "y": 9,  "note": "Approach Viridian entrance"},
-      {"x": 5, "y": 1,  "note": "Exit north to Viridian City"}
+      {"x": 5,  "y": 30, "note": "Go LEFT — ledge1 at y=27 spans x=7-14"},
+      {"x": 5,  "y": 26, "note": "North past ledge1 gap (x=4-6 open)"},
+      {"x": 5,  "y": 24, "note": "Continue north on left side"},
+      {"x": 13, "y": 24, "note": "Jog RIGHT before ledge2 at y=23 (blocks x=4-11)"},
+      {"x": 13, "y": 21, "note": "North past ledge2 gap (x=12-15 open)"},
+      {"x": 9,  "y": 20, "note": "Go LEFT — ledge3 at y=19 spans x=10-18, gap at x<=9"},
+      {"x": 9,  "y": 18, "note": "North past ledge3 gap"},
+      {"x": 14, "y": 16, "note": "Jog RIGHT — must reach x=14+ before ledge4 at y=13"},
+      {"x": 14, "y": 15, "note": "North to ledge4 gap (x=14-17 open)"},
+      {"x": 14, "y": 12, "note": "North past ledge4 gap"},
+      {"x": 14, "y": 7,  "note": "Stay RIGHT — ledge5 at y=5 spans x=7-13, gap x=14-16"},
+      {"x": 14, "y": 4,  "note": "North past ledge5 gap"},
+      {"x": 10, "y": 0,  "note": "Exit north — x=10-11 is the north gap"}
     ]
   },
 
   "1": {
     "name": "Viridian City",
     "waypoints": [
-      {"x": 17, "y": 17, "note": "Enter from Route 1"},
-      {"x": 17, "y": 10, "note": "Pokemon Center"},
+      {"x": 19, "y": 30, "note": "Left jog — barrier at y=26-27 has gap only at x=18-19"},
+      {"x": 19, "y": 26, "note": "North through gap — confirmed walkable from collision data"},
+      {"x": 22, "y": 22, "note": "Through building gap at x=22 (between PkCenter and houses)"},
+      {"x": 17, "y": 10, "note": "Northwest to main road area"},
       {"x": 17, "y": 1,  "note": "Exit north to Route 2"}
     ]
   },

@@ -605,7 +605,7 @@ class TestCollisionMap:
         """update() should read game_area_collision and downsample 18x20 to 9x10."""
         cm = CollisionMap()
         raw = [[1] * 20 for _ in range(18)]
-        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        mock_pyboy.game_wrapper.game_area_collision.return_value = raw
         cm.update(mock_pyboy)
         for row in cm.grid:
             for cell in row:
@@ -616,7 +616,7 @@ class TestCollisionMap:
         cm = CollisionMap()
         raw = [[1] * 20 for _ in range(18)]
         raw[0][0] = 0
-        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        mock_pyboy.game_wrapper.game_area_collision.return_value = raw
         cm.update(mock_pyboy)
         assert cm.grid[0][0] == 0
 
@@ -624,7 +624,7 @@ class TestCollisionMap:
         """All zeros -> all walls."""
         cm = CollisionMap()
         raw = [[0] * 20 for _ in range(18)]
-        mock_pyboy.game_wrapper.return_value.game_area_collision.return_value = raw
+        mock_pyboy.game_wrapper.game_area_collision.return_value = raw
         cm.update(mock_pyboy)
         for row in cm.grid:
             for cell in row:

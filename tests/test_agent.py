@@ -1564,17 +1564,17 @@ class TestRunBattleTurn:
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Super Potion", "bag_index": 3})
         ag.controller = MagicMock()
         ag.run_battle_turn()
-        # Should navigate_menu(1) for BAG, then navigate_menu(3) for item
+        # Should navigate_battle_menu(1) for BAG, then navigate_menu(3) for item slot
+        ag.controller.navigate_battle_menu.assert_called_once_with(1)
         menu_calls = [c for c in ag.controller.navigate_menu.call_args_list]
-        assert menu_calls[0] == call(1)
-        assert menu_calls[1] == call(3)
+        assert menu_calls[0] == call(3)
 
     def test_item_action_default_bag_index(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion"})
         ag.controller = MagicMock()
         ag.run_battle_turn()
         menu_calls = [c for c in ag.controller.navigate_menu.call_args_list]
-        assert menu_calls[1] == call(0)
+        assert menu_calls[0] == call(0)
 
     def test_switch_action(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "switch", "slot": 2})
@@ -2173,7 +2173,27 @@ class TestPokemonAgentCollisionMap:
         assert ag.last_overworld_state == state
 
     def test_choose_overworld_action_passes_collision_grid(self, tmp_path):
-        """choose_overworld_action passes collision_grid to navigator."""
+        """choose_overworld_action passes collision_grid for routed maps, None for unrouted."""
+        routes = {"0": {"name": "Test", "waypoints": [{"x": 10, "y": 10}]}}
+        ag = _make_agent(tmp_path, routes=routes)
+        ag.collision_map = MagicMock()
+        ag.collision_map.grid = [[1] * 10 for _ in range(9)]
+
+        # Use a map that has a defined route (map 0)
+        state = OverworldState(map_id=0, x=5, y=5)
+        ag.navigator.next_direction = MagicMock(return_value="down")
+
+        ag.choose_overworld_action(state)
+
+        ag.navigator.next_direction.assert_called_once_with(
+            state,
+            turn=ag.turn_count,
+            stuck_turns=ag.stuck_turns,
+            collision_grid=ag.collision_map.grid,
+        )
+
+    def test_choose_overworld_action_no_grid_for_unrouted_maps(self, tmp_path):
+        """choose_overworld_action passes None grid for maps without routes."""
         ag = _make_agent(tmp_path)
         ag.collision_map = MagicMock()
         ag.collision_map.grid = [[1] * 10 for _ in range(9)]
@@ -2187,7 +2207,7 @@ class TestPokemonAgentCollisionMap:
             state,
             turn=ag.turn_count,
             stuck_turns=ag.stuck_turns,
-            collision_grid=ag.collision_map.grid,
+            collision_grid=None,
         )
 
 

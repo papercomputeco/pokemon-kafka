@@ -173,6 +173,12 @@ class MemoryReader:
     # bit 6: text/script display active (set by DisplayTextID)
     ADDR_WD730 = 0xD730
 
+    # Quest progression flags
+    # wd74b bit 0: got Pokedex (set after delivering Oak's Parcel)
+    ADDR_WD74B = 0xD74B
+    # wd74e bit 1: got Oak's Parcel from Viridian Mart
+    ADDR_WD74E = 0xD74E
+
     def __init__(self, pyboy):
         self.pyboy = pyboy
 
@@ -297,6 +303,14 @@ class MemoryReader:
         count = self._read(self.ADDR_PARTY_COUNT)
         return [self._read(self.ADDR_PARTY_SPECIES_LIST + i) for i in range(min(count, 6))]
 
+    def has_pokedex(self) -> bool:
+        """Check if player has the Pokedex (Parcel delivered to Oak)."""
+        return bool(self._read(self.ADDR_WD74B) & 0x01)
+
+    def has_oaks_parcel(self) -> bool:
+        """Check if player got Oak's Parcel from Viridian Mart."""
+        return bool(self._read(self.ADDR_WD74E) & 0x02)
+
     def is_in_battle(self) -> bool:
         """Quick check: are we in a battle?"""
         return self._read(self.ADDR_BATTLE_TYPE) != 0
@@ -320,7 +334,7 @@ class CollisionMap:
 
     def update(self, pyboy) -> None:
         """Read collision data and downsample 18x20 to 9x10."""
-        raw = pyboy.game_wrapper().game_area_collision()
+        raw = pyboy.game_wrapper.game_area_collision()
         self.sprites = []
         for r in range(9):
             for c in range(10):

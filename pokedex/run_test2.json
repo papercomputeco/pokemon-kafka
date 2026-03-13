@@ -1,0 +1,15 @@
+{
+  "turns": 5000,
+  "battles_won": 125,
+  "maps_visited": 5,
+  "final_map_id": 12,
+  "final_x": 9,
+  "final_y": 24,
+  "badges": 0,
+  "party_size": 1,
+  "stuck_count": 563,
+  "backtrack_restores": 81,
+  "encounters": 125,
+  "level_ups": 35,
+  "evolutions": 0
+}
