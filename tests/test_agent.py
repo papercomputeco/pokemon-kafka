@@ -1861,16 +1861,21 @@ class TestTryAstar:
 class TestNextDirectionUncoveredBranches:
     """Cover lines 284, 289, 322-323 in next_direction."""
 
-    def test_map0_with_party_nulls_special_target(self):
-        """Line 284: map_id==0, party_count>0 sets special_target = None."""
-        # Map 0 is NOT in EARLY_GAME_TARGETS so this is a no-op path,
-        # but the assignment still executes if map_id == 0 and party_count > 0.
+    def test_map0_with_party_targets_route1_exit(self):
+        """Map 0 with party > 0 routes north to Route 1 exit at (10, 0)."""
         routes = {"0": [{"x": 8, "y": 10}]}
         nav = Navigator(routes)
-        state = OverworldState(map_id=0, x=5, y=5, party_count=1)
+        state = OverworldState(map_id=0, x=5, y=11, party_count=1)
         result = nav.next_direction(state)
-        # Falls through to waypoint routing since special_target was None/nulled
-        assert result is not None
+        # Should head north (axis="y") toward (10, 0)
+        assert result == "up"
+
+    def test_map0_with_party_at_exit_returns_up(self):
+        """Map 0 with party at (10, 0) returns 'up' to exit to Route 1."""
+        nav = Navigator({})
+        state = OverworldState(map_id=0, x=10, y=0, party_count=1)
+        result = nav.next_direction(state)
+        assert result == "up"
 
     def test_at_early_game_target_returns_at_target_hint(self):
         """Line 289: at target returns at_target hint (default 'down')."""
@@ -1917,13 +1922,13 @@ class TestUpdateOverworldProgressUncovered:
         ag.update_overworld_progress(state)
         assert ag.door_cooldown == 8
 
-    def test_door_cooldown_on_interior_exit_map40(self, tmp_path):
-        """Line 426: exiting map 40 to map 0 sets door_cooldown = 8."""
+    def test_short_door_cooldown_on_oak_lab_exit(self, tmp_path):
+        """Exiting Oak's Lab (40) gets short cooldown=3 (left only, no south push)."""
         ag = _make_agent(tmp_path)
         ag.last_overworld_state = OverworldState(map_id=40, x=5, y=5)
-        state = OverworldState(map_id=0, x=5, y=5)
+        state = OverworldState(map_id=0, x=5, y=11)
         ag.update_overworld_progress(state)
-        assert ag.door_cooldown == 8
+        assert ag.door_cooldown == 3
 
     def test_no_door_cooldown_on_non_interior_exit(self, tmp_path):
         """Line 426 not hit: exiting map 12 to map 0 does not set cooldown."""
