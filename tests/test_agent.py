@@ -28,7 +28,7 @@ from agent import (
     load_type_chart,
     main,
 )
-from memory_reader import BattleState, OverworldState
+from memory_reader import BattleState, MemoryReader, OverworldState
 
 # ===================================================================
 # Module-level import branches (lines 19-28)
@@ -216,7 +216,7 @@ class TestBattleStrategy:
     # -- constructor defaults --
 
     def test_default_params(self):
-        assert self.strategy.hp_run_threshold == 0.2
+        assert self.strategy.hp_run_threshold == 0.1
         assert self.strategy.hp_heal_threshold == 0.25
         assert self.strategy.unknown_move_score == 10.0
         assert self.strategy.status_move_score == 1.0
@@ -224,12 +224,12 @@ class TestBattleStrategy:
     def test_custom_params(self):
         s = BattleStrategy(
             self.chart,
-            hp_run_threshold=0.1,
+            hp_run_threshold=0.05,
             hp_heal_threshold=0.4,
             unknown_move_score=20.0,
             status_move_score=5.0,
         )
-        assert s.hp_run_threshold == 0.1
+        assert s.hp_run_threshold == 0.05
         assert s.hp_heal_threshold == 0.4
         assert s.unknown_move_score == 20.0
         assert s.status_move_score == 5.0
@@ -307,21 +307,27 @@ class TestBattleStrategy:
         return BattleState(**defaults)
 
     def test_choose_action_run_when_low_hp_wild(self):
-        battle = self._make_battle(player_hp=10, player_max_hp=100, battle_type=1)
+        battle = self._make_battle(player_hp=5, player_max_hp=100, battle_type=1)
         action = self.strategy.choose_action(battle)
         assert action == {"action": "run"}
 
     def test_choose_action_item_when_low_hp_trainer(self):
         # hp_ratio = 0.20 -- not < 0.2, so run won't trigger; but 0.20 < 0.25 -> item
         battle = self._make_battle(player_hp=20, player_max_hp=100, battle_type=2)
-        action = self.strategy.choose_action(battle)
-        assert action == {"action": "item", "item": "potion"}
+        action = self.strategy.choose_action(battle, bag_healing=(0, 0x14))
+        assert action == {"action": "item", "item": "Potion", "bag_index": 0}
 
     def test_choose_action_item_when_low_hp_wild_above_run_threshold(self):
         # hp_ratio = 0.24 -- above 0.2, below 0.25 -> item
         battle = self._make_battle(player_hp=24, player_max_hp=100, battle_type=1)
-        action = self.strategy.choose_action(battle)
-        assert action == {"action": "item", "item": "potion"}
+        action = self.strategy.choose_action(battle, bag_healing=(2, 0x19))
+        assert action == {"action": "item", "item": "Super Potion", "bag_index": 2}
+
+    def test_choose_action_no_item_when_no_bag_healing(self):
+        """Low HP but no healing items -> fall through to fight."""
+        battle = self._make_battle(player_hp=20, player_max_hp=100, battle_type=2)
+        action = self.strategy.choose_action(battle, bag_healing=None)
+        assert action["action"] == "fight"
 
     def test_choose_action_fight_best_move(self):
         battle = self._make_battle(
@@ -351,7 +357,7 @@ class TestBattleStrategy:
         assert action == {"action": "fight", "move_index": 0}
 
     def test_choose_action_max_hp_zero(self):
-        # max_hp = 0 -> max(0, 1) = 1, hp_ratio = 0/1 = 0 -> run (wild)
+        # max_hp = 0 -> max(0, 1) = 1, hp_ratio = 0/1 = 0 -> run (wild, 0 < 0.1)
         battle = self._make_battle(player_hp=0, player_max_hp=0, battle_type=1)
         action = self.strategy.choose_action(battle)
         assert action == {"action": "run"}
@@ -367,8 +373,75 @@ class TestBattleStrategy:
         # With hp_heal_threshold=0.5, hp_ratio=0.45 (above default run 0.2) triggers heal
         s = BattleStrategy(self.chart, hp_heal_threshold=0.5)
         battle = self._make_battle(player_hp=45, player_max_hp=100, battle_type=2)
-        action = s.choose_action(battle)
-        assert action == {"action": "item", "item": "potion"}
+        action = s.choose_action(battle, bag_healing=(0, 0x14))
+        assert action == {"action": "item", "item": "Potion", "bag_index": 0}
+
+    def test_run_attempts_fallback_after_3(self):
+        """After 3 failed run attempts, strategy stops returning run."""
+        battle = self._make_battle(player_hp=5, player_max_hp=100, battle_type=1)
+        # First 3 attempts return run
+        for _ in range(3):
+            action = self.strategy.choose_action(battle)
+            assert action == {"action": "run"}
+        # 4th attempt falls through — no bag_healing so fights
+        action = self.strategy.choose_action(battle)
+        assert action["action"] == "fight"
+
+    def test_run_attempts_reset(self):
+        """Resetting _run_attempts allows running again."""
+        battle = self._make_battle(player_hp=5, player_max_hp=100, battle_type=1)
+        for _ in range(3):
+            self.strategy.choose_action(battle)
+        # Reset as the main loop does when a battle ends
+        self.strategy._run_attempts = 0
+        action = self.strategy.choose_action(battle)
+        assert action == {"action": "run"}
+
+    # -- fight-first: high HP always fights, even in wild battles --
+
+    def test_fight_first_high_hp_wild(self):
+        """At full HP in a wild battle, the agent fights (not run)."""
+        battle = self._make_battle(player_hp=100, player_max_hp=100, battle_type=1)
+        action = self.strategy.choose_action(battle)
+        assert action["action"] == "fight"
+
+    def test_fight_first_moderate_hp_wild_with_healing(self):
+        """At 15% HP with healing items, the agent heals."""
+        battle = self._make_battle(player_hp=15, player_max_hp=100, battle_type=1)
+        action = self.strategy.choose_action(battle, bag_healing=(0, 0x14))
+        assert action["action"] == "item"
+
+    def test_fight_first_moderate_hp_wild_no_healing(self):
+        """At 15% HP without healing items, the agent fights."""
+        battle = self._make_battle(player_hp=15, player_max_hp=100, battle_type=1)
+        action = self.strategy.choose_action(battle, bag_healing=None)
+        assert action["action"] == "fight"
+
+    # -- type-aware scoring via choose_action --
+
+    def test_choose_action_uses_enemy_type(self):
+        """choose_action passes enemy_type_name to score_move for effectiveness."""
+        # Ember (fire) vs grass enemy -> super effective
+        battle = self._make_battle(
+            moves=[0x2D, 0x01, 0x00, 0x00],  # Ember, Pound
+            move_pp=[10, 10, 0, 0],
+            enemy_type1=0x17,  # grass
+        )
+        action = self.strategy.choose_action(battle)
+        assert action["action"] == "fight"
+        assert action["move_index"] == 0  # Ember is super effective vs grass
+
+    def test_choose_action_prefers_effective_move(self):
+        """When enemy type makes one move clearly better, it's chosen."""
+        # Water Gun (water) vs fire enemy -> super effective; Pound (normal) -> neutral
+        battle = self._make_battle(
+            moves=[0x01, 0x37, 0x00, 0x00],  # Pound, Water Gun
+            move_pp=[10, 10, 0, 0],
+            enemy_type1=0x14,  # fire
+        )
+        action = self.strategy.choose_action(battle)
+        assert action["action"] == "fight"
+        assert action["move_index"] == 1  # Water Gun super effective vs fire
 
 
 # ===================================================================
@@ -1188,6 +1261,241 @@ class TestWritePokedexEntry:
         ag.write_pokedex_entry()
         assert (ag.pokedex_dir / "log2.md").exists()
 
+    def test_pokedex_includes_encounters(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.encounter_log = [
+            {"species": "Pidgey", "type": "normal", "won": True},
+            {"species": "Pidgey", "type": "normal", "won": True},
+            {"species": "Rattata", "type": "normal", "won": True},
+        ]
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
+        ag.write_pokedex_entry()
+        logs = list(ag.pokedex_dir.glob("log*.md"))
+        content = logs[0].read_text()
+        assert "Encounters:** 3" in content
+        assert "Pidgey: 2" in content
+        assert "Rattata: 1" in content
+
+
+class TestEncounterLog:
+    def test_init_has_encounter_log(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        assert ag.encounter_log == []
+        assert ag._current_enemy_species == ""
+        assert ag._current_enemy_type == ""
+
+    def test_battle_end_logs_encounter(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            enemy_species=0x24,  # Pidgey
+            enemy_type1=0x00,  # normal
+            enemy_type2=0x02,  # flying
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+            player_level=5,
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=2)
+
+        assert len(ag.encounter_log) == 1
+        assert ag.encounter_log[0]["species"] == "Pidgey"
+        assert ag.encounter_log[0]["type"] == "normal"
+        assert ag.encounter_log[0]["won"] is True
+
+    def test_compute_fitness_includes_encounters(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.encounter_log = [{"species": "Pidgey", "type": "normal", "won": True}] * 3
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
+        fitness = ag.compute_fitness()
+        assert fitness["encounters"] == 3
+
+
+class TestEvolutionDetection:
+    def test_init_has_evolution_fields(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        assert ag._pre_battle_species == []
+        assert ag._pre_battle_level == 0
+        assert ag.evolution_log == []
+        assert ag.level_ups == 0
+
+    def test_level_up_detected(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            player_level=5,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+        # After battle, player level reads as 6 (leveled up from 5)
+        # ADDR_PLAYER_LEVEL reads 0 when not in battle, so falls through to party struct
+        ag.pyboy.memory[MemoryReader.PARTY_BASE + 33] = 6
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=2)
+
+        assert ag.level_ups == 1
+        assert any("LEVEL UP" in e for e in ag.events)
+        assert any("Lv5 -> Lv6" in e for e in ag.events)
+
+    def test_evolution_detected(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            player_level=16,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        # Pre-battle: Charmander; post-battle: Charmeleon
+        species_calls = [MagicMock(return_value=[0xB0]), MagicMock(return_value=[0xB2])]
+        call_count = [0]
+
+        def mock_read_species():
+            idx = min(call_count[0], len(species_calls) - 1)
+            call_count[0] += 1
+            return species_calls[idx]()
+
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(side_effect=mock_read_species)
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=2)
+
+        assert len(ag.evolution_log) == 1
+        assert ag.evolution_log[0]["from"] == "Charmander"
+        assert ag.evolution_log[0]["to"] == "Charmeleon"
+        assert ag.evolution_log[0]["slot"] == 0
+        assert any("EVOLUTION" in e for e in ag.events)
+
+    def test_no_evolution_when_species_unchanged(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            player_level=5,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=2)
+
+        assert ag.evolution_log == []
+
+    def test_pre_battle_snapshot_only_on_first_turn(self, tmp_path):
+        """Pre-battle species is only captured on the first battle turn."""
+        ag = _make_agent(tmp_path)
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            player_level=5,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        # 2 battle turns (iter1: still fighting, iter2: battle ends), then 1 overworld
+        # Each battle iter: main loop read + run_battle_turn read + post-check read = 3
+        # iter1: active, active, active (battle continues)
+        # iter2: active, active, none (battle ends)
+        # iter3: none (overworld)
+        ag.memory.read_battle_state = MagicMock(
+            side_effect=[
+                battle_active,
+                battle_active,
+                battle_active,
+                battle_active,
+                battle_active,
+                battle_none,
+                battle_none,
+            ]
+        )
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=3)
+
+        # read_party_species called: once for pre-battle snapshot, once for post-battle check
+        assert ag.memory.read_party_species.call_count == 2
+
+    def test_compute_fitness_includes_evolution_and_levelups(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.evolution_log = [{"slot": 0, "from": "Charmander", "to": "Charmeleon"}]
+        ag.level_ups = 3
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
+        fitness = ag.compute_fitness()
+        assert fitness["level_ups"] == 3
+        assert fitness["evolutions"] == 1
+
+    def test_pokedex_includes_evolution_section(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.evolution_log = [{"slot": 0, "from": "Charmander", "to": "Charmeleon"}]
+        ag.level_ups = 2
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
+        ag.write_pokedex_entry()
+        logs = list(ag.pokedex_dir.glob("log*.md"))
+        content = logs[0].read_text()
+        assert "## Evolutions" in content
+        assert "Charmander -> Charmeleon" in content
+        assert "## Level Ups: 2" in content
+
+    def test_pokedex_no_evolution_section_when_empty(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=0, y=0))
+        ag.write_pokedex_entry()
+        logs = list(ag.pokedex_dir.glob("log*.md"))
+        content = logs[0].read_text()
+        assert "## Evolutions" not in content
+        assert "## Level Ups" not in content
+
 
 class TestTakeScreenshot:
     def test_no_screenshots_flag(self, tmp_path):
@@ -1231,6 +1539,7 @@ class TestRunBattleTurn:
             move_pp=[10, 0, 0, 0],
         )
         ag.memory.read_battle_state = MagicMock(return_value=battle)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
         ag.battle_strategy.choose_action = MagicMock(return_value=action_dict)
         return ag
 
@@ -1247,9 +1556,25 @@ class TestRunBattleTurn:
         assert ag.turn_count == 1
 
     def test_item_action(self, tmp_path):
-        ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "potion"})
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion", "bag_index": 0})
         ag.run_battle_turn()
         assert ag.turn_count == 1
+
+    def test_item_action_navigates_to_bag_index(self, tmp_path):
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Super Potion", "bag_index": 3})
+        ag.controller = MagicMock()
+        ag.run_battle_turn()
+        # Should navigate_menu(1) for BAG, then navigate_menu(3) for item
+        menu_calls = [c for c in ag.controller.navigate_menu.call_args_list]
+        assert menu_calls[0] == call(1)
+        assert menu_calls[1] == call(3)
+
+    def test_item_action_default_bag_index(self, tmp_path):
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion"})
+        ag.controller = MagicMock()
+        ag.run_battle_turn()
+        menu_calls = [c for c in ag.controller.navigate_menu.call_args_list]
+        assert menu_calls[1] == call(0)
 
     def test_switch_action(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "switch", "slot": 2})
@@ -1260,6 +1585,24 @@ class TestRunBattleTurn:
         ag = self._setup_agent_for_battle(tmp_path, {"action": "switch"})
         ag.run_battle_turn()
         assert ag.turn_count == 1
+
+    def test_calls_find_healing_item(self, tmp_path):
+        """run_battle_turn passes find_healing_item result to choose_action."""
+        ag = _make_agent(tmp_path)
+        battle = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+        )
+        ag.memory.read_battle_state = MagicMock(return_value=battle)
+        ag.memory.find_healing_item = MagicMock(return_value=(0, 0x14))
+        ag.battle_strategy.choose_action = MagicMock(return_value={"action": "fight", "move_index": 0})
+        ag.run_battle_turn()
+        ag.battle_strategy.choose_action.assert_called_once_with(battle, bag_healing=(0, 0x14))
 
 
 class TestRunOverworld:
@@ -1334,8 +1677,14 @@ class TestRunOverworld:
 
 
 class TestRun:
+    def _mock_battle_helpers(self, ag):
+        """Set up common mocks for battle-related memory methods."""
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+
     def test_run_battle_then_overworld(self, tmp_path):
         ag = _make_agent(tmp_path)
+        self._mock_battle_helpers(ag)
 
         battle_active = BattleState(
             battle_type=1,
@@ -1345,6 +1694,7 @@ class TestRun:
             enemy_max_hp=40,
             moves=[0x01, 0x00, 0x00, 0x00],
             move_pp=[10, 0, 0, 0],
+            player_level=5,
         )
         battle_none = BattleState(battle_type=0)
         overworld = OverworldState(map_id=0, x=5, y=5)
@@ -1361,6 +1711,32 @@ class TestRun:
         assert ag.battles_won == 1
         assert any("Battle ended" in e for e in ag.events)
         assert any("Session complete" in e for e in ag.events)
+
+    def test_run_resets_run_attempts_on_battle_end(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        self._mock_battle_helpers(ag)
+        ag.battle_strategy._run_attempts = 3  # simulate exhausted run attempts
+
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+            player_level=5,
+        )
+        battle_none = BattleState(battle_type=0)
+        overworld = OverworldState(map_id=0, x=5, y=5)
+
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=overworld)
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=2)
+
+        assert ag.battle_strategy._run_attempts == 0
 
     def test_run_overworld_only(self, tmp_path):
         ag = _make_agent(tmp_path)
@@ -1398,6 +1774,7 @@ class TestRun:
     def test_run_battle_not_ended(self, tmp_path):
         """Battle still active after run_battle_turn -- no battles_won increment."""
         ag = _make_agent(tmp_path)
+        self._mock_battle_helpers(ag)
         battle_active = BattleState(
             battle_type=1,
             player_hp=50,
@@ -2596,7 +2973,7 @@ class TestEvolveParams:
         saved = os.environ.pop("EVOLVE_PARAMS", None)
         try:
             ag = _make_agent_with_evolve(tmp_path)
-            assert ag.battle_strategy.hp_run_threshold == 0.2
+            assert ag.battle_strategy.hp_run_threshold == 0.1
             assert ag.battle_strategy.hp_heal_threshold == 0.25
             assert ag.battle_strategy.unknown_move_score == 10.0
             assert ag.battle_strategy.status_move_score == 1.0
