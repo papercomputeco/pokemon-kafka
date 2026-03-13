@@ -189,10 +189,16 @@ class BattleStrategy:
             {"action": "switch", "slot": 1-5}
             {"action": "run"}
         """
-        # Low HP — heal if wild battle
+        # Low HP — try to run from wild battles, but fight if run keeps failing.
+        # Pokemon Red run escape can fail; after 3 attempts, just fight.
         hp_ratio = battle.player_hp / max(battle.player_max_hp, 1)
         if hp_ratio < self.hp_run_threshold and battle.battle_type == 1:  # Wild
-            return {"action": "run"}  # Safe option when low
+            if not hasattr(self, "_run_attempts"):
+                self._run_attempts = 0
+            if self._run_attempts < 3:
+                self._run_attempts += 1
+                return {"action": "run"}
+            # Fall through to fight — running isn't working
 
         if hp_ratio < self.hp_heal_threshold:
             return {"action": "item", "item": "potion"}
@@ -300,9 +306,9 @@ class Navigator:
             self.current_waypoint = 0
 
         special_target = EARLY_GAME_TARGETS.get(state.map_id)
-        # Map 0 early-game target only applies before getting a Pokemon
+        # Map 0: after getting a Pokemon, head north to Route 1 exit
         if state.map_id == 0 and state.party_count > 0:
-            special_target = None
+            special_target = {"name": "Route 1 exit", "target": (10, 0), "axis": "y", "at_target": "up"}
         if special_target:
             target_x, target_y = special_target["target"]
             # At target: use at_target hint to walk through doors/grass
@@ -545,10 +551,16 @@ class PokemonAgent:
             self.stuck_turns = 0
             self.recent_positions.clear()
             self.recent_positions.append(pos)
-            # Set door cooldown when exiting interior maps to avoid re-entry
+            # Set door cooldown when exiting interior maps to avoid re-entry.
+            # Houses (37, 38) get the full cooldown (down then left).
+            # Oak's Lab (40) gets a short cooldown (3 = left only) because
+            # its exit at (5,11) is near the south boundary — "down" would
+            # trap the agent at y=12 instead of letting it head north.
             prev = self.last_overworld_state.map_id
-            if prev in (37, 38, 40) and state.map_id == 0:
+            if prev in (37, 38) and state.map_id == 0:
                 self.door_cooldown = self._evolve_door_cooldown
+            elif prev == 40 and state.map_id == 0:
+                self.door_cooldown = 3  # sidestep left to clear lab door
             self.log(f"MAP CHANGE | {prev} -> {state.map_id} | Pos: ({state.x}, {state.y})")
             return
 
