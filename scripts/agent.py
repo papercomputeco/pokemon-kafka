@@ -580,22 +580,6 @@ class PokemonAgent:
                 f"STUCK | Map: {state.map_id} | Pos: ({state.x}, {state.y}) | "
                 f"Last move: {self.last_overworld_action} | Streak: {self.stuck_turns}"
             )
-            # Log collision grid on first stuck=5 to diagnose Route 1 obstacles
-            if self.stuck_turns == 5 and state.map_id == 12 and not getattr(self, "_route1_diag", False):
-                self._route1_diag = True
-                grid = self.collision_map.grid
-                rows = []
-                for r, row in enumerate(grid):
-                    cells = []
-                    for c, val in enumerate(row):
-                        if r == 4 and c == 4:
-                            cells.append("@")
-                        elif val:
-                            cells.append("#")
-                        else:
-                            cells.append(".")
-                    rows.append(" ".join(cells))
-                self.log(f"COLLISION | ({state.x},{state.y}):\n" + "\n".join(rows))
 
     def choose_overworld_action(self, state: OverworldState) -> str:
         """Pick the next overworld action."""
