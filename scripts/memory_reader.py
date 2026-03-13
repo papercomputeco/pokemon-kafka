@@ -8,6 +8,58 @@ Swap out the address maps for other games.
 from dataclasses import dataclass, field
 from typing import List
 
+# Gen 1 type byte → name mapping (from pokered disassembly)
+TYPE_ID_MAP: dict[int, str] = {
+    0x00: "normal",
+    0x01: "fighting",
+    0x02: "flying",
+    0x03: "poison",
+    0x04: "ground",
+    0x05: "rock",
+    0x07: "bug",
+    0x08: "ghost",
+    0x14: "fire",
+    0x15: "water",
+    0x16: "electric",
+    0x17: "grass",
+    0x18: "ice",
+    0x19: "psychic",
+    0x1A: "dragon",
+}
+
+# Species byte → name for early-game Pokemon (Route 1 + Viridian Forest + starters/evos)
+SPECIES_ID_MAP: dict[int, str] = {
+    0x24: "Pidgey",
+    0xA5: "Rattata",
+    0x7B: "Caterpie",
+    0x70: "Weedle",
+    0x54: "Pikachu",
+    0x6D: "Metapod",
+    0x6E: "Kakuna",
+    0xB0: "Charmander",
+    0xB2: "Charmeleon",
+    0xB1: "Squirtle",
+    0xB3: "Wartortle",
+    0x99: "Bulbasaur",
+    0x09: "Ivysaur",
+    0x7A: "Butterfree",
+    0x97: "Beedrill",
+    0x96: "Pidgeotto",
+}
+
+# Healing items the agent knows how to use in battle
+HEALING_ITEM_IDS: dict[int, str] = {
+    0x14: "Potion",
+    0x19: "Super Potion",
+    0x1A: "Hyper Potion",
+    0x10: "Full Restore",
+}
+
+# Bag memory layout
+ADDR_BAG_COUNT = 0xD31D
+ADDR_BAG_ITEMS = 0xD31E  # pairs of [item_id, quantity], terminated by 0xFF
+BAG_MAX_SLOTS = 20
+
 
 @dataclass
 class BattleState:
@@ -18,6 +70,8 @@ class BattleState:
     enemy_max_hp: int = 0
     enemy_level: int = 0
     enemy_species: int = 0
+    enemy_type1: int = 0
+    enemy_type2: int = 0
     player_hp: int = 0
     player_max_hp: int = 0
     player_level: int = 0
@@ -26,6 +80,16 @@ class BattleState:
     move_pp: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
     party_count: int = 0
     party_hp: List[int] = field(default_factory=list)
+
+    @property
+    def enemy_type_name(self) -> str:
+        """Resolve enemy_type1 byte to a type name string."""
+        return TYPE_ID_MAP.get(self.enemy_type1, "normal")
+
+    @property
+    def enemy_species_name(self) -> str:
+        """Resolve enemy_species byte to a species name string."""
+        return SPECIES_ID_MAP.get(self.enemy_species, f"#{self.enemy_species:02X}")
 
 
 @dataclass
@@ -60,6 +124,8 @@ class MemoryReader:
     ADDR_ENEMY_MAX_HP_LO = 0xCFF5
     ADDR_ENEMY_LEVEL = 0xCFF3
     ADDR_ENEMY_SPECIES = 0xCFE5
+    ADDR_ENEMY_TYPE1 = 0xCFEA
+    ADDR_ENEMY_TYPE2 = 0xCFEB
 
     # Player party (lead pokemon)
     ADDR_PLAYER_HP_HI = 0xD015
@@ -83,6 +149,7 @@ class MemoryReader:
 
     # Party
     ADDR_PARTY_COUNT = 0xD163
+    ADDR_PARTY_SPECIES_LIST = 0xD164  # 6 bytes, one species ID per party member
 
     # Party pokemon HP addresses (6 pokemon, 44 bytes apart)
     PARTY_BASE = 0xD16B
@@ -141,6 +208,8 @@ class MemoryReader:
         state.enemy_max_hp = self._read_16(self.ADDR_ENEMY_MAX_HP_HI, self.ADDR_ENEMY_MAX_HP_LO)
         state.enemy_level = self._read(self.ADDR_ENEMY_LEVEL)
         state.enemy_species = self._read(self.ADDR_ENEMY_SPECIES)
+        state.enemy_type1 = self._read(self.ADDR_ENEMY_TYPE1)
+        state.enemy_type2 = self._read(self.ADDR_ENEMY_TYPE2)
 
         # Player lead
         state.player_hp = self._read_16(self.ADDR_PLAYER_HP_HI, self.ADDR_PLAYER_HP_LO)
@@ -201,6 +270,32 @@ class MemoryReader:
             hp = self._read_16(base + self.PARTY_HP_OFFSET, base + self.PARTY_HP_OFFSET + 1)
             hp_list.append(hp)
         return hp_list
+
+    def read_bag_items(self) -> list[tuple[int, int]]:
+        """Read item_id/quantity pairs from the bag."""
+        count = self._read(ADDR_BAG_COUNT)
+        items: list[tuple[int, int]] = []
+        for i in range(min(count, BAG_MAX_SLOTS)):
+            addr = ADDR_BAG_ITEMS + i * 2
+            item_id = self._read(addr)
+            if item_id == 0xFF:
+                break
+            quantity = self._read(addr + 1)
+            items.append((item_id, quantity))
+        return items
+
+    def find_healing_item(self) -> tuple[int, int] | None:
+        """Find first healing item with qty > 0. Returns (bag_index, item_id) or None."""
+        items = self.read_bag_items()
+        for idx, (item_id, qty) in enumerate(items):
+            if item_id in HEALING_ITEM_IDS and qty > 0:
+                return (idx, item_id)
+        return None
+
+    def read_party_species(self) -> list[int]:
+        """Read species ID for each party member."""
+        count = self._read(self.ADDR_PARTY_COUNT)
+        return [self._read(self.ADDR_PARTY_SPECIES_LIST + i) for i in range(min(count, 6))]
 
     def is_in_battle(self) -> bool:
         """Quick check: are we in a battle?"""

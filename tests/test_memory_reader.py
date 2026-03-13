@@ -1,7 +1,18 @@
 """Tests for memory_reader.py — targeting 100% line coverage."""
 
 import pytest
-from memory_reader import BattleState, CollisionMap, MemoryReader, OverworldState
+from memory_reader import (
+    ADDR_BAG_COUNT,
+    ADDR_BAG_ITEMS,
+    BAG_MAX_SLOTS,
+    HEALING_ITEM_IDS,
+    SPECIES_ID_MAP,
+    TYPE_ID_MAP,
+    BattleState,
+    CollisionMap,
+    MemoryReader,
+    OverworldState,
+)
 
 # ---------------------------------------------------------------------------
 # Dataclass default-value tests
@@ -16,6 +27,8 @@ class TestBattleStateDefaults:
         assert bs.enemy_max_hp == 0
         assert bs.enemy_level == 0
         assert bs.enemy_species == 0
+        assert bs.enemy_type1 == 0
+        assert bs.enemy_type2 == 0
         assert bs.player_hp == 0
         assert bs.player_max_hp == 0
         assert bs.player_level == 0
@@ -24,6 +37,82 @@ class TestBattleStateDefaults:
         assert bs.move_pp == [0, 0, 0, 0]
         assert bs.party_count == 0
         assert bs.party_hp == []
+
+    def test_enemy_type_name_known(self):
+        bs = BattleState(enemy_type1=0x14)
+        assert bs.enemy_type_name == "fire"
+
+    def test_enemy_type_name_unknown_falls_back(self):
+        bs = BattleState(enemy_type1=0xFF)
+        assert bs.enemy_type_name == "normal"
+
+    def test_enemy_type_name_default(self):
+        bs = BattleState()
+        assert bs.enemy_type_name == "normal"  # 0x00 = normal
+
+    def test_enemy_species_name_known(self):
+        bs = BattleState(enemy_species=0x24)
+        assert bs.enemy_species_name == "Pidgey"
+
+    def test_enemy_species_name_unknown(self):
+        bs = BattleState(enemy_species=0xFF)
+        assert bs.enemy_species_name == "#FF"
+
+    def test_enemy_species_name_default(self):
+        bs = BattleState()
+        assert bs.enemy_species_name == "#00"
+
+
+class TestTypeIdMap:
+    def test_known_types(self):
+        assert TYPE_ID_MAP[0x00] == "normal"
+        assert TYPE_ID_MAP[0x14] == "fire"
+        assert TYPE_ID_MAP[0x15] == "water"
+        assert TYPE_ID_MAP[0x17] == "grass"
+        assert TYPE_ID_MAP[0x02] == "flying"
+        assert TYPE_ID_MAP[0x03] == "poison"
+
+    def test_all_entries_are_strings(self):
+        for key, val in TYPE_ID_MAP.items():
+            assert isinstance(key, int)
+            assert isinstance(val, str)
+
+
+class TestSpeciesIdMap:
+    def test_known_species(self):
+        assert SPECIES_ID_MAP[0x24] == "Pidgey"
+        assert SPECIES_ID_MAP[0xA5] == "Rattata"
+        assert SPECIES_ID_MAP[0x7B] == "Caterpie"
+        assert SPECIES_ID_MAP[0x54] == "Pikachu"
+
+    def test_starter_evolutions(self):
+        assert SPECIES_ID_MAP[0xB0] == "Charmander"
+        assert SPECIES_ID_MAP[0xB2] == "Charmeleon"
+        assert SPECIES_ID_MAP[0xB1] == "Squirtle"
+        assert SPECIES_ID_MAP[0xB3] == "Wartortle"
+        assert SPECIES_ID_MAP[0x99] == "Bulbasaur"
+        assert SPECIES_ID_MAP[0x09] == "Ivysaur"
+        assert SPECIES_ID_MAP[0x7A] == "Butterfree"
+        assert SPECIES_ID_MAP[0x97] == "Beedrill"
+        assert SPECIES_ID_MAP[0x96] == "Pidgeotto"
+
+    def test_all_entries_are_strings(self):
+        for key, val in SPECIES_ID_MAP.items():
+            assert isinstance(key, int)
+            assert isinstance(val, str)
+
+
+class TestHealingItemIds:
+    def test_known_items(self):
+        assert HEALING_ITEM_IDS[0x14] == "Potion"
+        assert HEALING_ITEM_IDS[0x19] == "Super Potion"
+        assert HEALING_ITEM_IDS[0x1A] == "Hyper Potion"
+        assert HEALING_ITEM_IDS[0x10] == "Full Restore"
+
+    def test_bag_constants(self):
+        assert ADDR_BAG_COUNT == 0xD31D
+        assert ADDR_BAG_ITEMS == 0xD31E
+        assert BAG_MAX_SLOTS == 20
 
 
 class TestOverworldStateDefaults:
@@ -124,6 +213,8 @@ class TestReadBattleState:
         mem[MemoryReader.ADDR_ENEMY_MAX_HP_LO] = 150
         mem[MemoryReader.ADDR_ENEMY_LEVEL] = 7
         mem[MemoryReader.ADDR_ENEMY_SPECIES] = 4
+        mem[MemoryReader.ADDR_ENEMY_TYPE1] = 0x00  # normal
+        mem[MemoryReader.ADDR_ENEMY_TYPE2] = 0x02  # flying
 
         # Player: HP=200, MaxHP=250, Level=10, Species=0xB0
         mem[MemoryReader.ADDR_PLAYER_HP_HI] = 0x00
@@ -161,6 +252,9 @@ class TestReadBattleState:
         assert state.enemy_max_hp == 150
         assert state.enemy_level == 7
         assert state.enemy_species == 4
+        assert state.enemy_type1 == 0x00
+        assert state.enemy_type2 == 0x02
+        assert state.enemy_type_name == "normal"
         assert state.player_hp == 200
         assert state.player_max_hp == 250
         assert state.player_level == 10
@@ -370,6 +464,129 @@ class TestPlayerWhitedOut:
         reader = MemoryReader(mock_pyboy)
         fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 0
         assert reader.player_whited_out() is True
+
+
+# ---------------------------------------------------------------------------
+# read_bag_items
+# ---------------------------------------------------------------------------
+
+
+class TestReadBagItems:
+    def test_empty_bag(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 0
+        assert reader.read_bag_items() == []
+
+    def test_one_item(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 1
+        fake_memory[ADDR_BAG_ITEMS] = 0x14  # Potion
+        fake_memory[ADDR_BAG_ITEMS + 1] = 3  # qty
+        assert reader.read_bag_items() == [(0x14, 3)]
+
+    def test_two_items(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 2
+        fake_memory[ADDR_BAG_ITEMS] = 0x14  # Potion
+        fake_memory[ADDR_BAG_ITEMS + 1] = 2
+        fake_memory[ADDR_BAG_ITEMS + 2] = 0x19  # Super Potion
+        fake_memory[ADDR_BAG_ITEMS + 3] = 1
+        assert reader.read_bag_items() == [(0x14, 2), (0x19, 1)]
+
+    def test_ff_terminator_stops_early(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 3
+        fake_memory[ADDR_BAG_ITEMS] = 0x14
+        fake_memory[ADDR_BAG_ITEMS + 1] = 1
+        fake_memory[ADDR_BAG_ITEMS + 2] = 0xFF  # terminator
+        assert reader.read_bag_items() == [(0x14, 1)]
+
+    def test_capped_at_max_slots(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 25  # more than BAG_MAX_SLOTS
+        for i in range(BAG_MAX_SLOTS):
+            fake_memory[ADDR_BAG_ITEMS + i * 2] = 0x04
+            fake_memory[ADDR_BAG_ITEMS + i * 2 + 1] = 1
+        result = reader.read_bag_items()
+        assert len(result) == BAG_MAX_SLOTS
+
+
+# ---------------------------------------------------------------------------
+# find_healing_item
+# ---------------------------------------------------------------------------
+
+
+class TestFindHealingItem:
+    def test_no_items(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 0
+        assert reader.find_healing_item() is None
+
+    def test_no_healing_items(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 1
+        fake_memory[ADDR_BAG_ITEMS] = 0x04  # non-healing item
+        fake_memory[ADDR_BAG_ITEMS + 1] = 5
+        assert reader.find_healing_item() is None
+
+    def test_finds_first_healing(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 2
+        fake_memory[ADDR_BAG_ITEMS] = 0x04  # non-healing
+        fake_memory[ADDR_BAG_ITEMS + 1] = 5
+        fake_memory[ADDR_BAG_ITEMS + 2] = 0x14  # Potion
+        fake_memory[ADDR_BAG_ITEMS + 3] = 3
+        assert reader.find_healing_item() == (1, 0x14)
+
+    def test_skips_zero_qty_healing(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 2
+        fake_memory[ADDR_BAG_ITEMS] = 0x14  # Potion with 0 qty
+        fake_memory[ADDR_BAG_ITEMS + 1] = 0
+        fake_memory[ADDR_BAG_ITEMS + 2] = 0x19  # Super Potion with qty
+        fake_memory[ADDR_BAG_ITEMS + 3] = 2
+        assert reader.find_healing_item() == (1, 0x19)
+
+    def test_returns_full_restore(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[ADDR_BAG_COUNT] = 1
+        fake_memory[ADDR_BAG_ITEMS] = 0x10  # Full Restore
+        fake_memory[ADDR_BAG_ITEMS + 1] = 1
+        assert reader.find_healing_item() == (0, 0x10)
+
+
+# ---------------------------------------------------------------------------
+# read_party_species
+# ---------------------------------------------------------------------------
+
+
+class TestReadPartySpecies:
+    def test_empty_party(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 0
+        assert reader.read_party_species() == []
+
+    def test_one_member(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 1
+        fake_memory[MemoryReader.ADDR_PARTY_SPECIES_LIST] = 0xB0  # Charmander
+        assert reader.read_party_species() == [0xB0]
+
+    def test_three_members(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 3
+        fake_memory[MemoryReader.ADDR_PARTY_SPECIES_LIST] = 0xB0
+        fake_memory[MemoryReader.ADDR_PARTY_SPECIES_LIST + 1] = 0x24
+        fake_memory[MemoryReader.ADDR_PARTY_SPECIES_LIST + 2] = 0xA5
+        assert reader.read_party_species() == [0xB0, 0x24, 0xA5]
+
+    def test_capped_at_six(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[MemoryReader.ADDR_PARTY_COUNT] = 8
+        for i in range(8):
+            fake_memory[MemoryReader.ADDR_PARTY_SPECIES_LIST + i] = 0x24
+        result = reader.read_party_species()
+        assert len(result) == 6
 
 
 # ---------------------------------------------------------------------------

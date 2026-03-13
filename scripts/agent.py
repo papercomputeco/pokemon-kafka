@@ -31,7 +31,15 @@ except ImportError:
     Image = None
 
 from memory_file import MemoryFile
-from memory_reader import BattleState, CollisionMap, MemoryReader, OverworldState
+from memory_reader import (
+    HEALING_ITEM_IDS,
+    SPECIES_ID_MAP,
+    TYPE_ID_MAP,
+    BattleState,
+    CollisionMap,
+    MemoryReader,
+    OverworldState,
+)
 from pathfinding import astar_path
 
 # ---------------------------------------------------------------------------
@@ -151,7 +159,7 @@ class BattleStrategy:
     def __init__(
         self,
         type_chart: dict,
-        hp_run_threshold: float = 0.2,
+        hp_run_threshold: float = 0.1,
         hp_heal_threshold: float = 0.25,
         unknown_move_score: float = 10.0,
         status_move_score: float = 1.0,
@@ -161,6 +169,7 @@ class BattleStrategy:
         self.hp_heal_threshold = hp_heal_threshold
         self.unknown_move_score = unknown_move_score
         self.status_move_score = status_move_score
+        self._run_attempts = 0
 
     def score_move(self, move_id: int, move_pp: int, enemy_type: str = "normal") -> float:
         """Score a move based on power, PP, and type effectiveness."""
@@ -179,26 +188,41 @@ class BattleStrategy:
 
         return power * (accuracy / 100.0) * effectiveness
 
-    def choose_action(self, battle: BattleState) -> dict:
+    def choose_action(self, battle: BattleState, bag_healing: tuple[int, int] | None = None) -> dict:
         """
-        Decide what to do in battle.
+        Decide what to do in battle.  Fight-first: leveling up beats running.
+
+        Args:
+            battle: Current battle state from memory.
+            bag_healing: (bag_index, item_id) from find_healing_item(), or None.
 
         Returns:
             {"action": "fight", "move_index": 0-3}
-            {"action": "item", "item": "potion"}
+            {"action": "item", "item": "potion", "bag_index": N}
             {"action": "switch", "slot": 1-5}
             {"action": "run"}
         """
-        # Low HP — heal if wild battle
         hp_ratio = battle.player_hp / max(battle.player_max_hp, 1)
+        enemy_type = battle.enemy_type_name
+
+        # Only run when critically low (<10%) in wild battles AND run hasn't
+        # failed 3 times already.  Leveling up is more valuable than preserving HP.
         if hp_ratio < self.hp_run_threshold and battle.battle_type == 1:  # Wild
-            return {"action": "run"}  # Safe option when low
+            if self._run_attempts < 3:
+                self._run_attempts += 1
+                return {"action": "run"}
+            # Fall through to fight — running isn't working
 
-        if hp_ratio < self.hp_heal_threshold:
-            return {"action": "item", "item": "potion"}
+        if hp_ratio < self.hp_heal_threshold and bag_healing is not None:
+            bag_index, item_id = bag_healing
+            return {"action": "item", "item": HEALING_ITEM_IDS.get(item_id, "potion"), "bag_index": bag_index}
 
-        # Score all moves and pick the best
-        moves = [(i, self.score_move(battle.moves[i], battle.move_pp[i])) for i in range(4) if battle.moves[i] != 0x00]
+        # Score all moves using the enemy's actual type for effectiveness
+        moves = [
+            (i, self.score_move(battle.moves[i], battle.move_pp[i], enemy_type))
+            for i in range(4)
+            if battle.moves[i] != 0x00
+        ]
 
         if not moves or all(score < 0 for _, score in moves):
             # No PP left — Struggle will auto-trigger, just press FIGHT
@@ -300,9 +324,9 @@ class Navigator:
             self.current_waypoint = 0
 
         special_target = EARLY_GAME_TARGETS.get(state.map_id)
-        # Map 0 early-game target only applies before getting a Pokemon
+        # Map 0: after getting a Pokemon, head north to Route 1 exit
         if state.map_id == 0 and state.party_count > 0:
-            special_target = None
+            special_target = {"name": "Route 1 exit", "target": (10, 0), "axis": "y", "at_target": "up"}
         if special_target:
             target_x, target_y = special_target["target"]
             # At target: use at_target hint to walk through doors/grass
@@ -467,6 +491,13 @@ class PokemonAgent:
         self.events: list[str] = []
         self.collision_map = CollisionMap()
         self.door_cooldown: int = 0  # Steps to walk away from door after exiting a building
+        self.encounter_log: list[dict] = []
+        self._current_enemy_species: str = ""
+        self._current_enemy_type: str = ""
+        self._pre_battle_species: list[int] = []
+        self._pre_battle_level: int = 0
+        self.evolution_log: list[dict] = []
+        self.level_ups: int = 0
 
         # Screenshot output directory
         self.frames_dir = SCRIPT_DIR.parent / "frames"
@@ -545,10 +576,16 @@ class PokemonAgent:
             self.stuck_turns = 0
             self.recent_positions.clear()
             self.recent_positions.append(pos)
-            # Set door cooldown when exiting interior maps to avoid re-entry
+            # Set door cooldown when exiting interior maps to avoid re-entry.
+            # Houses (37, 38) get the full cooldown (down then left).
+            # Oak's Lab (40) gets a short cooldown (3 = left only) because
+            # its exit at (5,11) is near the south boundary — "down" would
+            # trap the agent at y=12 instead of letting it head north.
             prev = self.last_overworld_state.map_id
-            if prev in (37, 38, 40) and state.map_id == 0:
+            if prev in (37, 38) and state.map_id == 0:
                 self.door_cooldown = self._evolve_door_cooldown
+            elif prev == 40 and state.map_id == 0:
+                self.door_cooldown = 3  # sidestep left to clear lab door
             self.log(f"MAP CHANGE | {prev} -> {state.map_id} | Pos: ({state.x}, {state.y})")
             return
 
@@ -684,6 +721,11 @@ class PokemonAgent:
         battles = [e for e in self.events if "BATTLE" in e]
         stuck_events = [e for e in self.events if "STUCK" in e]
 
+        # Encounter summary
+        species_counts: dict[str, int] = {}
+        for enc in self.encounter_log:
+            species_counts[enc["species"]] = species_counts.get(enc["species"], 0) + 1
+
         lines = [
             f"# Log {next_num}: Session {timestamp}",
             "",
@@ -691,12 +733,30 @@ class PokemonAgent:
             "",
             f"- **Turns:** {self.turn_count}",
             f"- **Battles won:** {self.battles_won}",
+            f"- **Encounters:** {len(self.encounter_log)}",
             f"- **Maps visited:** {len(self.maps_visited)} ({', '.join(str(m) for m in sorted(self.maps_visited))})",
             f"- **Final position:** Map {final_state.map_id} ({final_state.x}, {final_state.y})",
             f"- **Badges:** {final_state.badges}",
             f"- **Party size:** {final_state.party_count}",
             f"- **Strategy:** {self.battle_strategy.__class__.__name__}",
             "",
+            "## Encounters",
+            "",
+        ]
+        for species, count in sorted(species_counts.items()):
+            lines.append(f"- {species}: {count}")
+        lines.append("")
+
+        if self.evolution_log:
+            lines += ["## Evolutions", ""]
+            for evo in self.evolution_log:
+                lines.append(f"- Slot {evo['slot']}: {evo['from']} -> {evo['to']}")
+            lines.append("")
+
+        if self.level_ups > 0:
+            lines += [f"## Level Ups: {self.level_ups}", ""]
+
+        lines += [
             "## Stats",
             "",
             f"- Map changes: {len(map_changes)}",
@@ -729,12 +789,19 @@ class PokemonAgent:
     def run_battle_turn(self):
         """Execute one battle turn."""
         battle = self.memory.read_battle_state()
-        action = self.battle_strategy.choose_action(battle)
+        bag_healing = self.memory.find_healing_item()
+        action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
 
+        self._current_enemy_species = battle.enemy_species_name
+        self._current_enemy_type = battle.enemy_type_name
+
+        type2 = battle.enemy_type_name
+        type2_str = TYPE_ID_MAP.get(battle.enemy_type2, "")
+        type_label = f"{type2}/{type2_str}" if type2_str and type2_str != type2 else type2
         self.log(
-            f"BATTLE | Player HP: {battle.player_hp}/{battle.player_max_hp} | "
-            f"Enemy HP: {battle.enemy_hp}/{battle.enemy_max_hp} | "
-            f"Action: {action}"
+            f"BATTLE | Lv{battle.enemy_level} {battle.enemy_species_name} ({type_label}) | "
+            f"Player HP: {battle.player_hp}/{battle.player_max_hp} | "
+            f"Action: {action['action']}"
         )
         if action["action"] == "fight":
             # Navigate to FIGHT menu
@@ -755,8 +822,9 @@ class PokemonAgent:
             # Navigate to BAG (index 1 in battle menu)
             self.controller.navigate_menu(1)
             self.controller.wait(20)
-            # Select first healing item (simplified)
-            self.controller.press("a")
+            # Navigate to the correct item slot
+            bag_index = action.get("bag_index", 0)
+            self.controller.navigate_menu(bag_index)
             self.controller.wait(40)
             self.controller.mash_a(3)
 
@@ -929,6 +997,9 @@ class PokemonAgent:
             "party_size": final.party_count,
             "stuck_count": len([e for e in self.events if "STUCK" in e]),
             "backtrack_restores": self.backtrack.total_restores,
+            "encounters": len(self.encounter_log),
+            "level_ups": self.level_ups,
+            "evolutions": len(self.evolution_log),
         }
 
     def run(self, max_turns: int = 100_000):
@@ -956,6 +1027,12 @@ class PokemonAgent:
             self.controller.press("a")
             self.controller.wait(30)  # Longer waits for text to scroll
 
+        # Dismiss any leftover text boxes (e.g. SNES console dialogue in
+        # Red's bedroom) that the intro A-mashing may have triggered.
+        for _ in range(10):
+            self.controller.press("b")
+            self.controller.wait(15)
+
         self.log("Intro complete. Entering game loop.")
 
         # Diagnostic: capture game state right after intro
@@ -982,6 +1059,11 @@ class PokemonAgent:
             battle = self.memory.read_battle_state()
 
             if battle.battle_type > 0:
+                # Snapshot pre-battle state on first battle turn
+                if not self._pre_battle_species:
+                    self._pre_battle_species = self.memory.read_party_species()
+                    self._pre_battle_level = battle.player_level
+
                 self.run_battle_turn()
 
                 # Check if battle ended
@@ -989,7 +1071,38 @@ class PokemonAgent:
                 new_battle = self.memory.read_battle_state()
                 if new_battle.battle_type == 0:
                     self.battles_won += 1
+                    self.battle_strategy._run_attempts = 0
+                    self.encounter_log.append(
+                        {
+                            "species": self._current_enemy_species,
+                            "type": self._current_enemy_type,
+                            "won": True,
+                        }
+                    )
                     self.log(f"Battle ended. Total wins: {self.battles_won}")
+
+                    # Dismiss evolution/level-up screens
+                    self.controller.mash_a(10, delay=30)
+
+                    # Detect level-ups — read from party struct (offset 33 = level)
+                    # since battle addresses are cleared after battle ends
+                    post_level = self.memory._read(self.memory.PARTY_BASE + 33)
+                    if self._pre_battle_level > 0 and post_level > self._pre_battle_level:
+                        self.level_ups += 1
+                        self.log(f"LEVEL UP | Lv{self._pre_battle_level} -> Lv{post_level}")
+
+                    # Detect evolution (species change)
+                    post_species = self.memory.read_party_species()
+                    for slot, (pre, post) in enumerate(zip(self._pre_battle_species, post_species)):
+                        if pre != post:
+                            pre_name = SPECIES_ID_MAP.get(pre, f"#{pre:02X}")
+                            post_name = SPECIES_ID_MAP.get(post, f"#{post:02X}")
+                            self.log(f"EVOLUTION | Slot {slot}: {pre_name} -> {post_name}!")
+                            self.evolution_log.append({"slot": slot, "from": pre_name, "to": post_name})
+
+                    # Reset pre-battle snapshots
+                    self._pre_battle_species = []
+                    self._pre_battle_level = 0
             else:
                 self.run_overworld()
                 self.turn_count += 1
