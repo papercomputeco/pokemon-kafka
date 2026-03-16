@@ -246,8 +246,10 @@ stuck_count, increasing maps_visited, and winning battles. Return ONLY valid JSO
 with the same keys, nothing else."""
 
 
-def parse_llm_response(response: str) -> dict | None:
+def parse_llm_response(response: str | None) -> dict | None:
     """Extract a params dict from an LLM response. Returns None on failure."""
+    if response is None:
+        return None
     # Try to find JSON in the response
     text = response.strip()
     # Strip markdown code fences if present
@@ -508,15 +510,19 @@ def _make_llm_fn():
         print("[evolve] anthropic package not installed, using random perturbation")
         return None
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=3)
 
-    def llm_fn(prompt: str) -> str:
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
+    def llm_fn(prompt: str) -> str | None:
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text
+        except anthropic.APIError as exc:
+            print(f"[evolve] Anthropic API error: {exc}; falling back to random perturbation")
+            return None
 
     print("[evolve] Using Anthropic API for LLM-guided mutation")
     return llm_fn
