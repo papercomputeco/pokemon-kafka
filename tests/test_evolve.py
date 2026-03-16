@@ -428,6 +428,9 @@ class TestParseLlmResponse:
         assert result["stuck_threshold"] == 20
         assert result["hp_run_threshold"] == 0.5
 
+    def test_none_input(self):
+        assert parse_llm_response(None) is None
+
 
 # ── _perturb() ─────────────────────────────────────────────────────────
 
@@ -806,6 +809,22 @@ class TestMakeLlmFn:
 
         assert result == "response text"
         mock_client.messages.create.assert_called_once()
+
+    def test_callable_returns_none_on_api_error(self):
+        mock_client = MagicMock()
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic.return_value = mock_client
+        mock_anthropic.APIError = type("APIError", (Exception,), {})
+        mock_client.messages.create.side_effect = mock_anthropic.APIError("test error")
+
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch.dict("sys.modules", {"anthropic": mock_anthropic}),
+        ):
+            fn = _make_llm_fn()
+            result = fn("test prompt")
+
+        assert result is None
 
 
 class TestMakeObserverFn:
