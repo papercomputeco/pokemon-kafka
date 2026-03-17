@@ -30,6 +30,7 @@ try:
 except ImportError:
     Image = None
 
+from game_events import GameEventCollector
 from memory_file import MemoryFile
 from memory_reader import (
     HEALING_ITEM_IDS,
@@ -489,6 +490,7 @@ class PokemonAgent:
         self.recent_positions: list[tuple[int, int, int]] = []
         self.maps_visited: set[int] = set()
         self.events: list[str] = []
+        self.collector = GameEventCollector()
         self.collision_map = CollisionMap()
         self.door_cooldown: int = 0  # Steps to walk away from door after exiting a building
         self.encounter_log: list[dict] = []
@@ -565,6 +567,7 @@ class PokemonAgent:
         # Milestone detection (before adding to maps_visited)
         if state.map_id == 1 and state.map_id not in self.maps_visited:
             self.log("MILESTONE | Reached Viridian City!")
+            self.collector.milestone(self.turn_count, "Reached Viridian City!")
 
         self.maps_visited.add(state.map_id)
 
@@ -587,6 +590,7 @@ class PokemonAgent:
             elif prev == 40 and state.map_id == 0:
                 self.door_cooldown = 3  # sidestep left to clear lab door
             self.log(f"MAP CHANGE | {prev} -> {state.map_id} | Pos: ({state.x}, {state.y})")
+            self.collector.map_change(self.turn_count, prev, state.map_id, state.x, state.y)
             return
 
         # Detect oscillation: if current position was visited recently,
@@ -604,6 +608,14 @@ class PokemonAgent:
             self.log(
                 f"STUCK | Map: {state.map_id} | Pos: ({state.x}, {state.y}) | "
                 f"Last move: {self.last_overworld_action} | Streak: {self.stuck_turns}"
+            )
+            self.collector.stuck(
+                self.turn_count,
+                state.map_id,
+                state.x,
+                state.y,
+                self.last_overworld_action,
+                self.stuck_turns,
             )
 
     def choose_overworld_action(self, state: OverworldState) -> str:
@@ -803,6 +815,14 @@ class PokemonAgent:
             f"Player HP: {battle.player_hp}/{battle.player_max_hp} | "
             f"Action: {action['action']}"
         )
+        self.collector.battle(
+            self.turn_count,
+            battle.player_hp,
+            battle.player_max_hp,
+            battle.enemy_hp,
+            battle.enemy_max_hp,
+            action,
+        )
         if action["action"] == "fight":
             # Navigate to FIGHT menu
             self.controller.press("a")  # Select FIGHT
@@ -979,6 +999,17 @@ class PokemonAgent:
                 f"Action: {action} | "
                 f"Stuck: {self.stuck_turns}{wp_info}"
             )
+            self.collector.overworld(
+                self.turn_count,
+                state.map_id,
+                state.x,
+                state.y,
+                state.badges,
+                state.party_count,
+                action,
+                self.stuck_turns,
+                wp_info or None,
+            )
 
         self.last_overworld_state = state
         self.last_overworld_action = action
@@ -1005,6 +1036,7 @@ class PokemonAgent:
     def run(self, max_turns: int = 100_000):
         """Main agent loop. Returns fitness dict at end."""
         self.log("Agent starting. Advancing through intro...")
+        self.collector.session(0, "start")
 
         # Advance through title screen (needs ~1500 frames to reach "Press Start")
         self.controller.wait(1500)
@@ -1111,6 +1143,12 @@ class PokemonAgent:
                 self.take_screenshot()
 
         self.log(f"Session complete. Turns: {self.turn_count} | Wins: {self.battles_won}")
+        self.collector.session(
+            self.turn_count,
+            "end",
+            battles_won=self.battles_won,
+            maps_visited=len(self.maps_visited),
+        )
         self.write_pokedex_entry()
         fitness = self.compute_fitness()
         try:
@@ -1192,6 +1230,18 @@ def main():
             pub.close()
         except Exception as exc:
             print(f"[agent] telemetry publish failed: {exc}")
+
+    # Publish game events
+    if args.telemetry_dir:
+        try:
+            from publisher import make_publisher as _make_pub
+
+            game_pub = _make_pub(telemetry_dir=str(Path(args.telemetry_dir) / "game"))
+            for event in agent.collector.events:
+                game_pub.publish(event)
+            game_pub.close()
+        except Exception as exc:
+            print(f"[agent] game event publish failed: {exc}")
 
 
 if __name__ == "__main__":
