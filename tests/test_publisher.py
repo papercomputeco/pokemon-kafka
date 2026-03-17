@@ -4,6 +4,7 @@
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -187,6 +188,87 @@ def test_fanout_publisher_close_tolerates_failure():
     pub.close()
 
     assert closed == ["a", "b"]
+
+
+def test_confluent_publisher_routes_by_schema():
+    """ConfluentPublisher routes events to correct topics based on schema field."""
+    mock_producer_cls = MagicMock()
+    mock_producer = MagicMock()
+    mock_producer_cls.return_value = mock_producer
+
+    with patch.dict("sys.modules", {"confluent_kafka": MagicMock(Producer=mock_producer_cls)}):
+        # Re-import to pick up the mock
+        import importlib
+
+        import publisher
+
+        importlib.reload(publisher)
+
+        pub = publisher.ConfluentPublisher(
+            bootstrap_servers="test:9092",
+            api_key="key",
+            api_secret="secret",
+            topic_prefix="pokemon",
+        )
+        pub.publish({"schema": "tapes.node.v1", "type": "fitness"})
+        pub.publish({"schema": "pokemon.game.v1", "event_type": "battle"})
+
+        calls = mock_producer.produce.call_args_list
+        assert calls[0].kwargs["topic"] == "pokemon.telemetry.raw"
+        assert calls[1].kwargs["topic"] == "pokemon.game.events"
+
+        pub.close()
+        mock_producer.flush.assert_called_once_with(timeout=10)
+
+
+def test_confluent_publisher_drops_unknown_schema(capsys):
+    """ConfluentPublisher drops events with unknown schema and logs warning."""
+    mock_producer_cls = MagicMock()
+    mock_producer = MagicMock()
+    mock_producer_cls.return_value = mock_producer
+
+    with patch.dict("sys.modules", {"confluent_kafka": MagicMock(Producer=mock_producer_cls)}):
+        import importlib
+
+        import publisher
+
+        importlib.reload(publisher)
+
+        pub = publisher.ConfluentPublisher(
+            bootstrap_servers="test:9092",
+            api_key="key",
+            api_secret="secret",
+            topic_prefix="pokemon",
+        )
+        pub.publish({"schema": "unknown.v1", "data": "test"})
+
+        mock_producer.produce.assert_not_called()
+        assert "unknown schema" in capsys.readouterr().out
+
+
+def test_confluent_publisher_drops_missing_schema(capsys):
+    """ConfluentPublisher drops events with no schema field."""
+    mock_producer_cls = MagicMock()
+    mock_producer = MagicMock()
+    mock_producer_cls.return_value = mock_producer
+
+    with patch.dict("sys.modules", {"confluent_kafka": MagicMock(Producer=mock_producer_cls)}):
+        import importlib
+
+        import publisher
+
+        importlib.reload(publisher)
+
+        pub = publisher.ConfluentPublisher(
+            bootstrap_servers="test:9092",
+            api_key="key",
+            api_secret="secret",
+            topic_prefix="pokemon",
+        )
+        pub.publish({"type": "fitness"})
+
+        mock_producer.produce.assert_not_called()
+        assert "unknown schema" in capsys.readouterr().out
 
 
 def test_jsonl_publisher_writes_game_events(tmp_path):
