@@ -346,3 +346,19 @@ def test_jsonl_publisher_writes_game_events(tmp_path):
     assert line["schema"] == "pokemon.game.v1"
     assert line["event_type"] == "battle"
     assert line["data"]["player_hp"] == 45
+
+
+def test_confluent_publisher_delivery_callback_logs_error(capsys):
+    """Delivery callback prints warning when delivery fails."""
+    from publisher import ConfluentPublisher
+
+    ConfluentPublisher._delivery_callback(err="broker timeout", msg=None)
+    assert "delivery failed" in capsys.readouterr().out
+
+
+def test_confluent_publisher_delivery_callback_silent_on_success(capsys):
+    """Delivery callback produces no output on success."""
+    from publisher import ConfluentPublisher
+
+    ConfluentPublisher._delivery_callback(err=None, msg=None)
+    assert capsys.readouterr().out == ""
