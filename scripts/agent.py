@@ -794,6 +794,7 @@ class PokemonAgent:
             return
         suffix = f"_{label}" if label else ""
         path = self.frames_dir / f"turn{self.turn_count}{suffix}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
         img = Image.fromarray(self.pyboy.screen.ndarray)
         img.save(path)
         self.log(f"SCREENSHOT | {path}")
