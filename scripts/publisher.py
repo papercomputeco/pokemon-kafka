@@ -68,6 +68,27 @@ class NoopPublisher:
         pass
 
 
+class FanoutPublisher:
+    """Publishes events to multiple backends. One failing does not stop others."""
+
+    def __init__(self, publishers: list[Publisher]):
+        self._publishers = list(publishers)
+
+    def publish(self, event: dict) -> None:
+        for pub in self._publishers:
+            try:
+                pub.publish(event)
+            except Exception as exc:
+                print(f"[fanout] publisher {type(pub).__name__} failed: {exc}")
+
+    def close(self) -> None:
+        for pub in self._publishers:
+            try:
+                pub.close()
+            except Exception as exc:
+                print(f"[fanout] close {type(pub).__name__} failed: {exc}")
+
+
 def make_publisher(telemetry_dir: str | None = None) -> Publisher:
     """Factory: returns JSONLPublisher if dir is set, else NoopPublisher."""
     if telemetry_dir:

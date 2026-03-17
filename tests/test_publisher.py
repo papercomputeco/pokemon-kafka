@@ -81,6 +81,85 @@ def test_make_publisher_returns_noop_when_no_dir():
     assert isinstance(pub, NoopPublisher)
 
 
+def test_fanout_publisher_distributes_events():
+    """FanoutPublisher sends each event to all inner publishers."""
+    from publisher import FanoutPublisher
+
+    events_a, events_b = [], []
+
+    class RecorderA:
+        def publish(self, event):
+            events_a.append(event)
+
+        def close(self):
+            pass
+
+    class RecorderB:
+        def publish(self, event):
+            events_b.append(event)
+
+        def close(self):
+            pass
+
+    pub = FanoutPublisher([RecorderA(), RecorderB()])
+    pub.publish({"type": "test", "n": 1})
+    pub.publish({"type": "test", "n": 2})
+    pub.close()
+
+    assert len(events_a) == 2
+    assert len(events_b) == 2
+    assert events_a[0]["n"] == 1
+
+
+def test_fanout_publisher_tolerates_failure():
+    """One inner publisher failing does not stop others."""
+    from publisher import FanoutPublisher
+
+    received = []
+
+    class Broken:
+        def publish(self, event):
+            raise RuntimeError("boom")
+
+        def close(self):
+            pass
+
+    class Recorder:
+        def publish(self, event):
+            received.append(event)
+
+        def close(self):
+            pass
+
+    pub = FanoutPublisher([Broken(), Recorder()])
+    pub.publish({"type": "test"})
+    pub.close()
+
+    assert len(received) == 1
+
+
+def test_fanout_publisher_close_propagates():
+    """close() is called on all inner publishers."""
+    from publisher import FanoutPublisher
+
+    closed = []
+
+    class Trackable:
+        def __init__(self, name):
+            self.name = name
+
+        def publish(self, event):
+            pass
+
+        def close(self):
+            closed.append(self.name)
+
+    pub = FanoutPublisher([Trackable("a"), Trackable("b")])
+    pub.close()
+
+    assert closed == ["a", "b"]
+
+
 def test_jsonl_publisher_writes_game_events(tmp_path):
     """JSONLPublisher writes game events to a separate directory."""
     from game_events import build_battle_event
