@@ -48,3 +48,12 @@ def test_load_config_enabled_falsy(monkeypatch):
     monkeypatch.setenv("CONFLUENT_ENABLED", "no")
     cfg = load_config(None)
     assert cfg["telemetry"]["confluent"]["enabled"] is False
+
+
+def test_load_config_credential_env_vars_set_indirection(monkeypatch):
+    """When CONFLUENT_API_KEY/SECRET are set directly, api_*_env keys reflect them."""
+    monkeypatch.setenv("CONFLUENT_API_KEY", "direct-key")
+    monkeypatch.setenv("CONFLUENT_API_SECRET", "direct-secret")
+    cfg = load_config(None)
+    assert cfg["telemetry"]["confluent"]["api_key_env"] == "CONFLUENT_API_KEY"
+    assert cfg["telemetry"]["confluent"]["api_secret_env"] == "CONFLUENT_API_SECRET"

@@ -8,6 +8,7 @@ Precedence (highest wins):
 
 from __future__ import annotations
 
+import copy
 import os
 import tomllib
 from pathlib import Path
@@ -64,8 +65,6 @@ def load_config(config_path: Path | None = None) -> dict:
 
     If config_path is None or the file does not exist, returns defaults.
     """
-    import copy
-
     cfg = copy.deepcopy(_DEFAULTS)
     if config_path and config_path.is_file():
         with open(config_path, "rb") as f:
