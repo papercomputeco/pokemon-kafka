@@ -102,6 +102,10 @@ WHERE max_tokens > avg_tokens * 2.0;
 -- ============================================================
 -- Game Events: reads pokemon.game.v1 events from Kafka
 -- ============================================================
+-- Union schema: `data` is a flat ROW containing fields from ALL event types
+-- (battle, overworld, map_change, stuck, milestone, session). Most fields
+-- are NULL for any given event. This avoids per-type tables while keeping
+-- queries simple — filter on `event_type` to get the relevant columns.
 CREATE TABLE game_events (
     `schema` STRING,
     `event_type` STRING,

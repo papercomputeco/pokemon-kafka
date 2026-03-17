@@ -7,6 +7,7 @@ All events share a common envelope: schema, event_type, turn, occurred_at, data.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 SCHEMA_GAME_EVENT = "pokemon.game.v1"
@@ -30,8 +31,6 @@ def build_battle_event(
     enemy_max_hp: int,
     action: dict,
 ) -> dict:
-    import json as _json
-
     return _envelope(
         "battle",
         turn,
@@ -40,7 +39,9 @@ def build_battle_event(
             "player_max_hp": player_max_hp,
             "enemy_hp": enemy_hp,
             "enemy_max_hp": enemy_max_hp,
-            "action": _json.dumps(action),
+            # Serialize to string — action dicts have variable shape (fight/item/run)
+            # and Flink reads this as a STRING column.
+            "action": json.dumps(action),
         },
     )
 
