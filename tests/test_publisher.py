@@ -160,6 +160,35 @@ def test_fanout_publisher_close_propagates():
     assert closed == ["a", "b"]
 
 
+def test_fanout_publisher_close_tolerates_failure():
+    """close() continues to remaining publishers even if one raises."""
+    from publisher import FanoutPublisher
+
+    closed = []
+
+    class BrokenClose:
+        def publish(self, event):
+            pass
+
+        def close(self):
+            raise RuntimeError("close boom")
+
+    class Trackable:
+        def __init__(self, name):
+            self.name = name
+
+        def publish(self, event):
+            pass
+
+        def close(self):
+            closed.append(self.name)
+
+    pub = FanoutPublisher([BrokenClose(), Trackable("a"), Trackable("b")])
+    pub.close()
+
+    assert closed == ["a", "b"]
+
+
 def test_jsonl_publisher_writes_game_events(tmp_path):
     """JSONLPublisher writes game events to a separate directory."""
     from game_events import build_battle_event

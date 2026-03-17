@@ -10,9 +10,10 @@ The local JSONL path lets us iterate on the learning loop (agent →
 telemetry → Historical Observer → evolution) without cloud dependencies,
 then graduate data to Kafka/Confluent Cloud when ready.
 
-Two implementations:
+Three implementations:
 - JSONLPublisher: writes events to date-partitioned JSONL files
 - NoopPublisher: discards events (for runs without telemetry)
+- FanoutPublisher: fans out to multiple backends with per-publisher fault isolation
 """
 
 from __future__ import annotations
