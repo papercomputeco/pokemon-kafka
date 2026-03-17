@@ -271,6 +271,55 @@ def test_confluent_publisher_drops_missing_schema(capsys):
         assert "unknown schema" in capsys.readouterr().out
 
 
+def test_make_publisher_returns_fanout_when_confluent_enabled(tmp_path):
+    """make_publisher returns FanoutPublisher wrapping JSONL + Confluent."""
+    mock_producer_cls = MagicMock()
+    mock_producer_cls.return_value = MagicMock()
+
+    with patch.dict("sys.modules", {"confluent_kafka": MagicMock(Producer=mock_producer_cls)}):
+        import importlib
+
+        import publisher
+
+        importlib.reload(publisher)
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[telemetry.confluent]\nenabled = true\nbootstrap_servers = "test:9092"\n')
+
+        pub = publisher.make_publisher(telemetry_dir=str(tmp_path / "telemetry"), config_path=config_file)
+        assert isinstance(pub, publisher.FanoutPublisher)
+        pub.close()
+
+
+def test_make_publisher_without_config_returns_jsonl(tmp_path):
+    """make_publisher with no config behaves like before — returns JSONLPublisher."""
+    from publisher import JSONLPublisher, make_publisher
+
+    pub = make_publisher(telemetry_dir=str(tmp_path))
+    assert isinstance(pub, JSONLPublisher)
+    pub.close()
+
+
+def test_make_publisher_graceful_without_confluent_kafka(tmp_path, monkeypatch, capsys):
+    """make_publisher falls back to JSONL when confluent-kafka is not installed."""
+    import importlib
+
+    import publisher
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[telemetry.confluent]\nenabled = true\nbootstrap_servers = "test:9092"\n')
+    monkeypatch.setenv("CONFLUENT_API_KEY", "key")
+    monkeypatch.setenv("CONFLUENT_API_SECRET", "secret")
+
+    # Setting a sys.modules entry to None causes ImportError on import
+    with patch.dict("sys.modules", {"confluent_kafka": None}):
+        importlib.reload(publisher)
+        pub = publisher.make_publisher(telemetry_dir=str(tmp_path / "telemetry"), config_path=config_file)
+        assert isinstance(pub, publisher.JSONLPublisher)
+        assert "confluent setup failed" in capsys.readouterr().out
+        pub.close()
+
+
 def test_jsonl_publisher_writes_game_events(tmp_path):
     """JSONLPublisher writes game events to a separate directory."""
     from game_events import build_battle_event

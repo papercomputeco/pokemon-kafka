@@ -20,6 +20,7 @@ Four implementations:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -140,8 +141,39 @@ class FanoutPublisher:
                 print(f"[fanout] close {type(pub).__name__} failed: {exc}")
 
 
-def make_publisher(telemetry_dir: str | None = None) -> Publisher:
-    """Factory: returns JSONLPublisher if dir is set, else NoopPublisher."""
+def make_publisher(telemetry_dir: str | None = None, config_path: Path | None = None) -> Publisher:
+    """Factory: builds publisher stack from config.
+
+    Always includes JSONLPublisher when telemetry_dir is set.
+    Adds ConfluentPublisher when config enables it and confluent-kafka is installed.
+    Returns FanoutPublisher if multiple backends, single publisher otherwise.
+    """
+    from config import load_config
+
+    cfg = load_config(config_path)
+    publishers: list[Publisher] = []
+
     if telemetry_dir:
-        return JSONLPublisher(telemetry_dir)
-    return NoopPublisher()
+        publishers.append(JSONLPublisher(telemetry_dir))
+
+    confluent_cfg = cfg["telemetry"]["confluent"]
+    if confluent_cfg["enabled"]:
+        api_key = os.environ.get(confluent_cfg["api_key_env"], "")
+        api_secret = os.environ.get(confluent_cfg["api_secret_env"], "")
+        try:
+            publishers.append(
+                ConfluentPublisher(
+                    bootstrap_servers=confluent_cfg["bootstrap_servers"],
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    topic_prefix=confluent_cfg["topic_prefix"],
+                )
+            )
+        except Exception as exc:
+            print(f"[publisher] confluent setup failed, continuing with JSONL only: {exc}")
+
+    if not publishers:
+        return NoopPublisher()
+    if len(publishers) == 1:
+        return publishers[0]
+    return FanoutPublisher(publishers)
