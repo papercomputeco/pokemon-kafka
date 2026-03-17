@@ -110,7 +110,7 @@ CREATE TABLE game_events (
     `schema` STRING,
     `event_type` STRING,
     `turn` INT,
-    `occurred_at` TIMESTAMP(3),
+    `occurred_at` TIMESTAMP_LTZ(3),
     `data` ROW<
         `map_id` INT,
         `position` ROW<`x` INT, `y` INT>,
