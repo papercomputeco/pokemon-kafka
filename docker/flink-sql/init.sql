@@ -98,3 +98,89 @@ FROM (
     GROUP BY root_hash, window_start, window_end
 )
 WHERE max_tokens > avg_tokens * 2.0;
+
+-- ============================================================
+-- Game Events: reads pokemon.game.v1 events from Kafka
+-- ============================================================
+-- Union schema: `data` is a flat ROW containing fields from ALL event types
+-- (battle, overworld, map_change, stuck, milestone, session). Most fields
+-- are NULL for any given event. This avoids per-type tables while keeping
+-- queries simple — filter on `event_type` to get the relevant columns.
+CREATE TABLE game_events (
+    `schema` STRING,
+    `event_type` STRING,
+    `turn` INT,
+    `occurred_at` TIMESTAMP(3),
+    `data` ROW<
+        `map_id` INT,
+        `position` ROW<`x` INT, `y` INT>,
+        `player_hp` INT,
+        `player_max_hp` INT,
+        `enemy_hp` INT,
+        `enemy_max_hp` INT,
+        `action` STRING,
+        `prev_map` INT,
+        `new_map` INT,
+        `badges` INT,
+        `party_count` INT,
+        `stuck_turns` INT,
+        `streak` INT,
+        `last_action` STRING,
+        `description` STRING,
+        `phase` STRING,
+        `battles_won` INT,
+        `maps_visited` INT
+    >,
+    WATERMARK FOR `occurred_at` AS `occurred_at` - INTERVAL '5' SECONDS
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'agent.game.events',
+    'properties.bootstrap.servers' = 'kafka:29092',
+    'properties.group.id' = 'flink-game',
+    'scan.startup.mode' = 'earliest-offset',
+    'format' = 'json',
+    'json.timestamp-format.standard' = 'ISO-8601',
+    'json.ignore-parse-errors' = 'true'
+);
+
+-- Game alerts sink (reuses existing tapes_alerts table)
+
+-- Navigation stuck detection: 5+ stuck events in a 60s window
+INSERT INTO tapes_alerts
+SELECT
+    'GAME_STUCK_LOOP' AS alert_type,
+    '' AS root_hash,
+    CONCAT('map=', CAST(data.map_id AS STRING), ' streak=', CAST(MAX(data.streak) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(
+        TABLE game_events,
+        DESCRIPTOR(occurred_at),
+        INTERVAL '60' SECONDS
+    )
+)
+WHERE event_type = 'stuck'
+GROUP BY data.map_id, window_start, window_end
+HAVING COUNT(*) >= 5;
+
+-- Battle loss detection: battles where player HP hits 0 in a 5-minute window
+INSERT INTO tapes_alerts
+SELECT
+    'BATTLE_WIPE' AS alert_type,
+    '' AS root_hash,
+    CONCAT('wipes=', CAST(COUNT(*) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(
+        TABLE game_events,
+        DESCRIPTOR(occurred_at),
+        INTERVAL '5' MINUTES
+    )
+)
+WHERE event_type = 'battle' AND data.player_hp = 0
+GROUP BY window_start, window_end
+HAVING COUNT(*) >= 1;

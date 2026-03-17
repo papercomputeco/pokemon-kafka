@@ -3037,3 +3037,29 @@ class TestLabPokemonSelection:
             fitness = ag.run(max_turns=1000)
 
         assert fitness["party_size"] == 1, f"Pokemon not selected. Final pos: ({state['x']}, {state['y']})"
+
+
+# ===================================================================
+# Game event publish error path in main()
+# ===================================================================
+
+
+class TestGameEventPublish:
+    def test_game_event_publish_error_is_caught(self, tmp_path, capsys):
+        """Cover except branch when game event publishing fails (lines 1111-1112)."""
+        rom = tmp_path / "game.gb"
+        rom.write_text("fake rom")
+
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = {"turns": 5}
+        # Make collector.events a non-iterable to force TypeError
+        mock_agent.collector.events = 42
+
+        with (
+            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "5"]),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+        ):
+            main()  # should not raise
+
+        captured = capsys.readouterr()
+        assert "game event publish failed" in captured.out

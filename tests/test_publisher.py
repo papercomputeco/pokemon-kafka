@@ -79,3 +79,31 @@ def test_make_publisher_returns_noop_when_no_dir():
 
     pub = make_publisher(telemetry_dir=None)
     assert isinstance(pub, NoopPublisher)
+
+
+def test_jsonl_publisher_writes_game_events(tmp_path):
+    """JSONLPublisher writes game events to a separate directory."""
+    from game_events import build_battle_event
+    from publisher import JSONLPublisher
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    pub = JSONLPublisher(str(game_dir))
+
+    event = build_battle_event(
+        turn=1,
+        player_hp=45,
+        player_max_hp=50,
+        enemy_hp=12,
+        enemy_max_hp=35,
+        action={"action": "fight", "move_index": 0},
+    )
+    pub.publish(event)
+    pub.close()
+
+    files = list(game_dir.glob("*.jsonl"))
+    assert len(files) == 1
+    line = json.loads(files[0].read_text().strip())
+    assert line["schema"] == "pokemon.game.v1"
+    assert line["event_type"] == "battle"
+    assert line["data"]["player_hp"] == 45

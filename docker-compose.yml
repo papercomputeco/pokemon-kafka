@@ -68,6 +68,19 @@ services:
       - ./.tapes:/tapes
       - ./scripts/tape_writer.py:/app/tape_writer.py
 
+  game-consumer:
+    build: docker/game-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: agent.game.events
+      KAFKA_GROUP_ID: game-consumer
+      SINK_DIR: /data/game
+    volumes:
+      - ./data/game:/data/game
+
   flink-jobmanager:
     image: flink:1.18
     ports:
