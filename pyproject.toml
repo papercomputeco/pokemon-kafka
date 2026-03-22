@@ -18,6 +18,9 @@ dev = [
     "dlt[duckdb]>=1.0.0",
 ]
 
+[project.optional-dependencies]
+confluent = ["confluent-kafka>=2.3.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts", "tests"]

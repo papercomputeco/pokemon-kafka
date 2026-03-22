@@ -10,13 +10,17 @@ The local JSONL path lets us iterate on the learning loop (agent →
 telemetry → Historical Observer → evolution) without cloud dependencies,
 then graduate data to Kafka/Confluent Cloud when ready.
 
-Two implementations:
+Four implementations:
 - JSONLPublisher: writes events to date-partitioned JSONL files
 - NoopPublisher: discards events (for runs without telemetry)
+- ConfluentPublisher: publishes events to Confluent Cloud via confluent-kafka Producer
+- FanoutPublisher: fans out to multiple backends with per-publisher fault isolation
 """
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -68,8 +72,108 @@ class NoopPublisher:
         pass
 
 
-def make_publisher(telemetry_dir: str | None = None) -> Publisher:
-    """Factory: returns JSONLPublisher if dir is set, else NoopPublisher."""
+# Schema → topic suffix mapping
+_TOPIC_MAP: dict[str, str] = {
+    "tapes.node.v1": "telemetry.raw",
+    "pokemon.game.v1": "game.events",
+}
+
+
+class ConfluentPublisher:
+    """Publishes events to Confluent Cloud via confluent-kafka Producer.
+
+    Routes events to topics based on the ``schema`` field.
+    Unknown schemas are logged and dropped.
+    """
+
+    def __init__(self, bootstrap_servers: str, api_key: str, api_secret: str, topic_prefix: str):
+        from confluent_kafka import Producer
+
+        self._topic_prefix = topic_prefix
+        self._producer = Producer(
+            {
+                "bootstrap.servers": bootstrap_servers,
+                "security.protocol": "SASL_SSL",
+                "sasl.mechanisms": "PLAIN",
+                "sasl.username": api_key,
+                "sasl.password": api_secret,
+            }
+        )
+
+    @staticmethod
+    def _delivery_callback(err, msg):
+        if err is not None:
+            print(f"[confluent] delivery failed: {err}")
+
+    def publish(self, event: dict) -> None:
+        schema = event.get("schema", "")
+        suffix = _TOPIC_MAP.get(schema)
+        if suffix is None:
+            print(f"[confluent] unknown schema {schema!r}, dropping event")
+            return
+        topic = f"{self._topic_prefix}.{suffix}"
+        key = schema.encode("utf-8")
+        value = json.dumps(event).encode("utf-8")
+        self._producer.produce(topic=topic, key=key, value=value, callback=self._delivery_callback)
+
+    def close(self) -> None:
+        self._producer.flush(timeout=10)
+
+
+class FanoutPublisher:
+    """Publishes events to multiple backends. One failing does not stop others."""
+
+    def __init__(self, publishers: list[Publisher]):
+        self._publishers = list(publishers)
+
+    def publish(self, event: dict) -> None:
+        for pub in self._publishers:
+            try:
+                pub.publish(event)
+            except Exception as exc:
+                print(f"[fanout] publisher {type(pub).__name__} failed: {exc}")
+
+    def close(self) -> None:
+        for pub in self._publishers:
+            try:
+                pub.close()
+            except Exception as exc:
+                print(f"[fanout] close {type(pub).__name__} failed: {exc}")
+
+
+def make_publisher(telemetry_dir: str | None = None, config_path: Path | None = None) -> Publisher:
+    """Factory: builds publisher stack from config.
+
+    Always includes JSONLPublisher when telemetry_dir is set.
+    Adds ConfluentPublisher when config enables it and confluent-kafka is installed.
+    Returns FanoutPublisher if multiple backends, single publisher otherwise.
+    """
+    from config import load_config
+
+    cfg = load_config(config_path)
+    publishers: list[Publisher] = []
+
     if telemetry_dir:
-        return JSONLPublisher(telemetry_dir)
-    return NoopPublisher()
+        publishers.append(JSONLPublisher(telemetry_dir))
+
+    confluent_cfg = cfg["telemetry"]["confluent"]
+    if confluent_cfg["enabled"]:
+        api_key = os.environ.get(confluent_cfg["api_key_env"], "")
+        api_secret = os.environ.get(confluent_cfg["api_secret_env"], "")
+        try:
+            publishers.append(
+                ConfluentPublisher(
+                    bootstrap_servers=confluent_cfg["bootstrap_servers"],
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    topic_prefix=confluent_cfg["topic_prefix"],
+                )
+            )
+        except Exception as exc:
+            print(f"[publisher] confluent setup failed, continuing with JSONL only: {exc}")
+
+    if not publishers:
+        return NoopPublisher()
+    if len(publishers) == 1:
+        return publishers[0]
+    return FanoutPublisher(publishers)

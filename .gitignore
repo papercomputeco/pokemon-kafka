@@ -33,6 +33,9 @@ venv/
 .env
 *.key
 
+# Config (may contain credential env var references)
+config.toml
+
 # Claude Code (user-specific)
 .claude/
 

@@ -1196,6 +1196,12 @@ def main():
         default="data/telemetry",
         help="Directory for JSONL telemetry (default: data/telemetry, empty to disable)",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.toml",
+        help="Path to config.toml (default: config.toml in cwd)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -1209,11 +1215,13 @@ def main():
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output_json).write_text(json.dumps(fitness, indent=2) + "\n")
 
+    config_path = Path(args.config) if args.config else None
+
     if args.telemetry_dir:
         try:
             from publisher import make_publisher
 
-            pub = make_publisher(telemetry_dir=args.telemetry_dir)
+            pub = make_publisher(telemetry_dir=args.telemetry_dir, config_path=config_path)
             pub.publish(
                 {
                     "schema": "tapes.node.v1",
@@ -1237,7 +1245,7 @@ def main():
         try:
             from publisher import make_publisher as _make_pub
 
-            game_pub = _make_pub(telemetry_dir=str(Path(args.telemetry_dir) / "game"))
+            game_pub = _make_pub(telemetry_dir=str(Path(args.telemetry_dir) / "game"), config_path=config_path)
             for event in agent.collector.events:
                 game_pub.publish(event)
             game_pub.close()
