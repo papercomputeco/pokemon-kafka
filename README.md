@@ -150,6 +150,51 @@ The Tapes proxy listens on port 8080. Point the agent at it by setting `ANTHROPI
 
 A local-first alternative exists for development without a broker: pass `--telemetry-dir` to the agent and it writes JSONL files directly via `scripts/publisher.py`.
 
+## Confluent Cloud Setup
+
+Stream game and telemetry events to Confluent Cloud instead of (or alongside) local JSONL files. The publisher is opt-in and requires a cluster, two topics, and an API key.
+
+For a guided setup with troubleshooting, install the [confluent-cloud-setup](https://github.com/papercomputeco/skills/tree/main/skills/confluent-cloud-setup) skill:
+
+```bash
+npx skills add papercomputeco/skills
+```
+
+### Quick start
+
+1. Create a **Basic** cluster in Confluent Cloud (free tier, no ACL enforcement)
+2. Create topics: `pokemon.telemetry.raw` and `pokemon.game.events`
+3. Create a **My account** API key (not service account)
+4. Set env vars and create `config.toml`:
+
+```bash
+export CONFLUENT_API_KEY="<your-api-key>"
+export CONFLUENT_API_SECRET="<your-api-secret>"
+```
+
+```toml
+version = 1
+
+[telemetry]
+dir = "data/telemetry"
+
+[telemetry.confluent]
+enabled = true
+bootstrap_servers = "pkc-xxxxx.us-east-2.aws.confluent.cloud:9092"
+topic_prefix = "pokemon"
+api_key_env = "CONFLUENT_API_KEY"
+api_secret_env = "CONFLUENT_API_SECRET"
+```
+
+5. Install the optional dependency and run:
+
+```bash
+uv sync --extra confluent
+uv run scripts/agent.py rom/pokemon_red.gb --config config.toml --strategy low --max-turns 500
+```
+
+Events stream to both local JSONL and Confluent Cloud via the `FanoutPublisher`. If Confluent fails, the agent continues writing locally.
+
 ## Flink Anomaly Detection
 
 Apache Flink (1.18) runs two SQL jobs against the telemetry stream:
