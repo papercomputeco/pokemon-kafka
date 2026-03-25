@@ -1738,6 +1738,35 @@ class TestRun:
 
         assert ag.battle_strategy._run_attempts == 0
 
+    def test_run_battle_limit_stops_early(self, tmp_path):
+        """Loop breaks when battles_won reaches battle_limit."""
+        ag = _make_agent(tmp_path)
+        self._mock_battle_helpers(ag)
+
+        battle_active = BattleState(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=100,
+            enemy_hp=30,
+            enemy_max_hp=40,
+            moves=[0x01, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+            player_level=5,
+        )
+        battle_none = BattleState(battle_type=0)
+
+        # One battle: loop read -> run_battle_turn read -> post-battle read (ends)
+        ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none])
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=5, y=5))
+
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=100, battle_limit=1)
+
+        assert ag.battles_won == 1
+        assert any("Battle limit reached (1)" in e for e in ag.events)
+        # Loop exited after 1 battle, well before max_turns
+        assert ag.turn_count < 100
+
     def test_run_overworld_only(self, tmp_path):
         ag = _make_agent(tmp_path)
         battle_none = BattleState(battle_type=0)
@@ -1843,7 +1872,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
-        mock_agent.run.assert_called_once_with(max_turns=5)
+        mock_agent.run.assert_called_once_with(max_turns=5, battle_limit=0)
 
     def test_main_rom_not_found(self, tmp_path):
         missing = tmp_path / "nope.gb"
@@ -1869,7 +1898,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=True)
-        mock_agent.run.assert_called_once_with(max_turns=10)
+        mock_agent.run.assert_called_once_with(max_turns=10, battle_limit=0)
 
     def test_main_default_args(self, tmp_path):
         rom = tmp_path / "game.gb"
@@ -1884,7 +1913,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
-        mock_agent.run.assert_called_once_with(max_turns=100_000)
+        mock_agent.run.assert_called_once_with(max_turns=100_000, battle_limit=0)
 
 
 # ===================================================================
