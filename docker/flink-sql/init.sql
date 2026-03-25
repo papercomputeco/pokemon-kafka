@@ -184,3 +184,60 @@ FROM TABLE(
 WHERE event_type = 'battle' AND data.player_hp = 0
 GROUP BY window_start, window_end
 HAVING COUNT(*) >= 1;
+
+-- Battle loop detection: 20+ battle events with same enemy_hp in 30s
+-- Catches input spam where the agent fights without dealing damage
+-- (e.g., frame waits too short, moves not registering)
+INSERT INTO tapes_alerts
+SELECT
+    'BATTLE_LOOP' AS alert_type,
+    '' AS root_hash,
+    CONCAT('enemy_hp=', CAST(data.enemy_hp AS STRING),
+           ' player_hp=', CAST(MIN(data.player_hp) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(TABLE game_events, DESCRIPTOR(occurred_at), INTERVAL '30' SECONDS)
+)
+WHERE event_type = 'battle'
+GROUP BY data.enemy_hp, window_start, window_end
+HAVING COUNT(*) >= 20;
+
+-- Position deadlock: 50+ overworld events at same position in 2 minutes
+-- Catches the agent bouncing against an impassable obstacle (ledge, tree)
+INSERT INTO tapes_alerts
+SELECT
+    'POSITION_DEADLOCK' AS alert_type,
+    '' AS root_hash,
+    CONCAT('map=', CAST(data.map_id AS STRING),
+           ' pos=(', CAST(data.position.x AS STRING), ',',
+           CAST(data.position.y AS STRING), ')') AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(TABLE game_events, DESCRIPTOR(occurred_at), INTERVAL '2' MINUTES)
+)
+WHERE event_type = 'overworld'
+GROUP BY data.map_id, data.position.x, data.position.y, window_start, window_end
+HAVING COUNT(*) >= 50;
+
+-- No progress: 100+ overworld events on same map hitting <=5 unique positions in 5 min
+-- Higher-level signal that navigation is completely stalled
+INSERT INTO tapes_alerts
+SELECT
+    'NO_PROGRESS' AS alert_type,
+    '' AS root_hash,
+    CONCAT('map=', CAST(data.map_id AS STRING),
+           ' turns=', CAST(COUNT(*) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(TABLE game_events, DESCRIPTOR(occurred_at), INTERVAL '5' MINUTES)
+)
+WHERE event_type = 'overworld'
+GROUP BY data.map_id, window_start, window_end
+HAVING COUNT(*) >= 100
+   AND COUNT(DISTINCT CONCAT(CAST(data.position.x AS STRING), ',', CAST(data.position.y AS STRING))) <= 5;
