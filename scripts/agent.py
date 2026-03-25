@@ -1034,7 +1034,7 @@ class PokemonAgent:
             "evolutions": len(self.evolution_log),
         }
 
-    def run(self, max_turns: int = 100_000):
+    def run(self, max_turns: int = 100_000, battle_limit: int = 0):
         """Main agent loop. Returns fitness dict at end."""
         self.log("Agent starting. Advancing through intro...")
         self.collector.session(0, "start")
@@ -1136,6 +1136,10 @@ class PokemonAgent:
                     # Reset pre-battle snapshots
                     self._pre_battle_species = []
                     self._pre_battle_level = 0
+
+                    if battle_limit > 0 and self.battles_won >= battle_limit:
+                        self.log(f"Battle limit reached ({battle_limit}). Stopping.")
+                        break
             else:
                 self.run_overworld()
                 self.turn_count += 1
@@ -1178,6 +1182,12 @@ def main():
         type=int,
         default=100_000,
         help="Maximum turns before stopping (default: 100000)",
+    )
+    parser.add_argument(
+        "--battle-limit",
+        type=int,
+        default=0,
+        help="Stop after this many battle wins (0 = unlimited)",
     )
     parser.add_argument(
         "--save-screenshots",
@@ -1226,7 +1236,7 @@ def main():
 
         agent.collector = GameEventCollector(publisher=game_pub)
 
-    fitness = agent.run(max_turns=args.max_turns)
+    fitness = agent.run(max_turns=args.max_turns, battle_limit=args.battle_limit)
 
     if game_pub is not None:
         game_pub.close()
