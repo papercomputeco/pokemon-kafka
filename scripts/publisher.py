@@ -115,6 +115,7 @@ class ConfluentPublisher:
         key = schema.encode("utf-8")
         value = json.dumps(event).encode("utf-8")
         self._producer.produce(topic=topic, key=key, value=value, callback=self._delivery_callback)
+        self._producer.poll(0)  # Process delivery callbacks without blocking
 
     def close(self) -> None:
         self._producer.flush(timeout=10)
