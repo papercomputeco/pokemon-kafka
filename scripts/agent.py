@@ -830,14 +830,14 @@ class PokemonAgent:
             self.controller.wait(20)
             # Select move
             self.controller.navigate_menu(action["move_index"])
-            self.controller.wait(60)  # Wait for attack animation
-            self.controller.mash_a(3)  # Clear text boxes
+            self.controller.wait(180)  # Wait for both attack animations
+            self.controller.mash_a(8, delay=30)  # Clear all text boxes
 
         elif action["action"] == "run":
             # Navigate to RUN (index 3 in battle menu)
             self.controller.navigate_menu(3)
-            self.controller.wait(40)
-            self.controller.mash_a(3)
+            self.controller.wait(120)
+            self.controller.mash_a(5, delay=30)
 
         elif action["action"] == "item":
             # Navigate to BAG (index 1 in battle menu)
@@ -846,16 +846,16 @@ class PokemonAgent:
             # Navigate to the correct item slot
             bag_index = action.get("bag_index", 0)
             self.controller.navigate_menu(bag_index)
-            self.controller.wait(40)
-            self.controller.mash_a(3)
+            self.controller.wait(120)
+            self.controller.mash_a(5, delay=30)
 
         elif action["action"] == "switch":
             # Navigate to POKEMON (index 2 in battle menu)
             self.controller.navigate_menu(2)
             self.controller.wait(20)
             self.controller.navigate_menu(action.get("slot", 1))
-            self.controller.wait(40)
-            self.controller.mash_a(3)
+            self.controller.wait(120)
+            self.controller.mash_a(5, delay=30)
 
         self.turn_count += 1
 
@@ -1099,8 +1099,8 @@ class PokemonAgent:
 
                 self.run_battle_turn()
 
-                # Check if battle ended
-                self.controller.wait(10)
+                # Check if battle ended — wait long enough for turn to fully resolve
+                self.controller.wait(60)
                 new_battle = self.memory.read_battle_state()
                 if new_battle.battle_type == 0:
                     self.battles_won += 1
