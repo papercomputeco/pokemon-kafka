@@ -3045,21 +3045,111 @@ class TestLabPokemonSelection:
 
 
 class TestGameEventPublish:
-    def test_game_event_publish_error_is_caught(self, tmp_path, capsys):
-        """Cover except branch when game event publishing fails (lines 1111-1112)."""
+    """Tests for real-time game event publishing architecture."""
+
+    def test_game_publisher_setup_failure_is_caught(self, tmp_path, capsys):
+        """Cover except branch when make_publisher fails during setup (agent.py lines 1219-1220).
+
+        When make_publisher raises, game_pub stays None and the agent still runs.
+        """
         rom = tmp_path / "game.gb"
         rom.write_text("fake rom")
 
         mock_agent = MagicMock()
         mock_agent.run.return_value = {"turns": 5}
-        # Make collector.events a non-iterable to force TypeError
-        mock_agent.collector.events = 42
 
         with (
-            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "5"]),
+            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "5", "--telemetry-dir", str(tmp_path)]),
             patch("agent.PokemonAgent", return_value=mock_agent),
+            patch("publisher.make_publisher", side_effect=RuntimeError("kafka down")),
         ):
             main()  # should not raise
 
         captured = capsys.readouterr()
-        assert "game event publish failed" in captured.out
+        assert "game publisher setup failed" in captured.out
+        assert "kafka down" in captured.out
+        # collector should NOT have been reassigned since game_pub is None
+        mock_agent.run.assert_called_once()
+
+    def test_game_publisher_close_called_on_success(self, tmp_path):
+        """Cover game_pub.close() path (agent.py lines 1231-1232).
+
+        When make_publisher succeeds, game_pub.close() is called after run().
+        """
+        rom = tmp_path / "game.gb"
+        rom.write_text("fake rom")
+
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = {"turns": 5}
+
+        mock_pub = MagicMock()
+        mock_pub.close = MagicMock()
+
+        with (
+            patch("sys.argv", ["agent.py", str(rom), "--max-turns", "5", "--telemetry-dir", str(tmp_path)]),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+            patch("publisher.make_publisher", return_value=mock_pub),
+        ):
+            main()
+
+        # close() is called for both the game publisher and the general telemetry publisher
+        # (both use make_publisher which returns the same mock here); at least one call covers the path.
+        assert mock_pub.close.call_count >= 1
+
+    def test_collector_emit_catches_publisher_error(self, capsys):
+        """Cover _emit except branch (game_events.py lines 135-136).
+
+        When publisher.publish() raises, the error is caught and printed,
+        and the event is still stored locally.
+        """
+        from game_events import GameEventCollector
+
+        failing_pub = MagicMock()
+        failing_pub.publish.side_effect = RuntimeError("broker unreachable")
+
+        collector = GameEventCollector(publisher=failing_pub)
+        collector.milestone(turn=1, description="test milestone")
+
+        # Event should still be collected locally despite publish failure
+        assert len(collector.events) == 1
+        assert collector.events[0]["event_type"] == "milestone"
+
+        captured = capsys.readouterr()
+        assert "publish error" in captured.out
+        assert "broker unreachable" in captured.out
+
+    def test_collector_publishes_events_in_realtime(self):
+        """Verify events are published via the publisher in real-time."""
+        from game_events import GameEventCollector
+
+        mock_pub = MagicMock()
+        collector = GameEventCollector(publisher=mock_pub)
+
+        collector.battle(
+            turn=1, player_hp=100, player_max_hp=100, enemy_hp=50, enemy_max_hp=50, action={"type": "fight"}
+        )
+        collector.overworld(turn=2, map_id=1, x=5, y=10, badges=0, party_count=1, action="move", stuck_turns=0)
+        collector.map_change(turn=3, prev_map=0, new_map=1, x=5, y=10)
+        collector.stuck(turn=4, map_id=1, x=5, y=10, last_action="move", streak=3)
+        collector.milestone(turn=5, description="got badge")
+        collector.session(turn=6, phase="start", battles_won=0, maps_visited=1)
+
+        # All 6 events collected locally
+        assert len(collector.events) == 6
+
+        # All 6 events published in real-time (one publish call per emit)
+        assert mock_pub.publish.call_count == 6
+
+        # Verify event types in order
+        published_types = [c.args[0]["event_type"] for c in mock_pub.publish.call_args_list]
+        assert published_types == ["battle", "overworld", "map_change", "stuck", "milestone", "session"]
+
+    def test_collector_without_publisher_still_collects(self):
+        """Verify collector works without a publisher (publisher=None)."""
+        from game_events import GameEventCollector
+
+        collector = GameEventCollector()
+        collector.milestone(turn=1, description="no publisher")
+
+        assert len(collector.events) == 1
+        assert collector.events[0]["event_type"] == "milestone"

@@ -117,14 +117,26 @@ class GameEventCollector:
     """Collects structured game events during an agent session.
 
     Provides typed emit methods so agent.py call sites stay concise.
-    Events accumulate in ``self.events`` and are published at session end.
+    Events accumulate in ``self.events``.  When an optional *publisher* is
+    provided, each event is also published in real-time so data reaches
+    Confluent Cloud immediately instead of being batched after the run.
     """
 
-    def __init__(self):
+    def __init__(self, publisher=None):
         self.events: list[dict] = []
+        self._publisher = publisher
+
+    def _emit(self, event: dict) -> None:
+        """Append *event* to the local list and publish if a publisher is set."""
+        self.events.append(event)
+        if self._publisher is not None:
+            try:
+                self._publisher.publish(event)
+            except Exception as exc:
+                print(f"[game_events] publish error: {exc}")
 
     def battle(self, turn: int, player_hp: int, player_max_hp: int, enemy_hp: int, enemy_max_hp: int, action: dict):
-        self.events.append(build_battle_event(turn, player_hp, player_max_hp, enemy_hp, enemy_max_hp, action))
+        self._emit(build_battle_event(turn, player_hp, player_max_hp, enemy_hp, enemy_max_hp, action))
 
     def overworld(
         self,
@@ -138,18 +150,16 @@ class GameEventCollector:
         stuck_turns: int,
         waypoint_info: str | None = None,
     ):
-        self.events.append(
-            build_overworld_event(turn, map_id, x, y, badges, party_count, action, stuck_turns, waypoint_info)
-        )
+        self._emit(build_overworld_event(turn, map_id, x, y, badges, party_count, action, stuck_turns, waypoint_info))
 
     def map_change(self, turn: int, prev_map: int, new_map: int, x: int, y: int):
-        self.events.append(build_map_change_event(turn, prev_map, new_map, x, y))
+        self._emit(build_map_change_event(turn, prev_map, new_map, x, y))
 
     def stuck(self, turn: int, map_id: int, x: int, y: int, last_action: str, streak: int):
-        self.events.append(build_stuck_event(turn, map_id, x, y, last_action, streak))
+        self._emit(build_stuck_event(turn, map_id, x, y, last_action, streak))
 
     def milestone(self, turn: int, description: str):
-        self.events.append(build_milestone_event(turn, description))
+        self._emit(build_milestone_event(turn, description))
 
     def session(self, turn: int, phase: str, battles_won: int | None = None, maps_visited: int | None = None):
-        self.events.append(build_session_event(turn, phase, battles_won, maps_visited))
+        self._emit(build_session_event(turn, phase, battles_won, maps_visited))

@@ -1208,14 +1208,32 @@ def main():
         print(f"ROM not found: {args.rom}")
         sys.exit(1)
 
+    # Set up real-time game event publisher (Confluent Cloud / JSONL)
+    config_path = Path(args.config) if args.config else None
+    game_pub = None
+    if args.telemetry_dir:
+        try:
+            from publisher import make_publisher as _make_game_pub
+
+            game_pub = _make_game_pub(telemetry_dir=str(Path(args.telemetry_dir) / "game"), config_path=config_path)
+        except Exception as exc:
+            print(f"[agent] game publisher setup failed: {exc}")
+
     agent = PokemonAgent(args.rom, strategy=args.strategy, screenshots=args.save_screenshots)
+
+    if game_pub is not None:
+        from game_events import GameEventCollector
+
+        agent.collector = GameEventCollector(publisher=game_pub)
+
     fitness = agent.run(max_turns=args.max_turns)
+
+    if game_pub is not None:
+        game_pub.close()
 
     if args.output_json:
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output_json).write_text(json.dumps(fitness, indent=2) + "\n")
-
-    config_path = Path(args.config) if args.config else None
 
     if args.telemetry_dir:
         try:
@@ -1239,18 +1257,6 @@ def main():
             pub.close()
         except Exception as exc:
             print(f"[agent] telemetry publish failed: {exc}")
-
-    # Publish game events
-    if args.telemetry_dir:
-        try:
-            from publisher import make_publisher as _make_pub
-
-            game_pub = _make_pub(telemetry_dir=str(Path(args.telemetry_dir) / "game"), config_path=config_path)
-            for event in agent.collector.events:
-                game_pub.publish(event)
-            game_pub.close()
-        except Exception as exc:
-            print(f"[agent] game event publish failed: {exc}")
 
 
 if __name__ == "__main__":
