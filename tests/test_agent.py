@@ -1843,7 +1843,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
-        mock_agent.run.assert_called_once_with(max_turns=5)
+        mock_agent.run.assert_called_once_with(max_turns=5, battle_limit=0)
 
     def test_main_rom_not_found(self, tmp_path):
         missing = tmp_path / "nope.gb"
@@ -1869,7 +1869,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=True)
-        mock_agent.run.assert_called_once_with(max_turns=10)
+        mock_agent.run.assert_called_once_with(max_turns=10, battle_limit=0)
 
     def test_main_default_args(self, tmp_path):
         rom = tmp_path / "game.gb"
@@ -1884,7 +1884,7 @@ class TestMain:
             main()
 
         mock_cls.assert_called_once_with(str(rom), strategy="low", screenshots=False)
-        mock_agent.run.assert_called_once_with(max_turns=100_000)
+        mock_agent.run.assert_called_once_with(max_turns=100_000, battle_limit=0)
 
 
 # ===================================================================
