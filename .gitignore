@@ -14,6 +14,7 @@ frames/
 
 # Plans (ephemeral working artifacts, never commit)
 docs/plans/
+docs/superpowers/
 
 # Agent working memory (ephemeral per-run notes)
 notes.md
@@ -32,6 +33,7 @@ venv/
 # Environment / secrets
 .env
 *.key
+api-key-*.txt
 
 # Config (may contain credential env var references)
 config.toml
