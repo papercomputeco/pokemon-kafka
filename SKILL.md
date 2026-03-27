@@ -287,6 +287,61 @@ pokemon-agent/
     └── type_chart.json    # Pokemon type effectiveness
 ```
 
+## Self-Healing Navigation
+
+When a run fails — high stuck counts, low battle wins, agent trapped in a loop — **fix the waypoints in `references/routes.json` before re-tuning parameters**. The AlphaEvolve harness optimizes numeric knobs but cannot fix a path that walks into an impassable ledge.
+
+### Diagnosis workflow
+
+After a failed run, read the pokedex log (`pokedex/logN.md`) and check:
+
+1. **Stuck events vs battles won** — a ratio above 100:1 means a navigation dead-end, not a parameter problem
+2. **Final position** — if the agent ended on the same map it entered, it never progressed
+3. **Map changes** — fewer than 5 means the agent is trapped in one area
+4. **Stuck position cluster** — grep the log for `STUCK` lines; if they all cluster around the same y-coordinate, there's a physical obstacle (ledge, tree, NPC) blocking the path
+
+### Fix sequence
+
+1. **Identify the obstacle** — check where stuck events cluster (e.g., Route 1 y=24 is a one-way ledge)
+2. **Update `references/routes.json`** — reroute waypoints around the obstacle, not through it
+3. **Use `"loop": true`** for grind zones — when the goal is battles (not progression), loop waypoints keep the agent farming encounters in a known-good grass area instead of advancing into obstacles
+4. **Re-run immediately** — don't burn turns tuning parameters for a broken path; fix the path first, then evolve
+
+### Route design principles
+
+- **Grind routes loop**: set `"loop": true` and keep waypoints in tall grass (e.g., Route 1 south at y=29-33)
+- **Progression routes go one way**: no loop flag, waypoints lead to the next city
+- **Ledges are one-way down**: never route the agent northward through a known ledge; go around or stay south
+- **Keep waypoints close together**: big jumps between waypoints (e.g., y=27 to y=21) hide obstacles the agent can't see
+
+### When to use AlphaEvolve vs waypoint fixes
+
+| Symptom | Fix |
+|---|---|
+| High stuck count, agent trapped at one position | Fix waypoints in `routes.json` |
+| Agent progresses but loses battles | Tune battle params via `evolve.py` |
+| Agent navigates but slowly | Tune navigation params (`stuck_threshold`, `bt_*`) |
+| Agent oscillates between two maps | Add `"loop": true` or adjust door cooldown |
+
+### Example: Route 1 grind zone
+
+The south grass on Route 1 (y=29-33) has reliable wild encounters. A looping route keeps the agent here:
+
+```json
+"12": {
+  "name": "Route 1",
+  "loop": true,
+  "waypoints": [
+    {"x": 5, "y": 33, "note": "Enter from Pallet Town — south grass zone"},
+    {"x": 5, "y": 29, "note": "Walk north into tall grass"},
+    {"x": 9, "y": 31, "note": "Sweep right through grass"},
+    {"x": 5, "y": 33, "note": "Loop back south"}
+  ]
+}
+```
+
+When the agent faints, it respawns in Pallet Town, walks north, and re-enters the grind loop automatically.
+
 ## Limitations
 
 - ROM not included. You must supply your own legally obtained ROM.

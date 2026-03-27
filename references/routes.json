@@ -13,14 +13,12 @@
 
   "12": {
     "name": "Route 1",
+    "loop": true,
     "waypoints": [
-      {"x": 5, "y": 33, "note": "Enter from Pallet Town"},
-      {"x": 5, "y": 29, "note": "Walk north toward first bend"},
-      {"x": 7, "y": 27, "note": "Dodge right around ledge/obstacle at y=28"},
-      {"x": 7, "y": 21, "note": "Continue north on right side"},
-      {"x": 5, "y": 15, "note": "Shift back to center"},
-      {"x": 5, "y": 9,  "note": "Approach Viridian entrance"},
-      {"x": 5, "y": 1,  "note": "Exit north to Viridian City"}
+      {"x": 5, "y": 33, "note": "Enter from Pallet Town — south grass zone"},
+      {"x": 5, "y": 29, "note": "Walk north into tall grass for encounters"},
+      {"x": 9, "y": 31, "note": "Sweep right through grass"},
+      {"x": 5, "y": 33, "note": "Loop back south for more encounters"}
     ]
   },
 

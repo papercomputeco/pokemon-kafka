@@ -534,6 +534,14 @@ class TestNavigator:
         result = nav._direction_toward_target(state, 5, 5, axis_preference="y")
         assert result == "down"
 
+    def test_direction_random_jitter_at_stuck_20(self):
+        """At stuck_turns >= 20, direction is random from all four cardinals."""
+        nav = Navigator({})
+        state = OverworldState(x=3, y=3)
+        results = {nav._direction_toward_target(state, 5, 5, stuck_turns=20) for _ in range(50)}
+        assert results <= {"up", "down", "left", "right"}
+        assert len(results) > 1  # not deterministic
+
     # -- next_direction --
 
     def test_next_direction_early_game_target(self):
@@ -596,6 +604,17 @@ class TestNavigator:
         state = OverworldState(map_id=10, x=5, y=5)
         result = nav.next_direction(state)
         assert result is None
+
+    def test_next_direction_loop_route_wraps(self):
+        """Routes with loop=true reset waypoint index instead of returning None."""
+        routes = {"10": {"loop": True, "waypoints": [{"x": 5, "y": 5}, {"x": 10, "y": 10}]}}
+        nav = Navigator(routes)
+        nav.current_map = "10"
+        nav.current_waypoint = 2  # past the end
+        state = OverworldState(map_id=10, x=0, y=0)
+        result = nav.next_direction(state)
+        assert result is not None
+        assert nav.current_waypoint == 0
 
     def test_next_direction_waypoint_reached_advances(self):
         """When at a waypoint, the navigator advances and recurses."""
@@ -1116,15 +1135,15 @@ class TestUpdateOverworldProgress:
         ag.update_overworld_progress(state)
         assert ag.stuck_turns == 0
 
-    def test_recent_positions_capped_at_8(self, tmp_path):
+    def test_recent_positions_capped_at_16(self, tmp_path):
         ag = _make_agent(tmp_path)
         old = OverworldState(map_id=0, x=0, y=0)
         ag.last_overworld_state = old
-        ag.recent_positions = [(0, i, 0) for i in range(8)]
+        ag.recent_positions = [(0, i, 0) for i in range(16)]
 
         state = OverworldState(map_id=0, x=99, y=0)
         ag.update_overworld_progress(state)
-        assert len(ag.recent_positions) == 8
+        assert len(ag.recent_positions) == 16
 
     def test_stuck_log_at_2(self, tmp_path):
         ag = _make_agent(tmp_path)
