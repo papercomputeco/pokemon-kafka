@@ -13,6 +13,7 @@ import argparse
 import io
 import json
 import os
+import random
 import sys
 import time
 from collections import deque
@@ -293,6 +294,10 @@ class Navigator:
         if not ordered:
             return None
 
+        # Random jitter to break deterministic oscillation loops
+        if stuck_turns >= 20:
+            return random.choice(["up", "down", "left", "right"])
+
         # At low stuck counts, only cycle through forward directions
         forward_count = min(2, len(ordered))
         if stuck_turns < 8:
@@ -353,7 +358,11 @@ class Navigator:
         route = self.routes[map_key]
         waypoints = route["waypoints"] if isinstance(route, dict) and "waypoints" in route else route
         if self.current_waypoint >= len(waypoints):
-            return None  # Route complete
+            # Loop waypoints if route has "loop": true
+            if isinstance(route, dict) and route.get("loop"):
+                self.current_waypoint = 0
+            else:
+                return None  # Route complete
 
         target = waypoints[self.current_waypoint]
         tx, ty = target["x"], target["y"]
@@ -487,6 +496,7 @@ class PokemonAgent:
         self.last_overworld_state: OverworldState | None = None
         self.last_overworld_action: str | None = None
         self.stuck_turns = 0
+        self._last_progress_turn = 0  # turn of last meaningful progress (map change, battle win)
         self.recent_positions: list[tuple[int, int, int]] = []
         self.maps_visited: set[int] = set()
         self.events: list[str] = []
@@ -577,6 +587,7 @@ class PokemonAgent:
 
         if state.map_id != self.last_overworld_state.map_id:
             self.stuck_turns = 0
+            self._last_progress_turn = self.turn_count
             self.recent_positions.clear()
             self.recent_positions.append(pos)
             # Set door cooldown when exiting interior maps to avoid re-entry.
@@ -601,7 +612,7 @@ class PokemonAgent:
             self.stuck_turns = 0
 
         self.recent_positions.append(pos)
-        if len(self.recent_positions) > 8:
+        if len(self.recent_positions) > 16:
             self.recent_positions.pop(0)
 
         if self.stuck_turns in {2, 5, 10, 20}:
@@ -898,6 +909,22 @@ class PokemonAgent:
             ):
                 self.backtrack.save_snapshot(self.pyboy, state, self.turn_count)
 
+        # Force restore when no meaningful progress for 500 turns (skip in Oak's Lab)
+        progress_gap = self.turn_count - self._last_progress_turn
+        if not in_oaks_lab and progress_gap > 500 and self.backtrack.snapshots:
+            self.log(f"PROGRESS STALL | No progress for {progress_gap} turns, forcing backtrack restore")
+            snap = self.backtrack.restore(self.pyboy)
+            if snap is not None:
+                self.stuck_turns = 0
+                self._last_progress_turn = self.turn_count
+                self.recent_positions.clear()
+                state = self.memory.read_overworld_state()
+                self.log(
+                    f"BACKTRACK | Restored to turn {snap.turn} "
+                    f"map={snap.map_id} ({snap.x},{snap.y}) "
+                    f"attempt={snap.attempts}"
+                )
+
         # Restore when stuck too long (skip in Oak's Lab)
         if not in_oaks_lab and self.backtrack.should_restore(self.stuck_turns):
             snap = self.backtrack.restore(self.pyboy)
@@ -1104,6 +1131,7 @@ class PokemonAgent:
                 new_battle = self.memory.read_battle_state()
                 if new_battle.battle_type == 0:
                     self.battles_won += 1
+                    self._last_progress_turn = self.turn_count
                     self.battle_strategy._run_attempts = 0
                     self.encounter_log.append(
                         {
