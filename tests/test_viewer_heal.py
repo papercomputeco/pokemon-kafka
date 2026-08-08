@@ -171,6 +171,23 @@ def test_runner_failure_reports_error(tmp_path: Path):
     assert r.json() == {"state": "error", "verdict": "healer missing"}
 
 
+def test_verdict_prefers_decision_line_over_escalation(tmp_path: Path):
+    """When the healer escalates, the accept/keep decision is printed BEFORE the
+    escalation line — the readout must lead with the decision, not bury it."""
+    _run_with_rom(tmp_path)
+    stdout = (
+        "[healer] kept current genome (control 8785, best variant 8600)\n"
+        "[healer] escalating navigation-thrash to the discovery engine (refire-after-accept)"
+    )
+    client, _ = _client(tmp_path, runner=FakeRunner(stdout=stdout))
+
+    r = client.post(f"/api/runs/{RUN_ID}/heal")
+
+    assert r.json()["verdict"] == (
+        "kept current genome (control 8785, best variant 8600) · escalated to the discovery engine"
+    )
+
+
 def test_no_healer_line_in_output_still_completes(tmp_path: Path):
     _run_with_rom(tmp_path)
     client, _ = _client(tmp_path, runner=FakeRunner(stdout="something unexpected"))

@@ -81,8 +81,13 @@ class HealJobs:
         rule = self.jobs.get(run_id, {}).get("rule")
         try:
             proc = self.runner(cmd, capture_output=True, text=True)
-            lines = [ln for ln in (proc.stdout or "").splitlines() if "[healer]" in ln]
-            verdict = lines[-1].split("[healer]", 1)[1].strip() if lines else "no healer output"
+            lines = [ln.split("[healer]", 1)[1].strip() for ln in (proc.stdout or "").splitlines() if "[healer]" in ln]
+            # The accept/keep decision is the verdict; escalation prints after it
+            # and would otherwise mask the decision as the last line.
+            decision = next((ln for ln in lines if ln.startswith(("accepted:", "kept current genome"))), None)
+            verdict = decision or (lines[-1] if lines else "no healer output")
+            if decision and any(ln.startswith("escalating") for ln in lines):
+                verdict += " · escalated to the discovery engine"
             job = {"state": "done", "verdict": verdict}
         except Exception as exc:
             job = {"state": "error", "verdict": str(exc)}
