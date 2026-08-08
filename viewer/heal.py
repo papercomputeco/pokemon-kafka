@@ -16,6 +16,11 @@ from pathlib import Path
 
 _HEALER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "healer.py"
 
+# Mirror of healer.py's RULES names; kept literal so the viewer never imports
+# the emulator-heavy scripts package. tests/test_viewer_heal.py exercises the
+# round trip, so a rename over there fails loudly here.
+KNOWN_RULES = frozenset({"navigation-thrash", "terminal-wedge", "no-progress"})
+
 
 class HealJobs:
     """One healer subprocess per run_id, with an injectable runner for tests."""
@@ -30,8 +35,12 @@ class HealJobs:
     def status(self, run_id: str) -> dict:
         return self.jobs.get(run_id, {"state": "idle", "verdict": None})
 
-    def start(self, run_id: str, force: bool = False) -> dict:
+    def start(self, run_id: str, force: bool = False, rule: str | None = None) -> dict:
         if self.jobs.get(run_id, {}).get("state") == "running":
+            return self.jobs[run_id]
+
+        if rule is not None and rule not in KNOWN_RULES:
+            self.jobs[run_id] = {"state": "error", "verdict": f"unknown rule: {rule}"}
             return self.jobs[run_id]
 
         summary_path = self.runs_dir / run_id / "summary.json"
@@ -55,8 +64,13 @@ class HealJobs:
         ]
         if force:
             cmd += ["--cooldown-hours", "0"]
+        if rule:
+            cmd += ["--rule", rule]
 
-        self.jobs[run_id] = {"state": "running", "verdict": None}
+        job = {"state": "running", "verdict": None}
+        if rule:
+            job["rule"] = rule
+        self.jobs[run_id] = job
         if self.background:
             threading.Thread(target=self._work, args=(run_id, cmd), daemon=True).start()
         else:
@@ -64,10 +78,19 @@ class HealJobs:
         return self.jobs[run_id]
 
     def _work(self, run_id: str, cmd: list[str]) -> None:
+        rule = self.jobs.get(run_id, {}).get("rule")
         try:
             proc = self.runner(cmd, capture_output=True, text=True)
-            lines = [ln for ln in (proc.stdout or "").splitlines() if "[healer]" in ln]
-            verdict = lines[-1].split("[healer]", 1)[1].strip() if lines else "no healer output"
-            self.jobs[run_id] = {"state": "done", "verdict": verdict}
+            lines = [ln.split("[healer]", 1)[1].strip() for ln in (proc.stdout or "").splitlines() if "[healer]" in ln]
+            # The accept/keep decision is the verdict; escalation prints after it
+            # and would otherwise mask the decision as the last line.
+            decision = next((ln for ln in lines if ln.startswith(("accepted:", "kept current genome"))), None)
+            verdict = decision or (lines[-1] if lines else "no healer output")
+            if decision and any(ln.startswith("escalating") for ln in lines):
+                verdict += " · escalated to the discovery engine"
+            job = {"state": "done", "verdict": verdict}
         except Exception as exc:
-            self.jobs[run_id] = {"state": "error", "verdict": str(exc)}
+            job = {"state": "error", "verdict": str(exc)}
+        if rule:
+            job["rule"] = rule
+        self.jobs[run_id] = job

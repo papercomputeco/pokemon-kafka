@@ -99,6 +99,11 @@ def decide(control_score: float, winner_score: float, margin: float = MARGIN) ->
 
 
 def cooldown_active(state: dict, now_ts: float, hours: float = COOLDOWN_HOURS) -> bool:
+    # hours<=0 means "force": now_ts is the fitness file's mtime, and a run
+    # that already auto-healed has last_race_at >= now_ts, so the strict
+    # comparison alone would block a forced race forever.
+    if hours <= 0:
+        return False
     last = state.get("last_race_at")
     return last is not None and (now_ts - last) < hours * 3600
 
@@ -177,12 +182,18 @@ def _check(args) -> None:
         print(f"[healer] unreadable fitness file {fitness_path}: {exc}")
         return
 
-    fired = evaluate_rules(fitness)
-    if not fired:
-        print("[healer] run healthy — no rules fired")
-        return
-
-    rule = fired[0]  # one race per check; first rule in table order wins
+    if args.rule:
+        # Operator override (viewer: an anomaly selected in the feed). The
+        # human pointed at a symptom, so race that rule's knobs even when the
+        # whole-run fitness stays under every threshold.
+        rule = next(r for r in RULES if r["name"] == args.rule)
+        print(f"[healer] {rule['name']} operator-selected — racing regardless of thresholds")
+    else:
+        fired = evaluate_rules(fitness)
+        if not fired:
+            print("[healer] run healthy — no rules fired")
+            return
+        rule = fired[0]  # one race per check; first rule in table order wins
     param_names = rule["params"]
 
     state = load_state(args.state)
@@ -244,6 +255,12 @@ def main() -> int:
     check.add_argument("--state", default="data/healer_state.json", help="healer cooldown/race history")
     check.add_argument("--queue", default="data/discovery_queue.json", help="loop-3 escalation queue")
     check.add_argument("--cooldown-hours", type=float, default=COOLDOWN_HOURS)
+    check.add_argument(
+        "--rule",
+        choices=[r["name"] for r in RULES],
+        default=None,
+        help="force this rule to race (operator-selected anomaly), bypassing its threshold",
+    )
     args = parser.parse_args()
 
     try:

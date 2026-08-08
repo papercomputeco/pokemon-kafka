@@ -71,6 +71,41 @@ def test_post_heal_force_overrides_cooldown(tmp_path: Path):
     assert cmd[cmd.index("--cooldown-hours") + 1] == "0"
 
 
+def test_post_heal_rule_targets_selected_anomaly(tmp_path: Path):
+    """Selecting an anomaly in the feed sends rule=…; the healer races that rule."""
+    _run_with_rom(tmp_path)
+    runner = FakeRunner()
+    client, _ = _client(tmp_path, runner)
+
+    r = client.post(f"/api/runs/{RUN_ID}/heal?force=true&rule=navigation-thrash")
+
+    assert r.json()["rule"] == "navigation-thrash"
+    cmd = runner.calls[0]
+    assert cmd[cmd.index("--rule") + 1] == "navigation-thrash"
+
+
+def test_post_heal_without_rule_omits_flag(tmp_path: Path):
+    _run_with_rom(tmp_path)
+    runner = FakeRunner()
+    client, _ = _client(tmp_path, runner)
+
+    client.post(f"/api/runs/{RUN_ID}/heal")
+
+    assert "--rule" not in runner.calls[0]
+
+
+def test_post_heal_unknown_rule_errors_without_running(tmp_path: Path):
+    _run_with_rom(tmp_path)
+    runner = FakeRunner()
+    client, _ = _client(tmp_path, runner)
+
+    r = client.post(f"/api/runs/{RUN_ID}/heal?rule=bogus")
+
+    assert r.json()["state"] == "error"
+    assert "rule" in r.json()["verdict"]
+    assert runner.calls == []
+
+
 def test_heal_status_starts_idle(tmp_path: Path):
     _run_with_rom(tmp_path)
     client, _ = _client(tmp_path)
@@ -134,6 +169,23 @@ def test_runner_failure_reports_error(tmp_path: Path):
     r = client.post(f"/api/runs/{RUN_ID}/heal")
 
     assert r.json() == {"state": "error", "verdict": "healer missing"}
+
+
+def test_verdict_prefers_decision_line_over_escalation(tmp_path: Path):
+    """When the healer escalates, the accept/keep decision is printed BEFORE the
+    escalation line — the readout must lead with the decision, not bury it."""
+    _run_with_rom(tmp_path)
+    stdout = (
+        "[healer] kept current genome (control 8785, best variant 8600)\n"
+        "[healer] escalating navigation-thrash to the discovery engine (refire-after-accept)"
+    )
+    client, _ = _client(tmp_path, runner=FakeRunner(stdout=stdout))
+
+    r = client.post(f"/api/runs/{RUN_ID}/heal")
+
+    assert r.json()["verdict"] == (
+        "kept current genome (control 8785, best variant 8600) · escalated to the discovery engine"
+    )
 
 
 def test_no_healer_line_in_output_still_completes(tmp_path: Path):

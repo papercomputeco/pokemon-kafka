@@ -82,10 +82,10 @@ def create_app(
         return {"states": sorted(states, key=lambda s: s["turn"])}
 
     @app.post("/api/runs/{run_id}/heal")
-    def run_heal(run_id: str, force: bool = False):
+    def run_heal(run_id: str, force: bool = False, rule: str | None = None):
         if not (runs_dir / run_id).is_dir():
             raise HTTPException(status_code=404, detail="run not found")
-        return heal.start(run_id, force=force)
+        return heal.start(run_id, force=force, rule=rule)
 
     @app.get("/api/runs/{run_id}/heal")
     def heal_status(run_id: str):
