@@ -151,7 +151,7 @@ def test_cooldown_empty_state():
 
 
 def test_cooldown_zero_hours_never_blocks():
-    """hours=0 is the force path (viewer FORCE HEAL) — it must always race.
+    """hours=0 is the force path (the viewer's HEAL button) — it must always race.
 
     now_ts comes from the fitness file's mtime, so a run whose end-of-run
     auto-heal already recorded a race has last_race_at >= now_ts (negative

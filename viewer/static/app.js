@@ -271,8 +271,6 @@ function resetHealUI() {
   healPoll = null;
   const btn = document.getElementById("heal-btn");
   btn.disabled = false;
-  btn.textContent = "HEAL";
-  delete btn.dataset.force;
   document.getElementById("heal-readout").textContent = "";
 }
 function renderHeal(job) {
@@ -286,22 +284,14 @@ function renderHeal(job) {
   }
   btn.disabled = false;
   readout.textContent = job.verdict || "";
-  // Match the healer's skip phrasing exactly — a bare /cooldown/ also hits
-  // param names like door_cooldown inside accepted-race verdicts.
-  if (job.state === "done" && /cooldown active/i.test(job.verdict || "")) {
-    btn.textContent = "FORCE HEAL";  // cooldown blocked the race; re-press overrides it
-    btn.dataset.force = "1";
-  } else {
-    btn.textContent = "HEAL";
-    delete btn.dataset.force;
-  }
 }
 async function pollHeal() {
   renderHeal(await (await fetch(`${API}/api/runs/${runId}/heal`)).json());
 }
 async function startHeal() {
-  const force = document.getElementById("heal-btn").dataset.force === "1";
-  const r = await fetch(`${API}/api/runs/${runId}/heal${force ? "?force=true" : ""}`, { method: "POST" });
+  // A click is a deliberate human override: race now, never blocked by the
+  // auto-heal cooldown recorded from past runs (healer_state.json).
+  const r = await fetch(`${API}/api/runs/${runId}/heal?force=true`, { method: "POST" });
   renderHeal(await r.json());
 }
 
