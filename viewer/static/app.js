@@ -1,6 +1,7 @@
 const API = "";
 let frames = [], feed = [], states = [], runId = null, idx = 0, timer = null, liveWs = null;
 let isolated = null; // null = show every kind; otherwise show only this one
+let selectedAnomaly = null; // feed index of the anomaly HEAL should address
 
 function kindForEvent(et) {
   if (et === "milestone" || et === "map_change") return "milestone";
@@ -149,11 +150,20 @@ function renderFeed() {
     if (isolated !== null && e.kind !== isolated) return;
     const li = document.createElement("li");
     li.className = `entry ${e.kind}`;
+    if (i === selectedAnomaly) li.classList.add("selected");
     li.dataset.feedIdx = i;
     // ts is ISO-8601 ("2026-07-19T14:17:26.000000Z") — show the HH:MM:SS slice.
     const time = e.ts ? e.ts.slice(11, 19) : "";
     li.textContent = `T${e.turn}${time ? " " + time : ""} [${e.kind}] ${e.text}`;
-    li.addEventListener("click", () => { stop(); showFrame(frameIndexForTurn(e.turn)); });
+    li.addEventListener("click", () => {
+      stop();
+      showFrame(frameIndexForTurn(e.turn));
+      // Clicking an anomaly also arms HEAL to address it (click again to disarm).
+      if (e.kind === "anomaly") {
+        selectedAnomaly = selectedAnomaly === i ? null : i;
+        renderFeed();
+      }
+    });
     ul.appendChild(li);
   });
   highlightCurrentFeedEntry();
@@ -269,16 +279,25 @@ let healPoll = null;
 function resetHealUI() {
   if (healPoll) clearTimeout(healPoll);
   healPoll = null;
+  selectedAnomaly = null;
   const btn = document.getElementById("heal-btn");
   btn.disabled = false;
   document.getElementById("heal-readout").textContent = "";
+}
+// The rules race the same navigation knobs; name the wedge honestly when the
+// selected trace shows a terminal-length streak (healer.py TERMINAL_WEDGE_STREAK).
+function ruleForAnomaly(entry) {
+  const m = /Stuck ×(\d+)/.exec(entry?.text || "");
+  return m && parseInt(m[1], 10) >= 50 ? "terminal-wedge" : "navigation-thrash";
 }
 function renderHeal(job) {
   const btn = document.getElementById("heal-btn");
   const readout = document.getElementById("heal-readout");
   if (job.state === "running") {
     btn.disabled = true;
-    readout.textContent = "healing — racing variants…";
+    readout.textContent = job.rule
+      ? `healing — racing ${job.rule} variants for the selected anomaly…`
+      : "healing — racing variants…";
     healPoll = setTimeout(pollHeal, 2000);
     return;
   }
@@ -290,8 +309,13 @@ async function pollHeal() {
 }
 async function startHeal() {
   // A click is a deliberate human override: race now, never blocked by the
-  // auto-heal cooldown recorded from past runs (healer_state.json).
-  const r = await fetch(`${API}/api/runs/${runId}/heal?force=true`, { method: "POST" });
+  // auto-heal cooldown recorded from past runs (healer_state.json). With an
+  // anomaly selected (entry click or ANOMALY chip isolated), target its rule
+  // so the healer races even when whole-run fitness trips no threshold.
+  let q = "force=true";
+  if (selectedAnomaly !== null) q += `&rule=${ruleForAnomaly(feed[selectedAnomaly])}`;
+  else if (isolated === "anomaly") q += "&rule=navigation-thrash";
+  const r = await fetch(`${API}/api/runs/${runId}/heal?${q}`, { method: "POST" });
   renderHeal(await r.json());
 }
 

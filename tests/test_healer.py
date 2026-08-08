@@ -320,6 +320,40 @@ def test_check_cooldown_blocks_race(check_env, capsys):
     assert "cooldown" in capsys.readouterr().out
 
 
+def test_check_rule_flag_races_healthy_fitness(check_env, capsys):
+    """--rule is the operator override: an anomaly selected in the viewer must
+    race its knobs even when the whole-run fitness trips no threshold."""
+    tmp_path, fitness_file, notes, state, argv = check_env
+    fitness_file.write_text(json.dumps(_fitness()))  # healthy — no rules fire
+    with patch.object(healer, "run_race", return_value=_race_results([100.0, 300.0])) as rr:
+        with patch("sys.argv", argv + ["--rule", "navigation-thrash"]):
+            assert healer.main() == 0
+    rr.assert_called_once()
+    saved = healer.load_state(state)
+    assert saved["races"][0]["rule"] == "navigation-thrash"
+    assert "operator-selected" in capsys.readouterr().out
+
+
+def test_check_rule_flag_races_only_that_rules_params(check_env):
+    tmp_path, fitness_file, notes, state, argv = check_env
+    fitness_file.write_text(json.dumps(_fitness()))
+    captured = {}
+
+    def fake_race(rom, turns, candidates):
+        captured["candidates"] = candidates
+        return _race_results([100.0] * len(candidates))
+
+    with patch.object(healer, "run_race", side_effect=fake_race):
+        with patch("sys.argv", argv + ["--rule", "no-progress"]):
+            healer.main()
+    no_progress_params = next(r for r in healer.RULES if r["name"] == "no-progress")["params"]
+    base = captured["candidates"][0]
+    for v in captured["candidates"][1:]:
+        for key, val in v.items():
+            if key not in no_progress_params:
+                assert val == base[key]
+
+
 def test_check_malformed_fitness_exits_zero(check_env, capsys):
     tmp_path, fitness_file, notes, state, argv = check_env
     fitness_file.write_text("{broken")

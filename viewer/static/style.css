@@ -336,6 +336,13 @@ h1 {
 #feed li.entry.anomaly     { border-left-color: #ff4444; background: #1a0606; color: #ff9999; }
 #feed li.entry.decision    { border-left-color: #b388ff; background: #150a29; color: #d9c2ff; }
 #feed li.entry.current     { outline: 2px solid #ffffff; outline-offset: -2px; }
+/* Anomaly armed for HEAL: the button will race this trace's rule. */
+#feed li.entry.anomaly.selected {
+  outline: 2px solid #ff4444;
+  outline-offset: -2px;
+  background: #2e0a0a;
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.55);
+}
 .entry.decision { font-family: 'Courier New', monospace; }
 
 /* --- Header stats bar --- */
