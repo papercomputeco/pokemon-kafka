@@ -99,6 +99,11 @@ def decide(control_score: float, winner_score: float, margin: float = MARGIN) ->
 
 
 def cooldown_active(state: dict, now_ts: float, hours: float = COOLDOWN_HOURS) -> bool:
+    # hours<=0 means "force": now_ts is the fitness file's mtime, and a run
+    # that already auto-healed has last_race_at >= now_ts, so the strict
+    # comparison alone would block a forced race forever.
+    if hours <= 0:
+        return False
     last = state.get("last_race_at")
     return last is not None and (now_ts - last) < hours * 3600
 

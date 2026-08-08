@@ -150,6 +150,29 @@ def test_cooldown_empty_state():
     assert healer.cooldown_active({}, now_ts=123.0, hours=6) is False
 
 
+def test_cooldown_zero_hours_never_blocks():
+    """hours=0 is the force path (viewer FORCE HEAL) — it must always race.
+
+    now_ts comes from the fitness file's mtime, so a run whose end-of-run
+    auto-heal already recorded a race has last_race_at >= now_ts (negative
+    elapsed). With strict `< hours*3600` that blocked even hours=0 forever.
+    """
+    state = {"last_race_at": 1000.0}
+    assert healer.cooldown_active(state, now_ts=1000.0, hours=0) is False
+    assert healer.cooldown_active(state, now_ts=999.5, hours=0) is False  # last race "after" this fitness
+
+
+def test_check_zero_cooldown_hours_forces_race(check_env):
+    tmp_path, fitness_file, notes, state, argv = check_env
+    # Simulate the demo-run state: the auto-heal at end of run recorded a race
+    # fractionally after the summary.json mtime.
+    healer.save_state(state, {"last_race_at": fitness_file.stat().st_mtime + 0.001, "races": []})
+    with patch.object(healer, "run_race", return_value=_race_results([100.0, 300.0])) as rr:
+        with patch("sys.argv", argv + ["--cooldown-hours", "0"]):
+            assert healer.main() == 0
+    rr.assert_called_once()
+
+
 def test_state_round_trip_and_tolerant_load(tmp_path):
     p = tmp_path / "state.json"
     healer.save_state(p, {"last_race_at": 5.0, "races": []})
