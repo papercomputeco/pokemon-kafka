@@ -4066,3 +4066,101 @@ def test_finish_in_run_heal_rejected(tmp_path):
     verdict, genome = finish_in_run_heal(heal, notes_path=notes)
     assert genome is None
     assert "kept current genome" in verdict
+
+
+def test_apply_genome_live_updates_live_objects(tmp_path):
+    ag = _make_agent(tmp_path)
+    ag.apply_genome_live(
+        {
+            "door_cooldown": 12,
+            "stuck_threshold": 16,
+            "waypoint_skip_distance": 1,
+            "bt_restore_threshold": 17,
+            "bt_snapshot_interval": 60,
+        }
+    )
+    assert ag._evolve_door_cooldown == 12
+    assert ag.navigator.stuck_threshold == 16
+    assert ag.navigator.skip_distance == 1
+    assert ag.backtrack.restore_threshold == 17
+    assert ag._bt_snapshot_interval == 60
+    assert ag.evolve_params["door_cooldown"] == 12
+
+
+def test_tick_starts_heal_once_at_streak(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    launches = []
+
+    def fake_start(*args, **kwargs):
+        launches.append(args)
+        return InRunHeal(proc=FakeProc(), log_path="x.log", genome_before={}, started_turn=0)
+
+    monkeypatch.setattr(agent, "start_in_run_heal", fake_start)
+    ag.stuck_turns = 49
+    ag._tick_in_run_heal()
+    assert launches == []
+    ag.stuck_turns = 50
+    ag._tick_in_run_heal()
+    assert len(launches) == 1
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("Self-heal started" in m["data"]["description"] for m in milestones)
+    ag._tick_in_run_heal()  # already in flight — no second launch
+    assert len(launches) == 1
+
+
+def test_tick_respects_disable_flag(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    ag.in_run_heal_enabled = False
+    monkeypatch.setattr(agent, "start_in_run_heal", lambda *a, **kw: pytest.fail("must not launch"))
+    ag.stuck_turns = 99
+    ag._tick_in_run_heal()
+    assert ag._in_run_heal is None
+
+
+def test_tick_marks_done_when_launch_fails(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    monkeypatch.setattr(agent, "start_in_run_heal", lambda *a, **kw: None)
+    ag.stuck_turns = 50
+    ag._tick_in_run_heal()
+    assert ag._in_run_heal is None
+    assert ag._in_run_heal_done is True
+
+
+def test_tick_applies_genome_when_race_finishes(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    proc = FakeProc()
+    ag._in_run_heal = InRunHeal(proc=proc, log_path="x.log", genome_before={}, started_turn=1)
+    monkeypatch.setattr(
+        agent,
+        "finish_in_run_heal",
+        lambda heal, notes_path=None: ("[healer] accepted: x", {"stuck_threshold": 16, "door_cooldown": 12}),
+    )
+    ag._tick_in_run_heal()  # still racing (poll() is None)
+    assert ag._in_run_heal is not None
+    proc.polled = 0
+    ag._tick_in_run_heal()
+    assert ag.navigator.stuck_threshold == 16
+    assert ag._evolve_door_cooldown == 12
+    assert ag._in_run_heal is None
+    assert ag._in_run_heal_done is True
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("Self-heal applied mid-run" in m["data"]["description"] for m in milestones)
+    ag.stuck_turns = 99
+    ag._tick_in_run_heal()  # done — never re-fires this run
+    assert ag._in_run_heal is None
+
+
+def test_tick_reports_kept_genome(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    proc = FakeProc()
+    proc.polled = 0
+    ag._in_run_heal = InRunHeal(proc=proc, log_path="x.log", genome_before={}, started_turn=1)
+    monkeypatch.setattr(
+        agent,
+        "finish_in_run_heal",
+        lambda heal, notes_path=None: ("[healer] kept current genome (control 100, best variant 90)", None),
+    )
+    ag._tick_in_run_heal()
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("kept current genome" in m["data"]["description"] for m in milestones)
+    assert ag._in_run_heal_done is True

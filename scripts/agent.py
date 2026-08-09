@@ -855,6 +855,49 @@ class PokemonAgent:
                 self.stuck_turns,
             )
 
+    def apply_genome_live(self, genome: dict) -> None:
+        """Hot-apply an accepted genome mid-run — the knobs the healer races."""
+        self.evolve_params = {**self.evolve_params, **genome}
+        self._evolve_door_cooldown = int(self.evolve_params.get("door_cooldown", self._evolve_door_cooldown))
+        self.navigator.stuck_threshold = int(self.evolve_params.get("stuck_threshold", self.navigator.stuck_threshold))
+        self.navigator.skip_distance = int(
+            self.evolve_params.get("waypoint_skip_distance", self.navigator.skip_distance)
+        )
+        self.backtrack.restore_threshold = int(
+            self.evolve_params.get("bt_restore_threshold", self.backtrack.restore_threshold)
+        )
+        self._bt_snapshot_interval = int(self.evolve_params.get("bt_snapshot_interval", self._bt_snapshot_interval))
+
+    def _tick_in_run_heal(self) -> None:
+        """Per-turn hook: launch a heal at the wedge threshold, poll the race, hot-apply the winner."""
+        if not self.in_run_heal_enabled:
+            return
+        if self._in_run_heal is None:
+            if self._in_run_heal_done or self.stuck_turns < self.in_run_heal_streak:
+                return
+            self._in_run_heal = start_in_run_heal(self.pyboy, self.compute_fitness(), self.rom_path, self.turn_count)
+            if self._in_run_heal is None:
+                self._in_run_heal_done = True  # launch failed — don't retry every turn
+                return
+            msg = f"Self-heal started: stuck streak {self.stuck_turns} — racing variants from the wedged state"
+            self.log(f"HEAL | {msg}")
+            self.collector.milestone(self.turn_count, msg)
+            return
+        if self._in_run_heal.proc.poll() is None:
+            return
+        verdict, genome = finish_in_run_heal(self._in_run_heal)
+        if genome is not None:
+            self.apply_genome_live(genome)
+            before = self._in_run_heal.genome_before
+            changed = ", ".join(f"{k}={v}" for k, v in sorted(genome.items()) if before.get(k) != v)
+            msg = f"Self-heal applied mid-run: {changed or 'genome refreshed'}"
+        else:
+            msg = f"Self-heal finished: {verdict.removeprefix('[healer] ')}"
+        self.log(f"HEAL | {msg}")
+        self.collector.milestone(self.turn_count, msg)
+        self._in_run_heal = None
+        self._in_run_heal_done = True
+
     def choose_overworld_action(self, state: OverworldState) -> str:
         """Pick the next overworld action."""
         if state.text_box_active:
@@ -1943,6 +1986,10 @@ class PokemonAgent:
                 self.run_overworld()
                 self.turn_count += 1
 
+            # In-run self-heal: trigger on a terminal wedge, poll the background
+            # race, and hot-apply an accepted genome without stopping the run.
+            self._tick_in_run_heal()
+
             self.collector.tick(self.turn_count)
 
             if self.turn_count % 10 == 0:
@@ -1967,6 +2014,8 @@ class PokemonAgent:
 
         if self.worldmap_file:
             self.world.save(self.worldmap_file)  # final persist of everything learned this segment
+        if self._in_run_heal is not None:
+            self.log("HEAL | in-run heal still racing — an accepted genome lands in notes.md for the next run")
         self.log(f"Session complete. Turns: {self.turn_count} | Wins: {self.battles_won}")
         self.collector.session(
             self.turn_count,
@@ -2257,7 +2306,9 @@ def main():
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output_json).write_text(json.dumps(fitness, indent=2) + "\n")
 
-    if args.self_heal:
+    # Skip the end-of-run heal while an in-run race is still in flight — its
+    # accepted genome lands in notes.md; doubling the race would fight it.
+    if args.self_heal and agent._in_run_heal is None:
         run_self_heal(fitness, args.rom, fitness_path=args.output_json or None)
 
     if args.telemetry_dir:
