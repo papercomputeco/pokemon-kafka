@@ -686,6 +686,13 @@ class PokemonAgent:
         self.collector = GameEventCollector(game=self.profile.name)
         self.collision_map = CollisionMap()
         self.door_cooldown: int = 0  # Steps to walk away from door after exiting a building
+        # In-run self-heal: when the stuck streak crosses the terminal-wedge
+        # threshold, race healer variants from the wedged savestate in the
+        # background and hot-apply an accepted genome without stopping the run.
+        self.in_run_heal_enabled = True
+        self.in_run_heal_streak = 50
+        self._in_run_heal = None  # in-flight InRunHeal race, at most one per run
+        self._in_run_heal_done = False
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -2084,6 +2091,19 @@ def main():
         default=True,
         help="Chain healer.py check on this run's fitness at session end (default: on)",
     )
+    parser.add_argument(
+        "--in-run-heal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Race the healer from a wedged savestate mid-run and hot-apply the winner (default: on; "
+        "race children spawned by evolve.run_agent always disable it)",
+    )
+    parser.add_argument(
+        "--in-run-heal-streak",
+        type=int,
+        default=50,
+        help="Stuck streak that triggers the in-run heal (default: 50, the terminal-wedge threshold)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2109,6 +2129,8 @@ def main():
     if args.worldmap_file:
         agent.worldmap_file = args.worldmap_file
         agent.world = WorldMap.load(args.worldmap_file)  # resume learned geometry, if any
+    agent.in_run_heal_enabled = args.in_run_heal
+    agent.in_run_heal_streak = args.in_run_heal_streak
 
     producer = None
     run_id = None

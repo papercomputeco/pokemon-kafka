@@ -5,6 +5,7 @@ import io
 import json
 import os
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -3976,3 +3977,18 @@ class TestDecisionAndStateEvents:
         types = [json.loads(line)["event_type"] for line in lines]
         assert "decision" in types
         assert "agent_state" in types
+
+
+# ===================================================================
+# In-run self-heal (wedge-triggered background healer race)
+# ===================================================================
+
+
+def test_cli_exposes_in_run_heal_flags():
+    out = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts" / "agent.py"), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert "--no-in-run-heal" in out.stdout
+    assert "--in-run-heal-streak" in out.stdout
