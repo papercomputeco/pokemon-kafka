@@ -23,13 +23,16 @@ from agent import (
     BacktrackManager,
     BattleStrategy,
     GameController,
+    InRunHeal,
     Navigator,
     PokemonAgent,
     Snapshot,
     StrategyEngine,
+    finish_in_run_heal,
     load_type_chart,
     main,
     move_category,
+    start_in_run_heal,
 )
 from memory_reader import BattleState, MemoryReader, OverworldState
 
@@ -3992,3 +3995,74 @@ def test_cli_exposes_in_run_heal_flags():
     )
     assert "--no-in-run-heal" in out.stdout
     assert "--in-run-heal-streak" in out.stdout
+
+
+class FakePyBoy:
+    def save_state(self, f):
+        f.write(b"STATE")
+
+
+class FakeProc:
+    def __init__(self):
+        self.polled = None
+
+    def poll(self):
+        return self.polled
+
+
+def test_start_in_run_heal_launches_healer(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    captured = {}
+
+    def fake_popen(cmd, stdout=None, stderr=None):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    heal = start_in_run_heal(FakePyBoy(), {"stuck_count": 40}, "rom.gb", turn=123, notes_path=notes, popen=fake_popen)
+    assert heal is not None
+    assert heal.started_turn == 123
+    assert heal.genome_before == {}
+    cmd = captured["cmd"]
+    assert cmd[1].endswith("healer.py")
+    assert "check" in cmd
+    assert cmd[cmd.index("--rule") + 1] == "terminal-wedge"
+    assert cmd[cmd.index("--cooldown-hours") + 1] == "0"
+    assert cmd[cmd.index("--notes") + 1] == str(notes)
+    state_path = cmd[cmd.index("--load-state") + 1]
+    assert Path(state_path).read_bytes() == b"STATE"
+    fitness_path = cmd[cmd.index("--fitness") + 1]
+    assert json.loads(Path(fitness_path).read_text())["stuck_count"] == 40
+
+
+def test_start_in_run_heal_never_raises():
+    class ExplodingPyBoy:
+        def save_state(self, f):
+            raise RuntimeError("boom")
+
+    assert start_in_run_heal(ExplodingPyBoy(), {}, "rom.gb", turn=1) is None
+
+
+def test_finish_in_run_heal_accepted(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text('# Agent Notes\n\nHealer: terminal-wedge\n<!-- autotune:genome\n{"door_cooldown": 12}\n-->\n')
+    log = tmp_path / "heal.log"
+    log.write_text(
+        "[healer] terminal-wedge operator-selected — racing regardless of thresholds\n"
+        "[healer] accepted: Healer: terminal-wedge — door_cooldown 5→12 (score 100→200)\n"
+    )
+    heal = InRunHeal(proc=FakeProc(), log_path=str(log), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert genome == {"door_cooldown": 12}
+    assert verdict.startswith("[healer] accepted")
+
+
+def test_finish_in_run_heal_rejected(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    log = tmp_path / "heal.log"
+    log.write_text("[healer] kept current genome (control 100, best variant 90)\n")
+    heal = InRunHeal(proc=FakeProc(), log_path=str(log), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert genome is None
+    assert "kept current genome" in verdict

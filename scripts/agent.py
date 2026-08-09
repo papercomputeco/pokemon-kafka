@@ -1988,6 +1988,85 @@ class PokemonAgent:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class InRunHeal:
+    """A healer race launched mid-run from a wedged savestate."""
+
+    proc: object  # subprocess.Popen (or a test double with .poll())
+    log_path: str
+    genome_before: dict
+    started_turn: int
+
+
+def start_in_run_heal(pyboy, fitness, rom_path, turn, notes_path=None, rule="terminal-wedge", popen=subprocess.Popen):
+    """Snapshot the wedged state and launch a healer race from it, non-blocking.
+
+    Never raises — a heal that cannot start must not hurt the run. Returns the
+    in-flight race, or None if the launch failed.
+    """
+    try:
+        notes_path = str(notes_path or (SCRIPT_DIR.parent / "notes.md"))
+        fd, state_path = tempfile.mkstemp(suffix=".state", prefix="wedge-")
+        os.close(fd)
+        with open(state_path, "wb") as f:
+            pyboy.save_state(f)
+        fd, fitness_path = tempfile.mkstemp(suffix=".json", prefix="fitness-")
+        os.close(fd)
+        Path(fitness_path).write_text(json.dumps(fitness, indent=2) + "\n")
+        fd, log_path = tempfile.mkstemp(suffix=".log", prefix="heal-")
+        os.close(fd)
+        from autotune_bridge import load_genome_from_notes
+
+        genome_before = load_genome_from_notes(notes_path) or {}
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve().parent / "healer.py"),
+            "check",
+            "--fitness",
+            fitness_path,
+            "--rom",
+            str(rom_path),
+            "--rule",
+            rule,
+            # The agent gates itself to one race per run; the file cooldown only
+            # exists to stop end-of-run cascades, so bypass it here.
+            "--cooldown-hours",
+            "0",
+            "--load-state",
+            state_path,
+            "--notes",
+            notes_path,
+        ]
+        with open(log_path, "w") as log:
+            proc = popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+        return InRunHeal(proc=proc, log_path=log_path, genome_before=genome_before, started_turn=turn)
+    except Exception as exc:
+        print(f"[agent] in-run heal skipped: {exc}")
+        return None
+
+
+def finish_in_run_heal(heal, notes_path=None):
+    """Read a finished race's verdict. Returns (verdict line, accepted genome or None).
+
+    The genome diff against notes.md is the authoritative accept signal — the
+    healer only appends a genome block when a variant beat the control.
+    """
+    notes_path = str(notes_path or (SCRIPT_DIR.parent / "notes.md"))
+    verdict = "race finished"
+    try:
+        lines = [ln for ln in Path(heal.log_path).read_text().splitlines() if ln.startswith("[healer]")]
+        if lines:
+            verdict = lines[-1]
+    except OSError:
+        pass
+    from autotune_bridge import load_genome_from_notes
+
+    genome_after = load_genome_from_notes(notes_path) or {}
+    if genome_after and genome_after != heal.genome_before:
+        return verdict, genome_after
+    return verdict, None
+
+
 def run_self_heal(fitness, rom_path, fitness_path=None, runner=subprocess.run):
     """Chain healer.py check on this run's fitness — the self-healing loop, no wrapper needed.
 
