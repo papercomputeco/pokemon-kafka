@@ -1009,3 +1009,35 @@ def test_main_llm_local(tmp_path):
         observer_fn=None,
         historical_fn=None,
     )
+
+
+# ===================================================================
+# run_agent load_state passthrough + in-run heal recursion guard
+# ===================================================================
+
+
+def _capture_run(captured):
+    def fake_run(cmd, env=None, capture_output=True, timeout=600):
+        captured["cmd"] = cmd
+        return None
+
+    return fake_run
+
+
+def test_run_agent_disables_in_run_heal_and_passes_load_state():
+    captured = {}
+    with patch("evolve.subprocess.run", side_effect=_capture_run(captured)):
+        fitness = evolve_mod.run_agent("rom.gb", 10, {}, load_state="wedge.state")
+    cmd = captured["cmd"]
+    assert "--no-in-run-heal" in cmd
+    assert cmd[cmd.index("--load-state") + 1] == "wedge.state"
+    # No output file was written by the fake, so the penalty fitness comes back.
+    assert fitness["stuck_count"] == 10
+
+
+def test_run_agent_omits_load_state_by_default():
+    captured = {}
+    with patch("evolve.subprocess.run", side_effect=_capture_run(captured)):
+        evolve_mod.run_agent("rom.gb", 10, {})
+    assert "--load-state" not in captured["cmd"]
+    assert "--no-in-run-heal" in captured["cmd"]

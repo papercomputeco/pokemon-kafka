@@ -126,11 +126,12 @@ def score(fitness: dict) -> float:
 # ---------------------------------------------------------------------------
 
 
-def run_agent(rom_path: str, max_turns: int, params: dict) -> dict:
+def run_agent(rom_path: str, max_turns: int, params: dict, load_state: str | None = None) -> dict:
     """Run the agent in a subprocess and return fitness metrics.
 
     Passes params as the EVOLVE_PARAMS env var (JSON). The agent reads
-    this to override navigator defaults.
+    this to override navigator defaults. load_state starts the child from
+    a savestate (the healer's in-run wedge races use the wedged state).
     """
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
         output_path = f.name
@@ -147,7 +148,10 @@ def run_agent(rom_path: str, max_turns: int, params: dict) -> dict:
         "--output-json",
         output_path,
         "--no-self-heal",  # race children must never spawn their own healer
+        "--no-in-run-heal",  # nor an in-run one — heals must not recurse
     ]
+    if load_state:
+        cmd += ["--load-state", str(load_state)]
 
     try:
         subprocess.run(cmd, env=env, capture_output=True, timeout=600)
