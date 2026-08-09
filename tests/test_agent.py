@@ -4164,3 +4164,20 @@ def test_tick_reports_kept_genome(tmp_path, monkeypatch):
     milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
     assert any("kept current genome" in m["data"]["description"] for m in milestones)
     assert ag._in_run_heal_done is True
+
+
+def test_finish_in_run_heal_missing_log(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    heal = InRunHeal(proc=FakeProc(), log_path=str(tmp_path / "missing.log"), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert verdict == "race finished"
+    assert genome is None
+
+
+def test_run_epilogue_notes_in_flight_heal(tmp_path):
+    ag = _make_agent(tmp_path)
+    ag._in_run_heal = InRunHeal(proc=FakeProc(), log_path="x.log", genome_before={}, started_turn=1)
+    with patch.object(agent, "Image", None):
+        ag.run(max_turns=0)
+    assert any("still racing" in e for e in ag.events)
