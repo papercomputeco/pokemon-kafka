@@ -165,11 +165,11 @@ def default_seed(fitness_path) -> int:
     return int(digest[:16], 16)
 
 
-def run_race(rom: str, turns: int, candidates: list[dict]) -> list[RaceResult]:
+def run_race(rom: str, turns: int, candidates: list[dict], load_state: str | None = None) -> list[RaceResult]:
     """Run every candidate through evolve.run_agent; the only impure racing code."""
     results = []
     for params in candidates:
-        fitness = run_agent(rom, turns, params)
+        fitness = run_agent(rom, turns, params, load_state=load_state)
         results.append(RaceResult(params=params, fitness=fitness, score=score(fitness)))
     return results
 
@@ -210,7 +210,7 @@ def _check(args) -> None:
     seed = args.seed if args.seed is not None else default_seed(fitness_path)
     candidates = [base] + sample_variants(base, param_names, args.variants, random.Random(seed))
 
-    results = run_race(args.rom, args.race_turns, candidates)
+    results = run_race(args.rom, args.race_turns, candidates, load_state=args.load_state)
     control = results[0]
     winner = max(results, key=lambda r: r.score)
     accepted = winner is not control and decide(control.score, winner.score)
@@ -260,6 +260,11 @@ def main() -> int:
         choices=[r["name"] for r in RULES],
         default=None,
         help="force this rule to race (operator-selected anomaly), bypassing its threshold",
+    )
+    check.add_argument(
+        "--load-state",
+        default=None,
+        help="race candidates from this PyBoy savestate (in-run wedge heals race from the wedge itself)",
     )
     args = parser.parse_args()
 

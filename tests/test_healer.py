@@ -339,7 +339,7 @@ def test_check_rule_flag_races_only_that_rules_params(check_env):
     fitness_file.write_text(json.dumps(_fitness()))
     captured = {}
 
-    def fake_race(rom, turns, candidates):
+    def fake_race(rom, turns, candidates, load_state=None):
         captured["candidates"] = candidates
         return _race_results([100.0] * len(candidates))
 
@@ -385,7 +385,7 @@ def test_check_seed_flag_passed_to_sampling(check_env):
     tmp_path, fitness_file, notes, state, argv = check_env
     captured = {}
 
-    def fake_race(rom, turns, candidates):
+    def fake_race(rom, turns, candidates, load_state=None):
         captured["candidates"] = candidates
         return _race_results([100.0] * len(candidates))
 
@@ -465,3 +465,28 @@ def test_check_no_queue_write_without_escalation(check_env):
         with patch("sys.argv", argv):
             healer.main()
     assert not (tmp_path / "queue.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# --load-state passthrough (in-run wedge heals race from the wedged state)
+# ---------------------------------------------------------------------------
+
+
+def test_run_race_passes_load_state():
+    with patch.object(healer, "run_agent", return_value=_fitness()) as ra:
+        healer.run_race("rom.gb", 5, [dict(DEFAULT_PARAMS)], load_state="wedge.state")
+    assert ra.call_args.kwargs["load_state"] == "wedge.state"
+
+
+def test_run_race_load_state_defaults_to_none():
+    with patch.object(healer, "run_agent", return_value=_fitness()) as ra:
+        healer.run_race("rom.gb", 5, [dict(DEFAULT_PARAMS)])
+    assert ra.call_args.kwargs["load_state"] is None
+
+
+def test_check_passes_load_state_to_race(check_env):
+    tmp_path, fitness_file, notes, state, argv = check_env
+    with patch.object(healer, "run_race", return_value=_race_results([100.0, 300.0])) as rr:
+        with patch("sys.argv", argv + ["--load-state", "wedge.state"]):
+            assert healer.main() == 0
+    assert rr.call_args.kwargs["load_state"] == "wedge.state"
