@@ -259,6 +259,8 @@ uv run scripts/agent.py rom/pokemon_red.gb --output-json fit.json --max-turns 20
 
 When the run's own fitness trips a rule — `navigation-thrash` (`stuck_count ≥ 12` or `backtrack_restores ≥ 3`), `terminal-wedge` (`max_stuck_streak ≥ 50`, one unrecovered wedge that episode-counting misses), or `no-progress` (`maps_visited ≤ 1` after 500+ turns) — the healer races seeded variants of the implicated parameters via `evolve.run_agent`, and persists the winner to `notes.md` (the same autotune genome block the agent loads at startup) only if it beats the current genome by a 5% margin. A 6-hour cooldown (`data/healer_state.json`) prevents race cascades, and `check` always exits 0 so a healing failure never breaks the wrapper. `--dry-run` shows the decision without racing.
 
+The loop also closes **inside** a run: when the live agent's stuck streak crosses the terminal-wedge threshold (50), it saves its own wedged state, launches `healer.py check --rule terminal-wedge --load-state <wedge.state>` in the background, and keeps playing while the race runs candidates *from the wedge itself* — so the score directly measures escaping it. An accepted genome is hot-applied mid-run (navigator, backtracking, and door-cooldown knobs) and surfaces in the viewer feed as a milestone; no HEAL button press needed. One race per run; `--no-in-run-heal` opts out (race children always do), and `--in-run-heal-streak` moves the trigger.
+
 ### Discovery engine (capability healing)
 
 Parameter tuning only tunes the knobs that exist. When tuning is exhausted — the same rule re-fires after an accepted fix, or the last two races both rejected — the healer escalates to `data/discovery_queue.json`, and the discovery engine turns the evidence into a **code change proposal**:

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -22,13 +23,16 @@ from agent import (
     BacktrackManager,
     BattleStrategy,
     GameController,
+    InRunHeal,
     Navigator,
     PokemonAgent,
     Snapshot,
     StrategyEngine,
+    finish_in_run_heal,
     load_type_chart,
     main,
     move_category,
+    start_in_run_heal,
 )
 from memory_reader import BattleState, MemoryReader, OverworldState
 
@@ -3976,3 +3980,204 @@ class TestDecisionAndStateEvents:
         types = [json.loads(line)["event_type"] for line in lines]
         assert "decision" in types
         assert "agent_state" in types
+
+
+# ===================================================================
+# In-run self-heal (wedge-triggered background healer race)
+# ===================================================================
+
+
+def test_cli_exposes_in_run_heal_flags():
+    out = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts" / "agent.py"), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert "--no-in-run-heal" in out.stdout
+    assert "--in-run-heal-streak" in out.stdout
+
+
+class FakePyBoy:
+    def save_state(self, f):
+        f.write(b"STATE")
+
+
+class FakeProc:
+    def __init__(self):
+        self.polled = None
+
+    def poll(self):
+        return self.polled
+
+
+def test_start_in_run_heal_launches_healer(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    captured = {}
+
+    def fake_popen(cmd, stdout=None, stderr=None):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    heal = start_in_run_heal(FakePyBoy(), {"stuck_count": 40}, "rom.gb", turn=123, notes_path=notes, popen=fake_popen)
+    assert heal is not None
+    assert heal.started_turn == 123
+    assert heal.genome_before == {}
+    cmd = captured["cmd"]
+    assert cmd[1].endswith("healer.py")
+    assert "check" in cmd
+    assert cmd[cmd.index("--rule") + 1] == "terminal-wedge"
+    assert cmd[cmd.index("--cooldown-hours") + 1] == "0"
+    assert cmd[cmd.index("--notes") + 1] == str(notes)
+    state_path = cmd[cmd.index("--load-state") + 1]
+    assert Path(state_path).read_bytes() == b"STATE"
+    fitness_path = cmd[cmd.index("--fitness") + 1]
+    assert json.loads(Path(fitness_path).read_text())["stuck_count"] == 40
+
+
+def test_start_in_run_heal_never_raises():
+    class ExplodingPyBoy:
+        def save_state(self, f):
+            raise RuntimeError("boom")
+
+    assert start_in_run_heal(ExplodingPyBoy(), {}, "rom.gb", turn=1) is None
+
+
+def test_finish_in_run_heal_accepted(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text('# Agent Notes\n\nHealer: terminal-wedge\n<!-- autotune:genome\n{"door_cooldown": 12}\n-->\n')
+    log = tmp_path / "heal.log"
+    log.write_text(
+        "[healer] terminal-wedge operator-selected — racing regardless of thresholds\n"
+        "[healer] accepted: Healer: terminal-wedge — door_cooldown 5→12 (score 100→200)\n"
+    )
+    heal = InRunHeal(proc=FakeProc(), log_path=str(log), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert genome == {"door_cooldown": 12}
+    assert verdict.startswith("[healer] accepted")
+
+
+def test_finish_in_run_heal_rejected(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    log = tmp_path / "heal.log"
+    log.write_text("[healer] kept current genome (control 100, best variant 90)\n")
+    heal = InRunHeal(proc=FakeProc(), log_path=str(log), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert genome is None
+    assert "kept current genome" in verdict
+
+
+def test_apply_genome_live_updates_live_objects(tmp_path):
+    ag = _make_agent(tmp_path)
+    ag.apply_genome_live(
+        {
+            "door_cooldown": 12,
+            "stuck_threshold": 16,
+            "waypoint_skip_distance": 1,
+            "bt_restore_threshold": 17,
+            "bt_snapshot_interval": 60,
+        }
+    )
+    assert ag._evolve_door_cooldown == 12
+    assert ag.navigator.stuck_threshold == 16
+    assert ag.navigator.skip_distance == 1
+    assert ag.backtrack.restore_threshold == 17
+    assert ag._bt_snapshot_interval == 60
+    assert ag.evolve_params["door_cooldown"] == 12
+
+
+def test_tick_starts_heal_once_at_streak(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    launches = []
+
+    def fake_start(*args, **kwargs):
+        launches.append(args)
+        return InRunHeal(proc=FakeProc(), log_path="x.log", genome_before={}, started_turn=0)
+
+    monkeypatch.setattr(agent, "start_in_run_heal", fake_start)
+    ag.stuck_turns = 49
+    ag._tick_in_run_heal()
+    assert launches == []
+    ag.stuck_turns = 50
+    ag._tick_in_run_heal()
+    assert len(launches) == 1
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("Self-heal started" in m["data"]["description"] for m in milestones)
+    ag._tick_in_run_heal()  # already in flight — no second launch
+    assert len(launches) == 1
+
+
+def test_tick_respects_disable_flag(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    ag.in_run_heal_enabled = False
+    monkeypatch.setattr(agent, "start_in_run_heal", lambda *a, **kw: pytest.fail("must not launch"))
+    ag.stuck_turns = 99
+    ag._tick_in_run_heal()
+    assert ag._in_run_heal is None
+
+
+def test_tick_marks_done_when_launch_fails(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    monkeypatch.setattr(agent, "start_in_run_heal", lambda *a, **kw: None)
+    ag.stuck_turns = 50
+    ag._tick_in_run_heal()
+    assert ag._in_run_heal is None
+    assert ag._in_run_heal_done is True
+
+
+def test_tick_applies_genome_when_race_finishes(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    proc = FakeProc()
+    ag._in_run_heal = InRunHeal(proc=proc, log_path="x.log", genome_before={}, started_turn=1)
+    monkeypatch.setattr(
+        agent,
+        "finish_in_run_heal",
+        lambda heal, notes_path=None: ("[healer] accepted: x", {"stuck_threshold": 16, "door_cooldown": 12}),
+    )
+    ag._tick_in_run_heal()  # still racing (poll() is None)
+    assert ag._in_run_heal is not None
+    proc.polled = 0
+    ag._tick_in_run_heal()
+    assert ag.navigator.stuck_threshold == 16
+    assert ag._evolve_door_cooldown == 12
+    assert ag._in_run_heal is None
+    assert ag._in_run_heal_done is True
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("Self-heal applied mid-run" in m["data"]["description"] for m in milestones)
+    ag.stuck_turns = 99
+    ag._tick_in_run_heal()  # done — never re-fires this run
+    assert ag._in_run_heal is None
+
+
+def test_tick_reports_kept_genome(tmp_path, monkeypatch):
+    ag = _make_agent(tmp_path)
+    proc = FakeProc()
+    proc.polled = 0
+    ag._in_run_heal = InRunHeal(proc=proc, log_path="x.log", genome_before={}, started_turn=1)
+    monkeypatch.setattr(
+        agent,
+        "finish_in_run_heal",
+        lambda heal, notes_path=None: ("[healer] kept current genome (control 100, best variant 90)", None),
+    )
+    ag._tick_in_run_heal()
+    milestones = [e for e in ag.collector.events if e["event_type"] == "milestone"]
+    assert any("kept current genome" in m["data"]["description"] for m in milestones)
+    assert ag._in_run_heal_done is True
+
+
+def test_finish_in_run_heal_missing_log(tmp_path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    heal = InRunHeal(proc=FakeProc(), log_path=str(tmp_path / "missing.log"), genome_before={}, started_turn=1)
+    verdict, genome = finish_in_run_heal(heal, notes_path=notes)
+    assert verdict == "race finished"
+    assert genome is None
+
+
+def test_run_epilogue_notes_in_flight_heal(tmp_path):
+    ag = _make_agent(tmp_path)
+    ag._in_run_heal = InRunHeal(proc=FakeProc(), log_path="x.log", genome_before={}, started_turn=1)
+    with patch.object(agent, "Image", None):
+        ag.run(max_turns=0)
+    assert any("still racing" in e for e in ag.events)

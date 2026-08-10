@@ -42,3 +42,6 @@ def _no_real_self_heal(monkeypatch):
     import agent
 
     monkeypatch.setattr(agent, "run_self_heal", lambda *a, **kw: False)
+    # Same guard for the in-run wedge heal: a wedged test run must never spawn a
+    # background race. Tests for the real thing import start_in_run_heal directly.
+    monkeypatch.setattr(agent, "start_in_run_heal", lambda *a, **kw: None)

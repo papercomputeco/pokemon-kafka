@@ -686,6 +686,13 @@ class PokemonAgent:
         self.collector = GameEventCollector(game=self.profile.name)
         self.collision_map = CollisionMap()
         self.door_cooldown: int = 0  # Steps to walk away from door after exiting a building
+        # In-run self-heal: when the stuck streak crosses the terminal-wedge
+        # threshold, race healer variants from the wedged savestate in the
+        # background and hot-apply an accepted genome without stopping the run.
+        self.in_run_heal_enabled = True
+        self.in_run_heal_streak = 50
+        self._in_run_heal = None  # in-flight InRunHeal race, at most one per run
+        self._in_run_heal_done = False
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -847,6 +854,49 @@ class PokemonAgent:
                 self.last_overworld_action,
                 self.stuck_turns,
             )
+
+    def apply_genome_live(self, genome: dict) -> None:
+        """Hot-apply an accepted genome mid-run — the knobs the healer races."""
+        self.evolve_params = {**self.evolve_params, **genome}
+        self._evolve_door_cooldown = int(self.evolve_params.get("door_cooldown", self._evolve_door_cooldown))
+        self.navigator.stuck_threshold = int(self.evolve_params.get("stuck_threshold", self.navigator.stuck_threshold))
+        self.navigator.skip_distance = int(
+            self.evolve_params.get("waypoint_skip_distance", self.navigator.skip_distance)
+        )
+        self.backtrack.restore_threshold = int(
+            self.evolve_params.get("bt_restore_threshold", self.backtrack.restore_threshold)
+        )
+        self._bt_snapshot_interval = int(self.evolve_params.get("bt_snapshot_interval", self._bt_snapshot_interval))
+
+    def _tick_in_run_heal(self) -> None:
+        """Per-turn hook: launch a heal at the wedge threshold, poll the race, hot-apply the winner."""
+        if not self.in_run_heal_enabled:
+            return
+        if self._in_run_heal is None:
+            if self._in_run_heal_done or self.stuck_turns < self.in_run_heal_streak:
+                return
+            self._in_run_heal = start_in_run_heal(self.pyboy, self.compute_fitness(), self.rom_path, self.turn_count)
+            if self._in_run_heal is None:
+                self._in_run_heal_done = True  # launch failed — don't retry every turn
+                return
+            msg = f"Self-heal started: stuck streak {self.stuck_turns} — racing variants from the wedged state"
+            self.log(f"HEAL | {msg}")
+            self.collector.milestone(self.turn_count, msg)
+            return
+        if self._in_run_heal.proc.poll() is None:
+            return
+        verdict, genome = finish_in_run_heal(self._in_run_heal)
+        if genome is not None:
+            self.apply_genome_live(genome)
+            before = self._in_run_heal.genome_before
+            changed = ", ".join(f"{k}={v}" for k, v in sorted(genome.items()) if before.get(k) != v)
+            msg = f"Self-heal applied mid-run: {changed or 'genome refreshed'}"
+        else:
+            msg = f"Self-heal finished: {verdict.removeprefix('[healer] ')}"
+        self.log(f"HEAL | {msg}")
+        self.collector.milestone(self.turn_count, msg)
+        self._in_run_heal = None
+        self._in_run_heal_done = True
 
     def choose_overworld_action(self, state: OverworldState) -> str:
         """Pick the next overworld action."""
@@ -1936,6 +1986,10 @@ class PokemonAgent:
                 self.run_overworld()
                 self.turn_count += 1
 
+            # In-run self-heal: trigger on a terminal wedge, poll the background
+            # race, and hot-apply an accepted genome without stopping the run.
+            self._tick_in_run_heal()
+
             self.collector.tick(self.turn_count)
 
             if self.turn_count % 10 == 0:
@@ -1960,6 +2014,8 @@ class PokemonAgent:
 
         if self.worldmap_file:
             self.world.save(self.worldmap_file)  # final persist of everything learned this segment
+        if self._in_run_heal is not None:
+            self.log("HEAL | in-run heal still racing — an accepted genome lands in notes.md for the next run")
         self.log(f"Session complete. Turns: {self.turn_count} | Wins: {self.battles_won}")
         self.collector.session(
             self.turn_count,
@@ -1979,6 +2035,85 @@ class PokemonAgent:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class InRunHeal:
+    """A healer race launched mid-run from a wedged savestate."""
+
+    proc: object  # subprocess.Popen (or a test double with .poll())
+    log_path: str
+    genome_before: dict
+    started_turn: int
+
+
+def start_in_run_heal(pyboy, fitness, rom_path, turn, notes_path=None, rule="terminal-wedge", popen=subprocess.Popen):
+    """Snapshot the wedged state and launch a healer race from it, non-blocking.
+
+    Never raises — a heal that cannot start must not hurt the run. Returns the
+    in-flight race, or None if the launch failed.
+    """
+    try:
+        notes_path = str(notes_path or (SCRIPT_DIR.parent / "notes.md"))
+        fd, state_path = tempfile.mkstemp(suffix=".state", prefix="wedge-")
+        os.close(fd)
+        with open(state_path, "wb") as f:
+            pyboy.save_state(f)
+        fd, fitness_path = tempfile.mkstemp(suffix=".json", prefix="fitness-")
+        os.close(fd)
+        Path(fitness_path).write_text(json.dumps(fitness, indent=2) + "\n")
+        fd, log_path = tempfile.mkstemp(suffix=".log", prefix="heal-")
+        os.close(fd)
+        from autotune_bridge import load_genome_from_notes
+
+        genome_before = load_genome_from_notes(notes_path) or {}
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve().parent / "healer.py"),
+            "check",
+            "--fitness",
+            fitness_path,
+            "--rom",
+            str(rom_path),
+            "--rule",
+            rule,
+            # The agent gates itself to one race per run; the file cooldown only
+            # exists to stop end-of-run cascades, so bypass it here.
+            "--cooldown-hours",
+            "0",
+            "--load-state",
+            state_path,
+            "--notes",
+            notes_path,
+        ]
+        with open(log_path, "w") as log:
+            proc = popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+        return InRunHeal(proc=proc, log_path=log_path, genome_before=genome_before, started_turn=turn)
+    except Exception as exc:
+        print(f"[agent] in-run heal skipped: {exc}")
+        return None
+
+
+def finish_in_run_heal(heal, notes_path=None):
+    """Read a finished race's verdict. Returns (verdict line, accepted genome or None).
+
+    The genome diff against notes.md is the authoritative accept signal — the
+    healer only appends a genome block when a variant beat the control.
+    """
+    notes_path = str(notes_path or (SCRIPT_DIR.parent / "notes.md"))
+    verdict = "race finished"
+    try:
+        lines = [ln for ln in Path(heal.log_path).read_text().splitlines() if ln.startswith("[healer]")]
+        if lines:
+            verdict = lines[-1]
+    except OSError:
+        pass
+    from autotune_bridge import load_genome_from_notes
+
+    genome_after = load_genome_from_notes(notes_path) or {}
+    if genome_after and genome_after != heal.genome_before:
+        return verdict, genome_after
+    return verdict, None
 
 
 def run_self_heal(fitness, rom_path, fitness_path=None, runner=subprocess.run):
@@ -2084,6 +2219,19 @@ def main():
         default=True,
         help="Chain healer.py check on this run's fitness at session end (default: on)",
     )
+    parser.add_argument(
+        "--in-run-heal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Race the healer from a wedged savestate mid-run and hot-apply the winner (default: on; "
+        "race children spawned by evolve.run_agent always disable it)",
+    )
+    parser.add_argument(
+        "--in-run-heal-streak",
+        type=int,
+        default=50,
+        help="Stuck streak that triggers the in-run heal (default: 50, the terminal-wedge threshold)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2109,6 +2257,8 @@ def main():
     if args.worldmap_file:
         agent.worldmap_file = args.worldmap_file
         agent.world = WorldMap.load(args.worldmap_file)  # resume learned geometry, if any
+    agent.in_run_heal_enabled = args.in_run_heal
+    agent.in_run_heal_streak = args.in_run_heal_streak
 
     producer = None
     run_id = None
@@ -2156,7 +2306,9 @@ def main():
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output_json).write_text(json.dumps(fitness, indent=2) + "\n")
 
-    if args.self_heal:
+    # Skip the end-of-run heal while an in-run race is still in flight — its
+    # accepted genome lands in notes.md; doubling the race would fight it.
+    if args.self_heal and agent._in_run_heal is None:
         run_self_heal(fitness, args.rom, fitness_path=args.output_json or None)
 
     if args.telemetry_dir:
