@@ -52,6 +52,9 @@ function beatNumberFromLabel(label) {
 }
 
 function maybePushBeatRoute(label) {
+  // A /run/<id> deep link is already unambiguous — never downgrade it to a beat
+  // number, which several runs share.
+  if (location.pathname.startsWith("/run/")) return;
   const beat = beatNumberFromLabel(label);
   if (beat && location.pathname !== `/${beat}`) {
     history.pushState({}, "", `/${beat}`);
@@ -85,10 +88,15 @@ async function showGrid() {
 }
 
 async function routeInitial() {
-  const m = /^\/(\d+)$/.exec(location.pathname);
-  if (!m) { showGrid(); return; }
+  const byId = /^\/run\/([\w-]+)$/.exec(location.pathname);
+  const byBeat = /^\/(\d+)$/.exec(location.pathname);
+  if (!byId && !byBeat) { showGrid(); return; }
   const { runs } = await (await fetch(`${API}/api/runs`)).json();
-  const match = runs.find(r => beatNumberFromLabel(r.label) === m[1]);
+  // Beat numbers are ambiguous — several runs share a "7 ·" label and the first
+  // match wins — so a run_id link is the one that survives a demo.
+  const match = byId
+    ? runs.find(r => r.run_id === byId[1])
+    : runs.find(r => beatNumberFromLabel(r.label) === byBeat[1]);
   if (!match) { showGrid(); return; }
   document.body.dataset.view = "focus";
   await selectRun(match.run_id, match.label);
@@ -162,6 +170,7 @@ function renderFeed() {
       if (e.kind === "anomaly") {
         selectedAnomaly = selectedAnomaly === i ? null : i;
         renderFeed();
+        updateHealTarget();
       }
     });
     ul.appendChild(li);
@@ -273,57 +282,179 @@ function setSpeed(ms) {
   if (timer) play();  // restart the loop at the new speed
 }
 
-// HEAL button: run healer.py check on this run's own fitness; poll for the verdict.
-// Races take minutes of real emulation, so the server heals in the background.
-let healPoll = null;
+// HEAL button: turn the armed anomaly into the prompt scripts/discovery.py would
+// hand its proposer, for a human to paste into Claude Code. Parameter racing
+// still happens — automatically, after every run — but a genome can't fix a
+// capability gap, and that is what these wedges are.
 function resetHealUI() {
-  if (healPoll) clearTimeout(healPoll);
-  healPoll = null;
   selectedAnomaly = null;
-  const btn = document.getElementById("heal-btn");
-  btn.disabled = false;
-  document.getElementById("heal-readout").textContent = "";
+  closeComposer();
+  updateHealTarget();
 }
-// The rules race the same navigation knobs; name the wedge honestly when the
-// selected trace shows a terminal-length streak (healer.py TERMINAL_WEDGE_STREAK).
+
+// Name the wedge honestly: a terminal-length streak is a different failure from
+// ordinary thrash (mirrors healer.py TERMINAL_WEDGE_STREAK).
 function ruleForAnomaly(entry) {
   const m = /Stuck ×(\d+)/.exec(entry?.text || "");
   return m && parseInt(m[1], 10) >= 50 ? "terminal-wedge" : "navigation-thrash";
 }
-function renderHeal(job) {
+
+// Prompts are only as good as the operator note, so seed the box with the shape
+// of a useful one for the rule in question.
+const NOTE_PLACEHOLDERS = {
+  "terminal-wedge": "e.g. it pressed into the same wall for 95 turns and never re-planned a route",
+  "navigation-thrash": "type waa + Tab, or describe what you saw",
+};
+
+// Type a trigger, press Tab, get the sentence — nobody wants to watch a live
+// demo being typed out. Keep these describing observed behaviour, not guessed
+// causes: the prompt already carries the counted evidence, and a confident
+// wrong theory in the note is worse than a plain description of the symptom.
+const NOTE_SNIPPETS = {
+  waa:
+    "it ping-pongs between two adjacent tiles for thousands of turns — it replans from scratch " +
+    "every turn, so when the exit is not reachable over the tiles it has actually seen, the " +
+    "fallback target flips depending on which of the two tiles it is standing on, and nothing " +
+    "ever commits to a path",
+  wall:
+    "it presses the same blocked direction for hundreds of turns and never re-plans a route " +
+    "around the obstacle",
+  door:
+    "it steps in and out of the same doorway instead of walking away and continuing along the route",
+};
+
+function expandSnippet(event) {
+  if (event.key !== "Tab" || event.shiftKey) return;
+  const field = event.target;
+  const caret = field.selectionStart;
+  const trigger = /([A-Za-z]+)$/.exec(field.value.slice(0, caret));
+  // hasOwn, not plain lookup: "constructor"+Tab must not paste Object.prototype.
+  const key = trigger && trigger[1].toLowerCase();
+  const body = key && Object.hasOwn(NOTE_SNIPPETS, key) ? NOTE_SNIPPETS[key] : null;
+  if (!body) return;  // no match — Tab keeps its normal meaning and moves focus
+  event.preventDefault();
+  const start = caret - trigger[1].length;
+  field.value = field.value.slice(0, start) + body + field.value.slice(caret);
+  field.selectionStart = field.selectionEnd = start + body.length;
+}
+
+function armedAnomaly() {
+  return selectedAnomaly === null ? null : feed[selectedAnomaly];
+}
+
+// The button says what it needs. Pressing HEAL with nothing armed used to race
+// the whole run and report "run healthy" — true, useless, and confusing on stage.
+function updateHealTarget() {
   const btn = document.getElementById("heal-btn");
   const readout = document.getElementById("heal-readout");
-  if (job.state === "running") {
-    btn.disabled = true;
-    readout.textContent = job.rule
-      ? `healing — racing ${job.rule} variants for the selected anomaly…`
-      : "healing — racing variants…";
-    healPoll = setTimeout(pollHeal, 2000);
+  const entry = armedAnomaly();
+  btn.disabled = entry === null;
+  readout.textContent = entry
+    ? `T${entry.turn} · ${entry.text} · ${ruleForAnomaly(entry)}`
+    : "select an anomaly in the feed first";
+}
+
+function closeComposer() {
+  const dlg = document.getElementById("composer");
+  if (dlg.open) dlg.close();
+}
+
+function openComposer() {
+  const entry = armedAnomaly();
+  if (!entry) return;
+  const rule = ruleForAnomaly(entry);
+  document.getElementById("composer-target").textContent =
+    `${runId} · T${entry.turn} · ${entry.text} · rule: ${rule}`;
+  const note = document.getElementById("composer-note");
+  note.value = "";
+  note.placeholder = NOTE_PLACEHOLDERS[rule] || "describe what went wrong";
+  document.getElementById("composer-hint").textContent =
+    `shortcuts — type and press Tab: ${Object.keys(NOTE_SNIPPETS).join(", ")}`;
+  document.getElementById("composer-escalation").hidden = true;
+  document.getElementById("composer-out").hidden = true;
+  document.getElementById("composer-copy").disabled = true;
+  document.getElementById("composer-draft").disabled = false;
+  document.getElementById("composer-status").textContent = "";
+  document.getElementById("composer").showModal();
+  note.focus();
+}
+
+async function draftPrompt() {
+  const entry = armedAnomaly();
+  if (!entry) return;
+  const draftBtn = document.getElementById("composer-draft");
+  const status = document.getElementById("composer-status");
+  draftBtn.disabled = true;
+  status.textContent = "drafting…";
+
+  // Any failure must land in the status line with the button re-enabled — a
+  // fetch that throws mid-demo would otherwise wedge the composer until a
+  // page reload (openComposer doesn't reset the draft button).
+  let data;
+  try {
+    const r = await fetch(`${API}/api/runs/${runId}/prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rule: ruleForAnomaly(entry),
+        note: document.getElementById("composer-note").value,
+        anomaly: `T${entry.turn} ${entry.text}`,
+      }),
+    });
+    data = await r.json().catch(() => ({}));
+    // FastAPI errors arrive as {detail}, the drafter's own as {error} — neither
+    // may fall through to the success path or Copy would offer "undefined".
+    if (!r.ok || data.error) {
+      status.textContent = data.error || data.detail || `draft failed (HTTP ${r.status})`;
+      return;
+    }
+  } catch (err) {
+    status.textContent = `draft failed — ${err.message || "is the viewer server up?"}`;
     return;
+  } finally {
+    draftBtn.disabled = false;
   }
-  btn.disabled = false;
-  readout.textContent = job.verdict || "";
+  status.textContent = "";
+  const out = document.getElementById("composer-out");
+  out.textContent = data.prompt;
+  out.hidden = false;
+  document.getElementById("composer-copy").disabled = false;
+
+  // The whole point of the demo: this run already tripped the automatic path.
+  const esc = document.getElementById("composer-escalation");
+  if (data.escalation) {
+    const e = data.escalation;
+    esc.textContent =
+      `healer already escalated this run — ${e.rule} · ${e.reason} ` +
+      `(${e.position} of ${e.pending} pending in the discovery queue)`;
+    esc.hidden = false;
+  } else {
+    esc.hidden = true;
+  }
 }
-async function pollHeal() {
-  renderHeal(await (await fetch(`${API}/api/runs/${runId}/heal`)).json());
-}
-async function startHeal() {
-  // A click is a deliberate human override: race now, never blocked by the
-  // auto-heal cooldown recorded from past runs (healer_state.json). With an
-  // anomaly selected (entry click or ANOMALY chip isolated), target its rule
-  // so the healer races even when whole-run fitness trips no threshold.
-  let q = "force=true";
-  if (selectedAnomaly !== null) q += `&rule=${ruleForAnomaly(feed[selectedAnomaly])}`;
-  else if (isolated === "anomaly") q += "&rule=navigation-thrash";
-  const r = await fetch(`${API}/api/runs/${runId}/heal?${q}`, { method: "POST" });
-  renderHeal(await r.json());
+
+async function copyPrompt() {
+  const status = document.getElementById("composer-status");
+  try {
+    await navigator.clipboard.writeText(document.getElementById("composer-out").textContent);
+    status.textContent = "copied — paste it into Claude Code";
+  } catch {
+    status.textContent = "copy blocked by the browser — select the text and copy manually";
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("scrub").addEventListener("input", e => { stop(); showFrame(+e.target.value); });
-  document.getElementById("heal-btn").addEventListener("click", startHeal);
-  // Live playback controls: [ slower, ] faster, space = play/pause.
+  document.getElementById("heal-btn").addEventListener("click", openComposer);
+  document.getElementById("composer-note").addEventListener("keydown", expandSnippet);
+  document.getElementById("composer-draft").addEventListener("click", draftPrompt);
+  document.getElementById("composer-copy").addEventListener("click", copyPrompt);
+  document.getElementById("composer-close").addEventListener("click", closeComposer);
+  updateHealTarget();
+  // Live playback controls: [ slower, ] faster, space = play/pause. Skipped
+  // while the composer is open so typing a note doesn't drive the emulator.
   document.addEventListener("keydown", e => {
+    if (document.getElementById("composer").open) return;
     if (e.key === "[") setSpeed(frameDelay + 150);
     else if (e.key === "]") setSpeed(frameDelay - 150);
     else if (e.key === " ") { e.preventDefault(); timer ? stop() : play(); }

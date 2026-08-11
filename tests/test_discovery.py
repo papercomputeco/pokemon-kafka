@@ -4,6 +4,7 @@
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import discovery
@@ -84,6 +85,257 @@ def test_build_prompt_carries_constraints_and_evidence():
 
 def test_branch_name():
     assert discovery.branch_name("navigation-thrash", "2026-07-19") == "discovery/navigation-thrash-2026-07-19"
+
+
+# ---------------------------------------------------------------------------
+# run_evidence — measurement that outranks the operator's hypothesis
+# ---------------------------------------------------------------------------
+
+
+def _events(tmp_path, rows):
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows))
+    return path
+
+
+def _stuck(turn, x, y):
+    return {"event_type": "stuck", "turn": turn, "data": {"position": {"x": x, "y": y}}}
+
+
+def test_run_evidence_ranks_positions_by_count(tmp_path):
+    path = _events(
+        tmp_path,
+        [_stuck(t, 6, 2) for t in (317, 400, 7996)]
+        + [_stuck(t, 25, 17) for t in (186, 204)]
+        + [{"event_type": "decision", "turn": 1, "data": {}}],  # non-stuck ignored
+    )
+    evidence = discovery.run_evidence(path)
+    assert evidence["stuck_total"] == 5
+    top = evidence["top_positions"][0]
+    assert top["position"] == [6, 2]
+    assert (top["count"], top["first_turn"], top["last_turn"]) == (3, 317, 7996)
+
+
+def _decision(turn, x, y, buttons):
+    return {
+        "event_type": "decision",
+        "turn": turn,
+        "data": {"reason": f"map 51 ({x},{y}) stuck=0 | WP: 0→(1,43)", "buttons": buttons},
+    }
+
+
+def test_run_evidence_extracts_the_decision_loop_signature(tmp_path):
+    """The trace, not the stuck counts, is what shows a two-tile limit cycle."""
+    rows = []
+    for turn in range(20):
+        rows.append(_decision(turn, 6, 2, ["up"]) if turn % 2 == 0 else _decision(turn, 6, 1, ["down"]))
+    evidence = discovery.run_evidence(_events(tmp_path, rows), trace_len=4)
+
+    assert evidence["loop_signature"][0] == {"where": "map 51 (6,2)", "buttons": "up", "count": 10}
+    assert evidence["loop_signature"][1] == {"where": "map 51 (6,1)", "buttons": "down", "count": 10}
+    # Tail is capped and keeps the *last* decisions — the terminal behaviour.
+    assert [d["turn"] for d in evidence["final_decisions"]] == [16, 17, 18, 19]
+    assert evidence["final_decisions"][-1] == {"turn": 19, "where": "map 51 (6,1)", "buttons": "down"}
+
+
+def test_format_evidence_renders_signature_and_trace(tmp_path):
+    path = _events(tmp_path, [_decision(7999, 6, 1, ["down"]), _stuck(317, 6, 2)])
+    text = discovery.format_evidence(discovery.run_evidence(path))
+    assert "map 51 (6,1) → down: 1×" in text
+    assert "T7999 map 51 (6,1) → down" in text
+
+
+def test_prompt_names_the_existing_machinery():
+    prompt = discovery.build_prompt(discovery.build_bundle(_entry(), [], "", {}))
+    assert "AlphaEvolve" in prompt
+    assert "Factorio Learning Environment" in prompt
+    assert "DEFAULT_PARAMS" in prompt  # new thresholds must become evolvable
+
+
+def test_run_evidence_tolerates_a_partial_last_line(tmp_path):
+    """A live run's log can end mid-write; that must not lose the whole file."""
+    path = tmp_path / "events.jsonl"
+    path.write_text(json.dumps(_stuck(10, 1, 1)) + "\n{partial")
+    assert discovery.run_evidence(path)["stuck_total"] == 1
+
+
+def test_run_evidence_empty_when_absent_or_eventless(tmp_path):
+    assert discovery.run_evidence(tmp_path / "nope.jsonl") == {}
+    assert discovery.run_evidence(_events(tmp_path, [{"event_type": "milestone", "turn": 1}])) == {}
+    # A decision-only log still yields trace evidence — loops can exist
+    # without ever tripping the stuck detector.
+    assert discovery.run_evidence(_events(tmp_path, [{"event_type": "decision", "turn": 1}]))["loop_signature"]
+
+
+def test_format_evidence_states_the_counts_and_the_log(tmp_path):
+    text = discovery.format_evidence(discovery.run_evidence(_events(tmp_path, [_stuck(317, 6, 2)])))
+    assert "(6,2) — 1 events, turns 317–317" in text
+    assert "events.jsonl" in text
+
+
+def test_format_evidence_admits_when_nothing_was_measured():
+    """Empty evidence must not claim authority — "no log exists" was itself
+    an unmeasured claim, and telling proposers to trust it over a correct
+    operator note recreated the misdirection this section exists to prevent."""
+    for empty in ({}, None):
+        text = discovery.format_evidence(empty)
+        assert "not measured" in text
+        assert "trust the measurement" not in text.lower()
+
+
+def test_prompt_marks_the_note_as_hypothesis_when_measured(tmp_path):
+    """A wrong operator note must not read as a conclusion — this bit a real run."""
+    evidence = discovery.run_evidence(_events(tmp_path, [_stuck(317, 6, 2)]))
+    prompt = discovery.build_prompt(discovery.build_bundle(_entry(), [], "", evidence))
+    assert "hypothesis" in prompt.lower()
+    assert "trust the measurement" in prompt.lower()
+
+
+def test_events_for_fitness_resolves_recorded_runs(tmp_path):
+    run_dir = tmp_path / "runs" / "20260810-185357-7f79"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text("")
+    found = discovery.events_for_fitness({"run_id": "20260810-185357-7f79"}, runs_dir=tmp_path / "runs")
+    assert found == run_dir / "events.jsonl"
+    # No run_id (unrecorded run) or no log on disk → None, never a guess.
+    assert discovery.events_for_fitness({}, runs_dir=tmp_path / "runs") is None
+    assert discovery.events_for_fitness({"run_id": "nope"}, runs_dir=tmp_path / "runs") is None
+    assert discovery.events_for_fitness(None) is None
+
+
+def test_every_healer_rule_has_a_code_map():
+    """A rule the healer can escalate must not fall back to the "manual" map."""
+    from healer import RULES
+
+    for rule in RULES:
+        assert rule["name"] in discovery.RULE_CODE_MAP, rule["name"]
+
+
+def test_nav_rules_point_at_the_editable_route_file():
+    for name in ("navigation-thrash", "terminal-wedge"):
+        assert "references/routes.json" in discovery.RULE_CODE_MAP[name]
+
+
+# ---------------------------------------------------------------------------
+# pending_escalation — "the healer already escalated this run"
+# ---------------------------------------------------------------------------
+
+_FITNESS = {
+    "turns": 8000,
+    "stuck_count": 682,
+    "max_stuck_streak": 95,
+    "final_x": 6,
+    "final_y": 2,
+    "final_map_id": 51,
+}
+
+
+def test_pending_escalation_matches_on_run_identity(tmp_path):
+    queue = tmp_path / "q.json"
+    queue.write_text(
+        json.dumps(
+            [
+                _entry(rule="terminal-wedge", handled=True, fitness=_FITNESS),  # handled: skipped
+                _entry(fitness={**_FITNESS, "stuck_count": 3}),  # different run
+                _entry(fitness=_FITNESS),
+            ]
+        )
+    )
+    found = discovery.pending_escalation(queue, _FITNESS)
+    assert found == {"rule": "navigation-thrash", "reason": "rejects-exhausted", "position": 2, "pending": 2}
+
+
+def test_pending_escalation_none_when_run_never_escalated(tmp_path):
+    queue = tmp_path / "q.json"
+    queue.write_text(json.dumps([_entry(fitness=_FITNESS)]))
+    assert discovery.pending_escalation(queue, {**_FITNESS, "turns": 10}) is None
+    assert discovery.pending_escalation(tmp_path / "missing.json", _FITNESS) is None
+
+
+def test_pending_escalation_ignores_entries_missing_identity_keys(tmp_path):
+    """An empty-fitness entry must not match every run by vacuous truth."""
+    queue = tmp_path / "q.json"
+    queue.write_text(json.dumps([_entry(fitness={})]))
+    assert discovery.pending_escalation(queue, _FITNESS) is None
+
+
+# ---------------------------------------------------------------------------
+# prompt subcommand — the hand-driven half of loop 3
+# ---------------------------------------------------------------------------
+
+
+def _prompt_args(tmp_path, **kw):
+    fitness = tmp_path / "fitness.json"
+    fitness.write_text(json.dumps(_FITNESS))
+    args = {
+        "fitness": str(fitness),
+        "rule": "navigation-thrash",
+        "detail": "ping-pongs between two tiles",
+        "reason": "operator",
+        "json": False,
+        "events": None,
+        "queue": str(tmp_path / "queue.json"),
+        "healer_state": str(tmp_path / "healer.json"),
+    }
+    args.update(kw)
+    return SimpleNamespace(**args)
+
+
+def test_prompt_counts_evidence_from_the_log_beside_the_fitness_file(tmp_path, capsys):
+    _events(tmp_path, [_stuck(317, 6, 2), _stuck(400, 6, 2), _stuck(186, 25, 17)])
+    discovery._prompt(_prompt_args(tmp_path))
+    out = capsys.readouterr().out
+    assert "(6,2) — 2 events" in out  # dominant wedge, not the one a human clicked
+    assert "(25,17) — 1 events" in out
+
+
+def test_prompt_prints_the_proposer_prompt(tmp_path, capsys):
+    assert discovery._prompt(_prompt_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+    assert "navigation-thrash" in out
+    assert "ping-pongs between two tiles" in out
+    assert "682" in out  # the run's own evidence
+    assert "references/routes.json" in out
+    assert "do not delete or weaken tests" in out.lower()
+
+
+def test_prompt_writes_no_state(tmp_path):
+    """Drafting is read-only — it must not consume a queue entry or set a cooldown."""
+    discovery._prompt(_prompt_args(tmp_path))
+    assert not (tmp_path / "queue.json").exists()
+    assert not (tmp_path / "healer.json").exists()
+
+
+def test_prompt_json_mode_carries_escalation(tmp_path):
+    queue = tmp_path / "queue.json"
+    queue.write_text(json.dumps([_entry(fitness=_FITNESS)]))
+    args = _prompt_args(tmp_path, json=True, queue=str(queue))
+    with patch("builtins.print") as printer:
+        assert discovery._prompt(args) == 0
+    payload = json.loads(printer.call_args[0][0])
+    assert payload["escalation"]["reason"] == "rejects-exhausted"
+    assert "navigation-thrash" in payload["prompt"]
+
+
+def test_prompt_json_mode_escalation_none_for_clean_run(tmp_path):
+    with patch("builtins.print") as printer:
+        discovery._prompt(_prompt_args(tmp_path, json=True))
+    assert json.loads(printer.call_args[0][0])["escalation"] is None
+
+
+def test_prompt_unreadable_fitness_exits_nonzero(tmp_path, capsys):
+    """Unlike `run`, something is waiting on this — failures must surface."""
+    assert discovery._prompt(_prompt_args(tmp_path, fitness=str(tmp_path / "nope.json"))) == 1
+    assert "unreadable fitness file" in capsys.readouterr().err
+
+
+def test_prompt_subcommand_dispatches_through_main(tmp_path, capsys):
+    fitness = tmp_path / "fitness.json"
+    fitness.write_text(json.dumps(_FITNESS))
+    argv = ["discovery.py", "prompt", "--fitness", str(fitness), "--queue", str(tmp_path / "q.json")]
+    with patch("sys.argv", argv):
+        assert discovery.main() == 0
+    assert "You are the discovery engine" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ Runs are only written to `--runs-dir` when you ask for them:
 `--live` still writes the folder while the run is in flight — that's how the viewer
 serves the orange live tile — it just cleans up after itself, so watching a run
 doesn't quietly fill `runs/`. Add `--record` when you want to replay it afterwards
-or press HEAL on it (healing reads `summary.json`, which only a kept run has).
+or draft a fix prompt from it (HEAL reads `summary.json`, which only a kept run has).
 
 ## Architecture
 
@@ -275,7 +275,7 @@ uv run scripts/agent.py rom/pokemon_red.gb --output-json fit.json --max-turns 20
 
 When the run's own fitness trips a rule — `navigation-thrash` (`stuck_count ≥ 12` or `backtrack_restores ≥ 3`), `terminal-wedge` (`max_stuck_streak ≥ 50`, one unrecovered wedge that episode-counting misses), or `no-progress` (`maps_visited ≤ 1` after 500+ turns) — the healer races seeded variants of the implicated parameters via `evolve.run_agent`, and persists the winner to `notes.md` (the same autotune genome block the agent loads at startup) only if it beats the current genome by a 5% margin. A 6-hour cooldown (`data/healer_state.json`) prevents race cascades, and `check` always exits 0 so a healing failure never breaks the wrapper. `--dry-run` shows the decision without racing.
 
-The loop also closes **inside** a run: when the live agent's stuck streak crosses the terminal-wedge threshold (50), it saves its own wedged state, launches `healer.py check --rule terminal-wedge --load-state <wedge.state>` in the background, and keeps playing while the race runs candidates *from the wedge itself* — so the score directly measures escaping it. An accepted genome is hot-applied mid-run (navigator, backtracking, and door-cooldown knobs) and surfaces in the viewer feed as a milestone; no HEAL button press needed. One race per run; `--no-in-run-heal` opts out (race children always do), and `--in-run-heal-streak` moves the trigger.
+The loop also closes **inside** a run: when the live agent's stuck streak crosses the terminal-wedge threshold (50), it saves its own wedged state, launches `healer.py check --rule terminal-wedge --load-state <wedge.state>` in the background, and keeps playing while the race runs candidates *from the wedge itself* — so the score directly measures escaping it. An accepted genome is hot-applied mid-run (navigator, backtracking, and door-cooldown knobs) and surfaces in the viewer feed as a milestone, with no operator involvement at all. One race per run; `--no-in-run-heal` opts out (race children always do), and `--in-run-heal-streak` moves the trigger.
 
 ### Discovery engine (capability healing)
 
@@ -285,6 +285,20 @@ Parameter tuning only tunes the knobs that exist. When tuning is exhausted — t
 uv run scripts/discovery.py run --rom rom/pokemon_red.gb          # work the queue
 uv run scripts/discovery.py run --rom rom/pokemon_red.gb --reason "wedges at the forest exit"  # manual/demo
 ```
+
+There is a hand-driven on-ramp too, for when you want to read the proposal before
+anything runs. `prompt` builds the same bundle and prints the prompt instead of
+executing it — no worktree, no LLM call, no state written:
+
+```bash
+uv run scripts/discovery.py prompt --fitness runs/<id>/summary.json \
+  --rule navigation-thrash --detail "waypoint goes stale on backtrack"
+```
+
+That is what the viewer's **HEAL** button calls: select an anomaly in the feed,
+say what the agent got wrong, and copy out the prompt — which also reports
+whether the healer already escalated that same run on its own. The operator
+supplies one sentence; everything else in the prompt is assembled from evidence.
 
 The engine builds a context bundle (escalation, recent races, observations tail, implicated code), hands it to Claude Code headless (`claude -p`, `--permission-mode acceptEdits`) in an isolated git worktree, then runs the gates itself — full test suite, ruff, and a fitness eval of the patched agent vs baseline (`--eval-runs`, same 5% margin as the healer; `--eval-runs 0` skips it and the PR is titled `[eval pending]`). Gates pass → it pushes the branch and opens a PR with the diagnosis and evidence; gates fail → the worktree and branch are discarded. **A human always merges** — the engine never touches main. One attempt per escalation, 24-hour cooldown, always exits 0.
 

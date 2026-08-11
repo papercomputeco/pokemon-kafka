@@ -67,6 +67,14 @@ def test_beat_route_serves_index(tmp_path: Path):
     assert beat.text == c.get("/").text
 
 
+def test_run_route_serves_index(tmp_path: Path):
+    """Deep link by run_id — beat numbers are shared by several runs."""
+    c = _client(tmp_path)
+    run = c.get("/run/20260626-000001-aaaa")
+    assert run.status_code == 200
+    assert run.text == c.get("/").text
+
+
 def test_run_summary_has_grid_fields(tmp_path: Path):
     r = _client(tmp_path).get("/api/runs").json()["runs"][0]
     assert r["thumbnail"] == "000040.png"
