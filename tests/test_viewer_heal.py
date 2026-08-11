@@ -18,13 +18,19 @@ VERDICT_LINE = "[healer] kept current genome (control 5720, best variant 5720)"
 
 
 class FakeRunner:
-    def __init__(self, stdout: str = VERDICT_LINE):
+    """Subprocess stand-in shared with tests/test_viewer_prompt.py."""
+
+    def __init__(self, stdout: str = VERDICT_LINE, returncode: int = 0, stderr: str = ""):
         self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
         self.calls: list[list[str]] = []
+        self.kwargs: list[dict] = []
 
     def __call__(self, cmd, **kwargs):
         self.calls.append(cmd)
-        return SimpleNamespace(stdout=self.stdout, returncode=0)
+        self.kwargs.append(kwargs)
+        return SimpleNamespace(stdout=self.stdout, stderr=self.stderr, returncode=self.returncode)
 
 
 def _run_with_rom(tmp_path: Path) -> Path:

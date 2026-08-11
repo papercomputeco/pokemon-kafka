@@ -6,13 +6,14 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from viewer.alerts_tail import tail_alerts
 from viewer.feed import build_feed, load_anomalies
 from viewer.heal import HealJobs
+from viewer.prompt import PromptDrafter
 from viewer.store import RunStore
 
 _STATIC = Path(__file__).parent / "static"
@@ -24,11 +25,13 @@ def create_app(
     alerts_path=None,
     hub=None,
     heal_jobs=None,
+    prompt_drafter=None,
     alerts_poll_interval: float = 1.0,
 ) -> FastAPI:
     runs_dir = Path(runs_dir)
     store = RunStore(runs_dir)
     heal = heal_jobs if heal_jobs is not None else HealJobs(runs_dir)
+    drafter = prompt_drafter if prompt_drafter is not None else PromptDrafter(runs_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -93,6 +96,18 @@ def create_app(
             raise HTTPException(status_code=404, detail="run not found")
         return heal.status(run_id)
 
+    @app.post("/api/runs/{run_id}/prompt")
+    def run_prompt(run_id: str, body: dict = Body(default_factory=dict)):
+        """Draft the discovery-engine prompt for an anomaly the operator armed."""
+        if not (runs_dir / run_id).is_dir():
+            raise HTTPException(status_code=404, detail="run not found")
+        return drafter.draft(
+            run_id,
+            rule=body.get("rule"),
+            note=body.get("note", ""),
+            anomaly=body.get("anomaly", ""),
+        )
+
     @app.get("/runs/{run_id}/frames/{name}")
     def frame(run_id: str, name: str):
         path = runs_dir / run_id / "frames" / name
@@ -106,6 +121,11 @@ def create_app(
 
     @app.get("/{beat:int}")
     def beat_route(beat: int):
+        return FileResponse(_STATIC / "index.html")
+
+    @app.get("/run/{run_id}")
+    def run_route(run_id: str):
+        """Deep link one run. Beat numbers are ambiguous — many runs share a label."""
         return FileResponse(_STATIC / "index.html")
 
     if _STATIC.is_dir():

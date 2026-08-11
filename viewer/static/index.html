@@ -39,9 +39,10 @@
           <div class="green-bar"></div>
         </div>
         <div class="heal-ctrl">
-          <button id="heal-btn" title="Run healer.py check on this run's fitness">HEAL</button>
+          <button id="heal-btn" title="Draft a fix prompt for the selected anomaly">HEAL</button>
           <div id="heal-readout"></div>
         </div>
+
         <div class="dpad">
           <span class="dpad-h"></span>
           <span class="dpad-v"></span>
@@ -89,6 +90,29 @@
       <div class="state-section"><h3>Status</h3><pre id="st-status"></pre></div>
     </div>
   </div>
+
+  <!-- HEAL composer: turn an armed anomaly into a prompt you can hand to Claude Code -->
+  <dialog id="composer">
+    <div class="composer-head">
+      <h2>Draft a fix prompt</h2>
+      <button id="composer-close" title="Close">&times;</button>
+    </div>
+
+    <div id="composer-target"></div>
+    <div id="composer-escalation" hidden></div>
+
+    <label for="composer-note">What did the agent get wrong?</label>
+    <textarea id="composer-note" rows="3"></textarea>
+    <div id="composer-hint"></div>
+
+    <div class="composer-actions">
+      <button id="composer-draft">Draft prompt</button>
+      <button id="composer-copy" disabled>Copy</button>
+      <span id="composer-status"></span>
+    </div>
+
+    <pre id="composer-out" hidden></pre>
+  </dialog>
 
   <script src="/static/app.js"></script>
 </body>

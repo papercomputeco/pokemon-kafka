@@ -22,6 +22,19 @@ _HEALER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "healer.py
 KNOWN_RULES = frozenset({"navigation-thrash", "terminal-wedge", "no-progress"})
 
 
+def validate_run_target(runs_dir, run_id: str, rule: str | None, allowed=KNOWN_RULES) -> str | None:
+    """Shared precondition check for anything that acts on a recorded run.
+
+    Returns the error message, or None when the target is usable. One home for
+    the rule and summary.json checks so HealJobs and PromptDrafter can't drift.
+    """
+    if rule is not None and rule not in allowed:
+        return f"unknown rule: {rule}"
+    if not (Path(runs_dir) / run_id / "summary.json").is_file():
+        return "run has no summary.json yet (still live?)"
+    return None
+
+
 class HealJobs:
     """One healer subprocess per run_id, with an injectable runner for tests."""
 
@@ -39,15 +52,12 @@ class HealJobs:
         if self.jobs.get(run_id, {}).get("state") == "running":
             return self.jobs[run_id]
 
-        if rule is not None and rule not in KNOWN_RULES:
-            self.jobs[run_id] = {"state": "error", "verdict": f"unknown rule: {rule}"}
+        error = validate_run_target(self.runs_dir, run_id, rule)
+        if error:
+            self.jobs[run_id] = {"state": "error", "verdict": error}
             return self.jobs[run_id]
 
         summary_path = self.runs_dir / run_id / "summary.json"
-        if not summary_path.is_file():
-            self.jobs[run_id] = {"state": "error", "verdict": "run has no summary.json yet (still live?)"}
-            return self.jobs[run_id]
-
         rom = (json.loads(summary_path.read_text()).get("params") or {}).get("rom")
         if not rom or not Path(rom).exists():
             self.jobs[run_id] = {"state": "error", "verdict": f"rom not found: {rom}"}
