@@ -130,6 +130,7 @@ class WorldMap:
         ty: int,
         max_nodes: int = 8000,
         encounter_cost: int = 0,
+        require_reach: bool = False,
     ) -> str | None:
         """First step ("up"/"down"/"left"/"right") of an A* path from ``(px, py)`` to ``(tx, ty)``
         over the accumulated map. ``None`` only when already on the target. Falls back to a greedy
@@ -137,6 +138,13 @@ class WorldMap:
 
         ``encounter_cost`` (>= 0) is added to the g-cost of entering a known encounter tile, so the
         planner prefers fewer-grass routes among comparable paths without treating grass as a wall.
+
+        ``require_reach=True`` returns ``None`` instead of the fallback when A* did not actually
+        reach the goal. The fallback is memoryless — replanned from scratch each turn, its
+        closest-seen/greedy target depends on the tile the agent happens to stand on, and when the
+        goal is sealed behind observed walls that flips between two adjacent tiles forever (the
+        navigation-thrash wedge). Callers with a better "goal unreachable" move (frontier
+        exploration) pass this flag so they get the chance to make it.
         """
         if (px, py) == (tx, ty):
             return None
@@ -181,6 +189,8 @@ class WorldMap:
                     gscore[nb] = ng
                     came[nb] = cur
                     heapq.heappush(openh, (ng + abs(nb[0] - tx) + abs(nb[1] - ty), ng, nb))
+        if require_reach and reached is None:
+            return None
         end = reached if reached is not None else best
         step = self._first_step(came, start, end)
         if step is None:

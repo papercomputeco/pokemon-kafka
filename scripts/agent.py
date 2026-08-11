@@ -1091,10 +1091,14 @@ class PokemonAgent:
             # reroutes around them — so the agent snakes toward the far-left exit column instead of
             # plateauing on nearby frontiers the way pure nearest-frontier exploration does (it kept
             # mapping the forest body but never trekked to the NW exit pocket). Frontier exploration
-            # is the fallback when the optimistic plan has nowhere to go. Persisting the WorldMap
-            # across runs (load -> run -> save) lets successive epochs accumulate the whole maze, so
-            # known_reachable eventually fires and the commit branch above carries it out the exit.
-            d = self._pilot_to(state, ex, ey)
+            # is the fallback when the optimistic plan has nowhere to go — require_reach makes
+            # plan_step admit that (None) instead of emitting its memoryless closest-seen/greedy
+            # fallback, whose target flips with the start tile and two-cycles the agent when the
+            # exit is sealed behind observed walls (run 20260810-185357-7f79: 7600+ turns between
+            # (6,1) and (6,2)). Persisting the WorldMap across runs (load -> run -> save) lets
+            # successive epochs accumulate the whole maze, so known_reachable eventually fires and
+            # the commit branch above carries it out the exit.
+            d = self._pilot_to(state, ex, ey, require_reach=True)
             if d is not None:
                 return d
             explore = self.world.explore_step(state.map_id, state.x, state.y)
@@ -1136,14 +1140,24 @@ class PokemonAgent:
         map-edge non-exits as it goes (via the failed-move hard-blocks)."""
         return self.world.cross_step(state.map_id, state.x, state.y, goal)
 
-    def _pilot_to(self, state: OverworldState, tx: int, ty: int) -> str | None:
+    def _pilot_to(self, state: OverworldState, tx: int, ty: int, require_reach: bool = False) -> str | None:
         """Navigate toward tile ``(tx, ty)`` by pathfinding over the accumulated WorldMap. Returns
         ``None`` once standing on the tile (the caller then presses the target's ``at_target``
         action). Whole-map A* routes around remembered walls — e.g. it follows the fence north of
-        the Mart all the way to the gap on the centre corridor instead of stalling beneath it."""
+        the Mart all the way to the gap on the centre corridor instead of stalling beneath it.
+        ``require_reach=True`` also returns ``None`` when the goal can't be reached at all, so the
+        caller can explore instead of riding plan_step's flip-prone fallback."""
         if state.x == tx and state.y == ty:
             return None
-        return self.world.plan_step(state.map_id, state.x, state.y, tx, ty, encounter_cost=GRASS_ENCOUNTER_COST)
+        return self.world.plan_step(
+            state.map_id,
+            state.x,
+            state.y,
+            tx,
+            ty,
+            encounter_cost=GRASS_ENCOUNTER_COST,
+            require_reach=require_reach,
+        )
 
     def _quest_target(self, state: OverworldState) -> dict | None:
         """Build the parcel-quest nav override for this turn, or None to defer to waypoints.

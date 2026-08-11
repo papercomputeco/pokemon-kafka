@@ -1411,6 +1411,21 @@ class TestChooseOverworldAction:
             ag.stuck_turns = streak
             assert ag.choose_overworld_action(state) == "up"
 
+    def test_forest_planner_admits_unreachable_and_agent_explores(self, tmp_path):
+        """Regression for run 20260810-185357-7f79 (navigation-thrash): with the exit sealed
+        behind stamped walls, plan_step's memoryless fallback flipped between two adjacent
+        tiles for 7600+ turns while the explore fallback below it never ran. The non-commit
+        branch must ask plan_step to admit failure (require_reach) so a None falls through
+        to frontier exploration instead of the flip."""
+        ag = _make_agent(tmp_path)
+        ag.world.known_reachable = MagicMock(return_value=False)
+        ag.world.plan_step = MagicMock(return_value=None)  # goal sealed: planner admits it
+        ag.world.explore_step = MagicMock(return_value="right")
+        state = OverworldState(map_id=51, x=6, y=2)
+        assert ag.choose_overworld_action(state) == "right"
+        assert ag.world.plan_step.call_args.kwargs.get("require_reach") is True
+        ag.world.explore_step.assert_called_once_with(51, 6, 2)
+
     def test_navigator_returns_none_falls_back_to_a(self, tmp_path):
         ag = _make_agent(tmp_path)
         ag.navigator.next_direction = MagicMock(return_value=None)

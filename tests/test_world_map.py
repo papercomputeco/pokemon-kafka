@@ -334,3 +334,47 @@ def test_plan_step_does_not_step_onto_a_hard_blocked_goal():
     m[(2, 0)] = 0
     wm.block(51, 2, 0)  # a real wall — must not be entered even as a goal
     assert wm.plan_step(51, 2, 1, 2, 0) != "up"
+
+
+# --- require_reach: the planner must admit an unreachable goal ------------------
+# Regression for run 20260810-185357-7f79 (navigation-thrash): the exit (2,0) was sealed —
+# every neighbour stamped a wall — so A* could never reach it. The memoryless fallback then
+# flipped with the start tile: from (6,2) "best" was (6,1) -> "up"; from (6,1) best==start,
+# so greedy broke the tie -> "down". Replanning from scratch each turn locked a two-cell
+# limit cycle for 7600+ turns. ``require_reach=True`` makes plan_step return None instead
+# of the flip-prone fallback, so the caller can fall through to frontier exploration.
+
+
+def _sealed_pocket() -> WorldMap:
+    """Miniature of the wedge: a closed stamped room around (6,1)..(7,3) and a goal (2,0)
+    whose every neighbour is a stamped wall."""
+    wm = WorldMap()
+    m = wm.cells.setdefault(51, {})
+    for x in range(5, 9):  # room perimeter x in [5,8], y in [0,4]
+        for y in range(0, 5):
+            m[(x, y)] = 0
+    for x, y in [(6, 1), (6, 2), (6, 3), (7, 1), (7, 2), (7, 3)]:
+        m[(x, y)] = 1
+    m[(2, 0)] = 1  # the goal itself reads walkable...
+    for nb in [(1, 0), (3, 0), (2, 1)]:  # ...but every approach tile is stamped a wall
+        m[nb] = 0
+    return wm
+
+
+def test_fallback_flip_reproduces_the_two_cell_limit_cycle():
+    # Documents the fallback behaviour the wedge exposed: without require_reach the
+    # planner keeps emitting the start-dependent flip pair.
+    wm = _sealed_pocket()
+    assert wm.plan_step(51, 6, 2, 2, 0) == "up"
+    assert wm.plan_step(51, 6, 1, 2, 0) == "down"
+
+
+def test_require_reach_returns_none_when_goal_is_sealed():
+    wm = _sealed_pocket()
+    assert wm.plan_step(51, 6, 2, 2, 0, require_reach=True) is None
+    assert wm.plan_step(51, 6, 1, 2, 0, require_reach=True) is None
+
+
+def test_require_reach_still_plans_when_goal_is_reachable():
+    wm = WorldMap()  # empty map: goal optimistically reachable straight up
+    assert wm.plan_step(0, 5, 5, 5, 0, require_reach=True) == "up"
