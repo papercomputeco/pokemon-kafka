@@ -3665,6 +3665,20 @@ def test_build_recorder_configures_run_dir(tmp_path):
     assert rec.frame_interval == 7
 
 
+def test_build_recorder_persists_by_default(tmp_path):
+    from agent import build_recorder
+
+    rec = build_recorder(record=True, runs_dir=tmp_path, run_id="r", grabber=None)
+    assert rec.ephemeral is False
+
+
+def test_build_recorder_forwards_ephemeral(tmp_path):
+    from agent import build_recorder
+
+    rec = build_recorder(record=True, runs_dir=tmp_path, run_id="r", grabber=None, ephemeral=True)
+    assert rec.ephemeral is True
+
+
 # ===================================================================
 # --record CLI flag wiring
 # ===================================================================
@@ -3724,6 +3738,33 @@ class TestRecordFlag:
             main()
 
         assert mock_br.call_args.kwargs["frame_interval"] == 15
+
+    def _ephemeral_for(self, tmp_path, flags):
+        """Run main() with *flags* and report the ephemeral= passed to build_recorder."""
+        rom = tmp_path / "game.gb"
+        rom.write_text("fake rom")
+
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = {"turns": 1}
+
+        argv = ["agent.py", str(rom), "--runs-dir", str(tmp_path / "runs"), "--telemetry-dir", "", *flags]
+        with (
+            patch("sys.argv", argv),
+            patch("agent.PokemonAgent", return_value=mock_agent),
+            patch("agent.build_recorder", return_value=None) as mock_br,
+        ):
+            main()
+        return mock_br.call_args.kwargs["ephemeral"]
+
+    def test_record_alone_keeps_the_run(self, tmp_path):
+        assert self._ephemeral_for(tmp_path, ["--record"]) is False
+
+    def test_live_alone_is_ephemeral(self, tmp_path):
+        """Watching a run live must not silently leave a folder in runs/."""
+        assert self._ephemeral_for(tmp_path, ["--live"]) is True
+
+    def test_live_with_record_keeps_the_run(self, tmp_path):
+        assert self._ephemeral_for(tmp_path, ["--live", "--record"]) is False
 
 
 # ===================================================================

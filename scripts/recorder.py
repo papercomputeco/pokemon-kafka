@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -25,6 +26,7 @@ class RunRecorder:
         frame_grabber: Optional[Callable[[], "Image"]] = None,
         frame_interval: int = 10,
         live: Optional[Callable[[dict], None]] = None,
+        ephemeral: bool = False,
     ) -> None:
         self.run_id = run_id
         self.run_dir = Path(runs_dir) / run_id
@@ -32,6 +34,10 @@ class RunRecorder:
         self.frame_grabber = frame_grabber
         self.frame_interval = max(1, int(frame_interval))
         self.live = live
+        # An ephemeral run records normally so the viewer can serve its live tile off
+        # disk, then deletes itself in finish(). Used for --live without --record, so
+        # watching a run doesn't silently accumulate folders in runs/.
+        self.ephemeral = ephemeral
         self._params: dict = {}
         self._events_fh = None
 
@@ -94,9 +100,16 @@ class RunRecorder:
         payload = dict(summary)
         payload["params"] = self._params
         payload["run_id"] = self.run_id
-        (self.run_dir / "summary.json").write_text(json.dumps(payload, indent=2))
+        # An ephemeral run is about to be deleted, so summary.json would only ever be
+        # read by the rmtree below.
+        if not self.ephemeral:
+            (self.run_dir / "summary.json").write_text(json.dumps(payload, indent=2))
         if self.live is not None:
             self.live({"type": "done"})
         if self._events_fh is not None:
             self._events_fh.close()
             self._events_fh = None
+        if self.ephemeral:
+            # After the handle is closed, so Windows can unlink it too. finish() runs
+            # from the agent's finally block, so this also covers crashes and Ctrl-C.
+            shutil.rmtree(self.run_dir, ignore_errors=True)

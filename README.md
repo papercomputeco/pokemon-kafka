@@ -33,6 +33,22 @@ run finishes → fitness JSON
 - **[Worktree setup](docs/worktree.md)** — isolated, pinned-state worktrees per beat
 - **[Replayable demo runs](demo-runs/)** — committed frames + events; replay with `uv run python -m viewer --runs-dir demo-runs`
 
+### Keeping a run
+
+Runs are only written to `--runs-dir` when you ask for them:
+
+| Flags | Result |
+|-------|--------|
+| *(neither)* | nothing written |
+| `--live` | streams to the viewer, and the run folder is deleted when the run ends |
+| `--record` | run folder kept |
+| `--live --record` | streams *and* keeps the folder |
+
+`--live` still writes the folder while the run is in flight — that's how the viewer
+serves the orange live tile — it just cleans up after itself, so watching a run
+doesn't quietly fill `runs/`. Add `--record` when you want to replay it afterwards
+or press HEAL on it (healing reads `summary.json`, which only a kept run has).
+
 ## Architecture
 
 ```
