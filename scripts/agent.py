@@ -784,6 +784,13 @@ class PokemonAgent:
         self._bt_snapshot_interval = int(self.evolve_params.get("bt_snapshot_interval", 50))
         self._bt_last_map_id: int | None = None
 
+        # Hard-block expiry: walkable re-observations before a blocked tile is re-testable
+        # (transient NPC occupants must not seal a map forever). Evolvable; re-applied in main()
+        # when a persisted WorldMap replaces self.world.
+        self.world.block_expiry_observations = int(
+            self.evolve_params.get("block_expiry_observations", self.world.block_expiry_observations)
+        )
+
         # Rebuild navigator and battle strategy with evolved params
         if self.evolve_params:
             self.navigator = Navigator(
@@ -2285,7 +2292,9 @@ def main():
     )
     if args.worldmap_file:
         agent.worldmap_file = args.worldmap_file
+        expiry = agent.world.block_expiry_observations  # carry the (possibly evolved) threshold
         agent.world = WorldMap.load(args.worldmap_file)  # resume learned geometry, if any
+        agent.world.block_expiry_observations = expiry
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
 

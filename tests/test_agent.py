@@ -3448,6 +3448,21 @@ class TestEvolveParams:
             if saved is not None:
                 os.environ["EVOLVE_PARAMS"] = saved
 
+    def test_block_expiry_flows_to_worldmap(self, tmp_path):
+        """block_expiry_observations from EVOLVE_PARAMS reaches the WorldMap, so the healer can
+        tune how fast NPC-poisoned hard-blocks decay."""
+        ag = _make_agent_with_evolve(tmp_path, evolve_params={"block_expiry_observations": 7})
+        assert ag.world.block_expiry_observations == 7
+
+    def test_block_expiry_defaults_without_evolve_params(self, tmp_path):
+        saved = os.environ.pop("EVOLVE_PARAMS", None)
+        try:
+            ag = _make_agent_with_evolve(tmp_path)
+            assert ag.world.block_expiry_observations == 25
+        finally:
+            if saved is not None:
+                os.environ["EVOLVE_PARAMS"] = saved
+
     def test_evolve_params_print_logged(self, tmp_path, capsys):
         """Line 431: evolve params are printed when set."""
         params = {"stuck_threshold": 5, "door_cooldown": 10, "waypoint_skip_distance": 2, "axis_preference_map_0": "y"}
