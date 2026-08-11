@@ -176,3 +176,59 @@ def test_finish_no_live_skips_done(tmp_path: Path):
     rec.start({})
     rec.finish({"battles_won": 0})
     assert (tmp_path / "rn" / "summary.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral runs — a --live run that wasn't explicitly asked to persist needs a
+# real run dir while it streams (the viewer serves the live tile off disk), but
+# must leave nothing in runs/ once it ends.
+# ---------------------------------------------------------------------------
+
+
+def test_ephemeral_run_dir_exists_while_streaming(tmp_path: Path):
+    rec = RunRecorder("eph1", tmp_path, frame_grabber=_grabber, frame_interval=10, ephemeral=True)
+    rec.start({"strategy": "low", "label": "live"})
+    rec.on_event({"event_type": "milestone", "turn": 10, "data": {"description": "x"}})
+
+    run_dir = tmp_path / "eph1"
+    assert run_dir.is_dir(), "viewer reads the live run off disk, so the dir must exist mid-run"
+    assert (run_dir / "events.jsonl").exists()
+    assert (run_dir / "meta.json").exists()
+    assert list((run_dir / "frames").glob("*.png")) == [run_dir / "frames" / "000010.png"]
+
+
+def test_ephemeral_run_dir_removed_on_finish(tmp_path: Path):
+    rec = RunRecorder("eph2", tmp_path, frame_grabber=_grabber, frame_interval=10, ephemeral=True)
+    rec.start({"strategy": "low"})
+    rec.on_event({"event_type": "milestone", "turn": 10, "data": {}})
+    rec.finish({"battles_won": 3})
+
+    assert not (tmp_path / "eph2").exists(), "ephemeral run must leave nothing behind"
+
+
+def test_ephemeral_finish_still_emits_done_to_live(tmp_path: Path):
+    """Cleanup must not cost the viewer its end-of-run signal."""
+    sent = []
+    rec = RunRecorder("eph3", tmp_path, frame_grabber=_grabber, frame_interval=10, ephemeral=True, live=sent.append)
+    rec.start({})
+    rec.on_event({"event_type": "milestone", "turn": 10, "data": {}})
+    rec.finish({"battles_won": 1})
+
+    types = [m["type"] for m in sent]
+    assert "event" in types and "frame" in types, "ephemeral runs still stream live"
+    assert types.count("done") == 1
+    assert not (tmp_path / "eph3").exists()
+
+
+def test_ephemeral_finish_without_start_is_safe(tmp_path: Path):
+    """A run that dies before start() still hits finish() via the agent's finally block."""
+    rec = RunRecorder("eph4", tmp_path, ephemeral=True)
+    rec.finish({})
+    assert not (tmp_path / "eph4").exists()
+
+
+def test_non_ephemeral_is_the_default_and_keeps_the_run(tmp_path: Path):
+    rec = RunRecorder("keep", tmp_path, frame_grabber=_grabber, frame_interval=10)
+    rec.start({})
+    rec.finish({"battles_won": 0})
+    assert (tmp_path / "keep" / "summary.json").exists()

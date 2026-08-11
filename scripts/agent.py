@@ -53,11 +53,22 @@ from recorder import RunRecorder
 from world_map import WorldMap
 
 
-def build_recorder(record, runs_dir, run_id, grabber, frame_interval=10, live=None):
-    """Return a configured RunRecorder, or None when recording is disabled."""
+def build_recorder(record, runs_dir, run_id, grabber, frame_interval=10, live=None, ephemeral=False):
+    """Return a configured RunRecorder, or None when recording is disabled.
+
+    ``ephemeral`` records to disk for the duration of the run and deletes the folder
+    on finish — what --live uses when --record wasn't asked for.
+    """
     if not record:
         return None
-    return RunRecorder(run_id, runs_dir, frame_grabber=grabber, frame_interval=frame_interval, live=live)
+    return RunRecorder(
+        run_id,
+        runs_dir,
+        frame_grabber=grabber,
+        frame_interval=frame_interval,
+        live=live,
+        ephemeral=ephemeral,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2189,10 +2200,14 @@ def main():
         default="data/telemetry",
         help="Directory for JSONL telemetry (default: data/telemetry, empty to disable)",
     )
-    parser.add_argument("--record", action="store_true", help="Record a replayable run folder")
+    parser.add_argument("--record", action="store_true", help="Keep a replayable run folder in --runs-dir")
     parser.add_argument("--runs-dir", default="runs", help="Directory for recorded runs")
     parser.add_argument("--frame-interval", type=int, default=10, help="Capture a frame every N turns")
-    parser.add_argument("--live", action="store_true", help="Stream live to viewer over WebSocket (implies --record)")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Stream live to viewer over WebSocket. The run folder is deleted on exit; add --record to keep it",
+    )
     parser.add_argument("--viewer-url", default="ws://127.0.0.1:8200", help="Viewer WebSocket base URL")
     parser.add_argument("--label", default="", help="Human-readable label shown on the viewer's run tile")
     parser.add_argument("--load-state", default=None, help="Load a PyBoy save state and skip the intro")
@@ -2279,6 +2294,9 @@ def main():
             grabber=lambda: Image.fromarray(agent.pyboy.screen.ndarray),
             frame_interval=args.frame_interval,
             live=producer.send if producer is not None else None,
+            # --live needs a run dir for the viewer's live tile, but only --record
+            # means "keep this". Without it the folder is cleaned up on finish.
+            ephemeral=not args.record,
         )
     if game_pub is not None or recorder is not None:
         agent.collector = GameEventCollector(publisher=game_pub, recorder=recorder, game=agent.profile.name)
