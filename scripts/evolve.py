@@ -37,6 +37,7 @@ DEFAULT_PARAMS = {
     "hp_heal_threshold": 0.25,
     "unknown_move_score": 10.0,
     "status_move_score": 1.0,
+    "block_expiry_observations": 25,
 }
 
 # Bounds for each evolvable parameter: (min, max, type) or tuple of valid values for enums
@@ -53,6 +54,7 @@ PARAM_BOUNDS = {
     "hp_heal_threshold": (0.1, 0.6, float),
     "unknown_move_score": (1.0, 30.0, float),
     "status_move_score": (0.0, 10.0, float),
+    "block_expiry_observations": (5, 200, int),
 }
 
 

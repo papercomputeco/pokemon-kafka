@@ -784,6 +784,13 @@ class PokemonAgent:
         self._bt_snapshot_interval = int(self.evolve_params.get("bt_snapshot_interval", 50))
         self._bt_last_map_id: int | None = None
 
+        # Hard-block expiry: walkable re-observations before a blocked tile is re-testable
+        # (transient NPC occupants must not seal a map forever). Evolvable; re-applied in main()
+        # when a persisted WorldMap replaces self.world.
+        self.world.block_expiry_observations = int(
+            self.evolve_params.get("block_expiry_observations", self.world.block_expiry_observations)
+        )
+
         # Rebuild navigator and battle strategy with evolved params
         if self.evolve_params:
             self.navigator = Navigator(
@@ -1091,10 +1098,14 @@ class PokemonAgent:
             # reroutes around them — so the agent snakes toward the far-left exit column instead of
             # plateauing on nearby frontiers the way pure nearest-frontier exploration does (it kept
             # mapping the forest body but never trekked to the NW exit pocket). Frontier exploration
-            # is the fallback when the optimistic plan has nowhere to go. Persisting the WorldMap
-            # across runs (load -> run -> save) lets successive epochs accumulate the whole maze, so
-            # known_reachable eventually fires and the commit branch above carries it out the exit.
-            d = self._pilot_to(state, ex, ey)
+            # is the fallback when the optimistic plan has nowhere to go — require_reach makes
+            # plan_step admit that (None) instead of emitting its memoryless closest-seen/greedy
+            # fallback, whose target flips with the start tile and two-cycles the agent when the
+            # exit is sealed behind observed walls (run 20260810-185357-7f79: 7600+ turns between
+            # (6,1) and (6,2)). Persisting the WorldMap across runs (load -> run -> save) lets
+            # successive epochs accumulate the whole maze, so known_reachable eventually fires and
+            # the commit branch above carries it out the exit.
+            d = self._pilot_to(state, ex, ey, require_reach=True)
             if d is not None:
                 return d
             explore = self.world.explore_step(state.map_id, state.x, state.y)
@@ -1136,14 +1147,24 @@ class PokemonAgent:
         map-edge non-exits as it goes (via the failed-move hard-blocks)."""
         return self.world.cross_step(state.map_id, state.x, state.y, goal)
 
-    def _pilot_to(self, state: OverworldState, tx: int, ty: int) -> str | None:
+    def _pilot_to(self, state: OverworldState, tx: int, ty: int, require_reach: bool = False) -> str | None:
         """Navigate toward tile ``(tx, ty)`` by pathfinding over the accumulated WorldMap. Returns
         ``None`` once standing on the tile (the caller then presses the target's ``at_target``
         action). Whole-map A* routes around remembered walls — e.g. it follows the fence north of
-        the Mart all the way to the gap on the centre corridor instead of stalling beneath it."""
+        the Mart all the way to the gap on the centre corridor instead of stalling beneath it.
+        ``require_reach=True`` also returns ``None`` when the goal can't be reached at all, so the
+        caller can explore instead of riding plan_step's flip-prone fallback."""
         if state.x == tx and state.y == ty:
             return None
-        return self.world.plan_step(state.map_id, state.x, state.y, tx, ty, encounter_cost=GRASS_ENCOUNTER_COST)
+        return self.world.plan_step(
+            state.map_id,
+            state.x,
+            state.y,
+            tx,
+            ty,
+            encounter_cost=GRASS_ENCOUNTER_COST,
+            require_reach=require_reach,
+        )
 
     def _quest_target(self, state: OverworldState) -> dict | None:
         """Build the parcel-quest nav override for this turn, or None to defer to waypoints.
@@ -2271,7 +2292,9 @@ def main():
     )
     if args.worldmap_file:
         agent.worldmap_file = args.worldmap_file
+        expiry = agent.world.block_expiry_observations  # carry the (possibly evolved) threshold
         agent.world = WorldMap.load(args.worldmap_file)  # resume learned geometry, if any
+        agent.world.block_expiry_observations = expiry
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
 

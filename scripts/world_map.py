@@ -38,9 +38,17 @@ class WorldMap:
     def __init__(self) -> None:
         self.cells: dict[int, dict[tuple[int, int], int]] = {}
         # Tiles the agent *tried* to step onto but couldn't (ledges, map-edge non-exits, NPCs).
-        # The collision grid reports these as walkable, so this hard-block — which ``observe`` must
-        # never overwrite — is the only record that they can't actually be entered.
-        self.blocked: dict[int, set[tuple[int, int]]] = {}
+        # The collision grid reports these as walkable, so this hard-block is the only record that
+        # they can't actually be entered. Unlike walls, though, some blocks are transient — a
+        # wandering NPC's tile stays hard-blocked long after the NPC has moved on, and a stale
+        # block can seal off a map exit (run 20260810-185357-7f79: blocks at (1,17)/(2,18) cut the
+        # forest's left exit corridor). So each block carries a count of how many times ``observe``
+        # has since seen the tile walkable (the occupant is gone); at ``block_expiry_observations``
+        # the block is dropped and the tile becomes re-testable. A real ledge expires too, but its
+        # re-test just fails twice and ``block`` re-arms it — a couple of wasted presses every N
+        # sightings, in exchange for never permanently sealing a map on a transient occupant.
+        self.blocked: dict[int, dict[tuple[int, int], int]] = {}
+        self.block_expiry_observations: int = 25
         # Tiles where a wild encounter has fired (tall grass). Walkable, but the planner can be
         # asked to pay an extra ``encounter_cost`` to enter them so equal-ish paths prefer fewer
         # battles — learned from real encounters, like walls are learned from failed steps.
@@ -49,6 +57,7 @@ class WorldMap:
     def observe(self, map_id: int, px: int, py: int, grid: list[list[int]]) -> None:
         """Stamp a 9x10 collision ``grid`` (player at the centre) into the map at ``(px, py)``."""
         m = self.cells.setdefault(map_id, {})
+        blocked = self.blocked.get(map_id)
         for r in range(min(9, len(grid))):
             row = grid[r]
             for c in range(min(10, len(row))):
@@ -56,10 +65,17 @@ class WorldMap:
                 gy = py + (r - _PLAYER_ROW)
                 if 0 <= gx <= _MAX_COORD and 0 <= gy <= _MAX_COORD:
                     m[(gx, gy)] = 1 if row[c] else 0
+                    # A hard-blocked tile observed walkable again: its occupant may be gone.
+                    # Count the sighting; at the expiry threshold, drop the block for a re-test.
+                    if row[c] and blocked and (gx, gy) in blocked:
+                        blocked[(gx, gy)] += 1
+                        if blocked[(gx, gy)] >= self.block_expiry_observations:
+                            del blocked[(gx, gy)]
 
     def block(self, map_id: int, x: int, y: int) -> None:
-        """Record that ``(x, y)`` can't be entered (a move into it just failed)."""
-        self.blocked.setdefault(map_id, set()).add((x, y))
+        """Record that ``(x, y)`` can't be entered (a move into it just failed). Re-blocking an
+        expired tile starts a fresh expiry counter."""
+        self.blocked.setdefault(map_id, {})[(x, y)] = 0
 
     def mark_encounter(self, map_id: int, x: int, y: int) -> None:
         """Record that stepping onto ``(x, y)`` triggered a wild encounter (tall grass)."""
@@ -75,7 +91,7 @@ class WorldMap:
         """JSON-able snapshot of the learned map (occupancy + hard-blocks + encounter tiles)."""
         return {
             "cells": {str(m): [[x, y, v] for (x, y), v in cells.items()] for m, cells in self.cells.items()},
-            "blocked": {str(m): [[x, y] for (x, y) in s] for m, s in self.blocked.items()},
+            "blocked": {str(m): [[x, y, seen] for (x, y), seen in s.items()] for m, s in self.blocked.items()},
             "encounters": {str(m): [[x, y] for (x, y) in s] for m, s in self.encounters.items()},
         }
 
@@ -86,7 +102,8 @@ class WorldMap:
         for m, items in (data.get("cells") or {}).items():
             wm.cells[int(m)] = {(int(x), int(y)): int(v) for x, y, v in items}
         for m, items in (data.get("blocked") or {}).items():
-            wm.blocked[int(m)] = {(int(x), int(y)) for x, y in items}
+            # Legacy files stored bare [x, y] pairs; newer ones append the expiry counter.
+            wm.blocked[int(m)] = {(int(it[0]), int(it[1])): int(it[2]) if len(it) > 2 else 0 for it in items}
         for m, items in (data.get("encounters") or {}).items():
             wm.encounters[int(m)] = {(int(x), int(y)) for x, y in items}
         return wm
@@ -130,6 +147,7 @@ class WorldMap:
         ty: int,
         max_nodes: int = 8000,
         encounter_cost: int = 0,
+        require_reach: bool = False,
     ) -> str | None:
         """First step ("up"/"down"/"left"/"right") of an A* path from ``(px, py)`` to ``(tx, ty)``
         over the accumulated map. ``None`` only when already on the target. Falls back to a greedy
@@ -137,6 +155,13 @@ class WorldMap:
 
         ``encounter_cost`` (>= 0) is added to the g-cost of entering a known encounter tile, so the
         planner prefers fewer-grass routes among comparable paths without treating grass as a wall.
+
+        ``require_reach=True`` returns ``None`` instead of the fallback when A* did not actually
+        reach the goal. The fallback is memoryless — replanned from scratch each turn, its
+        closest-seen/greedy target depends on the tile the agent happens to stand on, and when the
+        goal is sealed behind observed walls that flips between two adjacent tiles forever (the
+        navigation-thrash wedge). Callers with a better "goal unreachable" move (frontier
+        exploration) pass this flag so they get the chance to make it.
         """
         if (px, py) == (tx, ty):
             return None
@@ -181,6 +206,8 @@ class WorldMap:
                     gscore[nb] = ng
                     came[nb] = cur
                     heapq.heappush(openh, (ng + abs(nb[0] - tx) + abs(nb[1] - ty), ng, nb))
+        if require_reach and reached is None:
+            return None
         end = reached if reached is not None else best
         step = self._first_step(came, start, end)
         if step is None:

@@ -334,3 +334,117 @@ def test_plan_step_does_not_step_onto_a_hard_blocked_goal():
     m[(2, 0)] = 0
     wm.block(51, 2, 0)  # a real wall — must not be entered even as a goal
     assert wm.plan_step(51, 2, 1, 2, 0) != "up"
+
+
+# --- require_reach: the planner must admit an unreachable goal ------------------
+# Regression for run 20260810-185357-7f79 (navigation-thrash): the exit (2,0) was sealed —
+# every neighbour stamped a wall — so A* could never reach it. The memoryless fallback then
+# flipped with the start tile: from (6,2) "best" was (6,1) -> "up"; from (6,1) best==start,
+# so greedy broke the tie -> "down". Replanning from scratch each turn locked a two-cell
+# limit cycle for 7600+ turns. ``require_reach=True`` makes plan_step return None instead
+# of the flip-prone fallback, so the caller can fall through to frontier exploration.
+
+
+def _sealed_pocket() -> WorldMap:
+    """Miniature of the wedge: a closed stamped room around (6,1)..(7,3) and a goal (2,0)
+    whose every neighbour is a stamped wall."""
+    wm = WorldMap()
+    m = wm.cells.setdefault(51, {})
+    for x in range(5, 9):  # room perimeter x in [5,8], y in [0,4]
+        for y in range(0, 5):
+            m[(x, y)] = 0
+    for x, y in [(6, 1), (6, 2), (6, 3), (7, 1), (7, 2), (7, 3)]:
+        m[(x, y)] = 1
+    m[(2, 0)] = 1  # the goal itself reads walkable...
+    for nb in [(1, 0), (3, 0), (2, 1)]:  # ...but every approach tile is stamped a wall
+        m[nb] = 0
+    return wm
+
+
+def test_fallback_flip_reproduces_the_two_cell_limit_cycle():
+    # Documents the fallback behaviour the wedge exposed: without require_reach the
+    # planner keeps emitting the start-dependent flip pair.
+    wm = _sealed_pocket()
+    assert wm.plan_step(51, 6, 2, 2, 0) == "up"
+    assert wm.plan_step(51, 6, 1, 2, 0) == "down"
+
+
+def test_require_reach_returns_none_when_goal_is_sealed():
+    wm = _sealed_pocket()
+    assert wm.plan_step(51, 6, 2, 2, 0, require_reach=True) is None
+    assert wm.plan_step(51, 6, 1, 2, 0, require_reach=True) is None
+
+
+def test_require_reach_still_plans_when_goal_is_reachable():
+    wm = WorldMap()  # empty map: goal optimistically reachable straight up
+    assert wm.plan_step(0, 5, 5, 5, 0, require_reach=True) == "up"
+
+
+# --- hard-block expiry ----------------------------------------------------------
+# Upstream cause of the sealed-exit wedge (run 20260810-185357-7f79): a failed move into a
+# *wandering NPC* hard-blocks its tile forever — blocks (1,17)/(2,18) severed the left exit
+# corridor long after the bug catchers had moved on. Wall stamps self-correct because
+# ``observe`` overwrites them, but ``blocked`` was permanent. Now each walkable
+# re-observation of a blocked tile (the NPC is gone, the grid reads it open again) counts
+# toward expiry; at ``block_expiry_observations`` the block is dropped and the tile becomes
+# re-testable. A real ledge also expires, but its re-test just fails twice and re-arms the
+# block — a couple of wasted presses every N sightings, in exchange for never sealing a map.
+
+
+def _observe_tile(wm, map_id, x, y, walkable):
+    """Stamp one observation window centred on (x, y) whose centre tile reads ``walkable``."""
+    grid = [[1] * 10 for _ in range(9)]
+    grid[4][4] = 1 if walkable else 0
+    wm.observe(map_id, x, y, grid)
+
+
+def test_hard_block_expires_after_walkable_reobservations():
+    wm = WorldMap()
+    wm.block_expiry_observations = 3
+    wm.block(51, 2, 18)
+    assert wm.walkable(51, 2, 18) == 0
+    for _ in range(2):
+        _observe_tile(wm, 51, 2, 18, walkable=True)
+        assert wm.walkable(51, 2, 18) == 0  # not yet expired
+    _observe_tile(wm, 51, 2, 18, walkable=True)
+    assert wm.walkable(51, 2, 18) == 1  # NPC long gone: block dropped, tile re-testable
+
+
+def test_hard_block_does_not_expire_while_observed_impassable():
+    wm = WorldMap()
+    wm.block_expiry_observations = 2
+    wm.block(51, 2, 18)
+    for _ in range(10):
+        _observe_tile(wm, 51, 2, 18, walkable=False)  # NPC still standing there
+    assert wm.walkable(51, 2, 18) == 0
+
+
+def test_reblock_after_expiry_rearms_a_fresh_counter():
+    wm = WorldMap()
+    wm.block_expiry_observations = 2
+    wm.block(51, 5, 5)
+    for _ in range(2):
+        _observe_tile(wm, 51, 5, 5, walkable=True)
+    assert wm.walkable(51, 5, 5) == 1  # expired
+    wm.block(51, 5, 5)  # re-test failed twice: it really is a ledge
+    _observe_tile(wm, 51, 5, 5, walkable=True)
+    assert wm.walkable(51, 5, 5) == 0  # fresh counter: one observation isn't enough
+
+
+def test_block_expiry_progress_roundtrips_through_dict():
+    wm = WorldMap()
+    wm.block_expiry_observations = 3
+    wm.block(51, 2, 18)
+    _observe_tile(wm, 51, 2, 18, walkable=True)  # partial progress: 1 of 3
+    wm2 = WorldMap.from_dict(wm.to_dict())
+    wm2.block_expiry_observations = 3
+    assert wm2.walkable(51, 2, 18) == 0
+    for _ in range(2):
+        _observe_tile(wm2, 51, 2, 18, walkable=True)
+    assert wm2.walkable(51, 2, 18) == 1  # resumed at 1, expired at 3 — progress persisted
+
+
+def test_block_loads_from_legacy_pair_format():
+    # Worldmap files written before expiry stored blocked as bare [x, y] pairs.
+    wm = WorldMap.from_dict({"blocked": {"51": [[2, 18]]}})
+    assert wm.walkable(51, 2, 18) == 0

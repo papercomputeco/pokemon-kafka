@@ -1411,6 +1411,21 @@ class TestChooseOverworldAction:
             ag.stuck_turns = streak
             assert ag.choose_overworld_action(state) == "up"
 
+    def test_forest_planner_admits_unreachable_and_agent_explores(self, tmp_path):
+        """Regression for run 20260810-185357-7f79 (navigation-thrash): with the exit sealed
+        behind stamped walls, plan_step's memoryless fallback flipped between two adjacent
+        tiles for 7600+ turns while the explore fallback below it never ran. The non-commit
+        branch must ask plan_step to admit failure (require_reach) so a None falls through
+        to frontier exploration instead of the flip."""
+        ag = _make_agent(tmp_path)
+        ag.world.known_reachable = MagicMock(return_value=False)
+        ag.world.plan_step = MagicMock(return_value=None)  # goal sealed: planner admits it
+        ag.world.explore_step = MagicMock(return_value="right")
+        state = OverworldState(map_id=51, x=6, y=2)
+        assert ag.choose_overworld_action(state) == "right"
+        assert ag.world.plan_step.call_args.kwargs.get("require_reach") is True
+        ag.world.explore_step.assert_called_once_with(51, 6, 2)
+
     def test_navigator_returns_none_falls_back_to_a(self, tmp_path):
         ag = _make_agent(tmp_path)
         ag.navigator.next_direction = MagicMock(return_value=None)
@@ -3429,6 +3444,21 @@ class TestEvolveParams:
             assert ag._evolve_door_cooldown == 8
             assert ag.navigator.stuck_threshold == 8
             assert ag.navigator.skip_distance == 3
+        finally:
+            if saved is not None:
+                os.environ["EVOLVE_PARAMS"] = saved
+
+    def test_block_expiry_flows_to_worldmap(self, tmp_path):
+        """block_expiry_observations from EVOLVE_PARAMS reaches the WorldMap, so the healer can
+        tune how fast NPC-poisoned hard-blocks decay."""
+        ag = _make_agent_with_evolve(tmp_path, evolve_params={"block_expiry_observations": 7})
+        assert ag.world.block_expiry_observations == 7
+
+    def test_block_expiry_defaults_without_evolve_params(self, tmp_path):
+        saved = os.environ.pop("EVOLVE_PARAMS", None)
+        try:
+            ag = _make_agent_with_evolve(tmp_path)
+            assert ag.world.block_expiry_observations == 25
         finally:
             if saved is not None:
                 os.environ["EVOLVE_PARAMS"] = saved
