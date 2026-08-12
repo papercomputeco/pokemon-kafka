@@ -401,12 +401,16 @@ h1 {
 /* ── HEAL composer ───────────────────────────────────────────── */
 /* Anomaly → operator note → the prompt the discovery engine would build. */
 #composer {
-  width: min(920px, 92vw);
+  /* Scale with the viewport like the shell does (its width is min(1860px, 98vw)):
+     the base font grows on big/zoomed screens and every inner size is in em,
+     so the whole form tracks it. 58em ≈ 920px at the 16px floor. */
+  font-size: clamp(1rem, 0.55rem + 0.55vw, 1.5rem);
+  width: min(58em, 92vw);
   max-height: 88vh;
   /* The `* { margin: 0 }` reset above kills the UA's `margin: auto` on dialog,
      which is what centers a modal — put it back or it pins to the top-left. */
   margin: auto;
-  padding: 20px 22px;
+  padding: 1.25em 1.375em;
   border: 3px solid #1f7d45;
   border-radius: 12px;
   background: #0d1a11;
@@ -418,38 +422,38 @@ h1 {
 
 .composer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .composer-head h2 {
-  font-size: 1rem; text-transform: uppercase; letter-spacing: 3px;
+  font-size: 1em; text-transform: uppercase; letter-spacing: 3px;
   color: #eafff0; text-shadow: 1px 1px 0 #04170b;
 }
 #composer-close {
   background: none; border: none; cursor: pointer;
-  color: #6bcf91; font-size: 1.4rem; line-height: 1; padding: 0 4px;
+  color: #6bcf91; font-size: 1.4em; line-height: 1; padding: 0 4px;
 }
 #composer-close:hover { color: #eafff0; }
 
 #composer-target {
   margin: 12px 0; padding: 8px 10px;
   border-left: 3px solid #34b866; background: #102417;
-  font-size: 0.85rem; overflow-wrap: anywhere;
+  font-size: 0.85em; overflow-wrap: anywhere;
 }
 
 /* The automatic path, stated as a fact: this run is already in the queue. */
 #composer-escalation {
   margin-bottom: 12px; padding: 8px 10px;
   border-left: 3px solid #e0b341; background: #241f10;
-  color: #f4dc9a; font-size: 0.82rem; overflow-wrap: anywhere;
+  color: #f4dc9a; font-size: 0.82em; overflow-wrap: anywhere;
 }
 
 #composer label {
   display: block; margin-bottom: 6px;
-  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; color: #6bcf91;
+  font-size: 0.78em; text-transform: uppercase; letter-spacing: 1px; color: #6bcf91;
 }
-#composer-hint { margin-top: 5px; font-size: 0.72rem; color: #4f7a5f; }
+#composer-hint { margin-top: 5px; font-size: 0.72em; color: #4f7a5f; }
 #composer-note {
   width: 100%; padding: 8px 10px; resize: vertical;
   border: 2px solid #1f7d45; border-radius: 6px;
   background: #08130c; color: #cdfbe0;
-  font-family: inherit; font-size: 0.9rem; line-height: 1.4;
+  font-family: inherit; font-size: 0.9em; line-height: 1.4;
 }
 #composer-note:focus { outline: none; border-color: #34b866; }
 #composer-note::placeholder { color: #4f7a5f; }
@@ -457,7 +461,7 @@ h1 {
 .composer-actions { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
 .composer-actions button {
   padding: 7px 18px; border-radius: 6px; cursor: pointer;
-  font-family: inherit; font-weight: bold; font-size: 0.82rem; letter-spacing: 1px;
+  font-family: inherit; font-weight: bold; font-size: 0.82em; letter-spacing: 1px;
   color: #08260f; background: linear-gradient(160deg, #6ee39a, #34b866);
   border: 2px solid #1f7d45;
 }
@@ -466,11 +470,11 @@ h1 {
   cursor: not-allowed; color: #1f3326;
   background: linear-gradient(160deg, #9fbfa8, #6d8f78); border-color: #4d6656;
 }
-#composer-status { font-size: 0.78rem; color: #6bcf91; overflow-wrap: anywhere; }
+#composer-status { font-size: 0.78em; color: #6bcf91; overflow-wrap: anywhere; }
 
 #composer-out {
   margin: 0; padding: 12px;
   max-height: 42vh; overflow: auto;
   border: 2px solid #1f7d45; border-radius: 6px; background: #08130c;
-  font-size: 0.78rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  font-size: 0.78em; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
