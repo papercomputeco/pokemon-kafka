@@ -5,8 +5,10 @@ observation to <MEMORY_DIR>/observations.md, the same file the observational
 memory loop maintains, so the agent surfaces Flink anomalies at session start.
 """
 
+import hashlib
 import json
 import os
+from datetime import datetime, timedelta, timezone
 
 from confluent_kafka import Consumer, KafkaError
 
@@ -14,6 +16,8 @@ TOPIC = os.environ.get("KAFKA_TOPIC", "agent.telemetry.alerts")
 BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "alerts-consumer")
 MEMORY_DIR = os.environ.get("MEMORY_DIR")
+ADVICE_INBOX_DIR = os.environ.get("ADVICE_INBOX_DIR")
+ADVICE_TTL_SECONDS = int(os.environ.get("ADVICE_TTL_SECONDS", "600"))
 
 
 def format_alert(data: dict) -> str:
@@ -41,6 +45,35 @@ def alert_observation(data: dict) -> dict:
         "content": content,
         "source_session": "flink",
     }
+
+
+def advice_from_alert(data: dict, now: datetime | None = None) -> dict:
+    """Shape a Flink alert as a pokemon.advice.v1 note for the agent's inbox.
+
+    Deterministic id (alert type + content hash) so the agent's dedupe absorbs
+    at-least-once redelivery; a short TTL keeps stale anomalies from steering
+    a run that has already moved on.
+    """
+    now = now or datetime.now(timezone.utc)
+    digest = hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    alert_type = data.get("alert_type", "UNKNOWN")
+    detail = data.get("detail", "")[:200]
+    return {
+        "schema": "pokemon.advice.v1",
+        "id": f"flink:{alert_type}:{digest}",
+        "type": "note",
+        "data": {"text": f"[{alert_type}] {detail}".rstrip()},
+        "expires_at": (now + timedelta(seconds=ADVICE_TTL_SECONDS)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": f"flink:{alert_type}",
+    }
+
+
+def append_advice_line(inbox_dir: str, item: dict) -> None:
+    """Append advice to <inbox_dir>/advice.jsonl, creating the inbox on first use."""
+    os.makedirs(inbox_dir, exist_ok=True)
+    path = os.path.join(inbox_dir, "advice.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(item) + "\n")
 
 
 def append_alert_line(memory_dir: str, data: dict) -> None:
@@ -94,6 +127,12 @@ def main():
                         append_alert_line(MEMORY_DIR, data)
                     except Exception as exc:
                         print(f"[alerts] alerts.jsonl write failed: {exc}", flush=True)
+
+                if ADVICE_INBOX_DIR:
+                    try:
+                        append_advice_line(ADVICE_INBOX_DIR, advice_from_alert(data))
+                    except Exception as exc:
+                        print(f"[alerts] advice write failed: {exc}", flush=True)
 
                 if append_observations:
                     try:
