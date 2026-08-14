@@ -1809,6 +1809,22 @@ class PokemonAgent:
             "brock_lead_level": self.brock_lead_level,
         }
 
+    @staticmethod
+    def _turns_remaining(loop_turns: int, max_turns: int) -> bool:
+        """Negative max_turns = unlimited (the long-loop mode); 0 keeps its
+        established meaning of zero loop iterations (bookkeeping-only runs)."""
+        return max_turns < 0 or loop_turns < max_turns
+
+    def _maybe_snapshot_fitness(self, fitness_every: int, fitness_path: str | None) -> None:
+        """Rolling fitness for unlimited runs: healer rules and observers read a live
+        window from the same file end-of-run fitness would land in."""
+        if not fitness_path or fitness_every <= 0 or self.turn_count <= 0:
+            return
+        if self.turn_count % fitness_every or self.turn_count == self._last_fitness_turn:
+            return
+        Path(fitness_path).write_text(json.dumps(self.compute_fitness(), indent=2) + "\n")
+        self._last_fitness_turn = self.turn_count
+
     def _advance_intro(self):
         """Advance through the title screen, Oak's intro, and name selection."""
         # Advance through title screen (needs ~1500 frames to reach "Press Start")
@@ -1869,9 +1885,16 @@ class PokemonAgent:
         save_state_on_map=None,
         save_state_on_trainer=None,
         save_state_every=None,
+        fitness_every: int = 0,
+        fitness_path: str | None = None,
     ):
         """Main agent loop. Returns fitness dict at end.
 
+        max_turns: loop bound; negative runs unlimited (the long-loop mode), 0 runs
+            no turns at all (intro/end bookkeeping only).
+        fitness_every / fitness_path: rewrite *fitness_path* with compute_fitness()
+            every N turns, so healer rules and observers can evaluate a live window
+            on a run that never ends.
         load_state: path to a PyBoy save state to load instead of running the intro.
         save_state_on_battle: path to dump a save state at the first detected battle.
         save_state_on_map: "MAPID:PATH" to dump a state when first reaching that map.
@@ -1912,7 +1935,10 @@ class PokemonAgent:
             _every, save_every_path = save_state_every.split(":", 1)
             save_every_n = int(_every)
         self._last_checkpoint_turn = -1
-        for _ in range(max_turns):
+        self._last_fitness_turn = -1
+        loop_turns = 0
+        while self._turns_remaining(loop_turns, max_turns):
+            loop_turns += 1
             battle = self.memory.read_battle_state()
 
             if battle.battle_type > 0:
@@ -2105,6 +2131,8 @@ class PokemonAgent:
             if self.worldmap_file and self.turn_count > 0 and self.turn_count % 500 == 0:
                 self.world.save(self.worldmap_file)
 
+            self._maybe_snapshot_fitness(fitness_every, fitness_path)
+
         if self.worldmap_file:
             self.world.save(self.worldmap_file)  # final persist of everything learned this segment
         if self._in_run_heal is not None:
@@ -2257,7 +2285,7 @@ def main():
         "--max-turns",
         type=int,
         default=100_000,
-        help="Maximum turns before stopping (default: 100000)",
+        help="Maximum turns before stopping (default: 100000; -1 = unlimited, 0 = no turns)",
     )
     parser.add_argument(
         "--battle-limit",
@@ -2275,6 +2303,12 @@ def main():
         type=str,
         default=None,
         help="Write fitness metrics JSON to this path at end of run",
+    )
+    parser.add_argument(
+        "--fitness-every",
+        type=int,
+        default=0,
+        help="Rewrite --output-json with a rolling fitness snapshot every N turns (0 = end of run only)",
     )
     parser.add_argument(
         "--telemetry-dir",
@@ -2412,6 +2446,8 @@ def main():
             save_state_on_map=args.save_state_on_map,
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
+            fitness_every=args.fitness_every,
+            fitness_path=args.output_json,
         )
     finally:
         if recorder is not None:

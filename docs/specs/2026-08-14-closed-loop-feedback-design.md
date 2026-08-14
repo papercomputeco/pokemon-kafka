@@ -87,8 +87,10 @@ Inbox failures log and never break the run.
 
 ### Unlimited runs + rolling fitness
 
-- `--max-turns 0` = unlimited: the run loop becomes a `while` on
-  `max_turns <= 0 or loop_turns < max_turns`.
+- `--max-turns -1` = unlimited: the run loop becomes a `while` on
+  `max_turns < 0 or loop_turns < max_turns`. (`0` keeps its established
+  meaning of zero loop iterations — existing tests rely on it for
+  bookkeeping-only runs.)
 - `--fitness-every N` rewrites the `--output-json` path with
   `compute_fitness()` every N turns, so healer rules and observers can
   evaluate a live window on a run that never ends.

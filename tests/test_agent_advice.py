@@ -110,3 +110,41 @@ def test_inbox_read_failure_never_breaks_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_mod.advice, "poll_inbox", boom)
     ag._tick_advice()  # logs, does not raise
     assert _milestones(ag) == []
+
+
+def test_turns_remaining_unlimited_and_bounded():
+    from agent import PokemonAgent
+
+    assert PokemonAgent._turns_remaining(10_000_000, -1)  # negative = unlimited
+    assert not PokemonAgent._turns_remaining(0, 0)  # 0 keeps meaning zero iterations
+    assert PokemonAgent._turns_remaining(4, 5)
+    assert not PokemonAgent._turns_remaining(5, 5)
+
+
+def test_fitness_snapshot_writes_on_interval(tmp_path):
+    ag = _make_agent(tmp_path)
+    out = tmp_path / "fit.json"
+    ag.turn_count = 100
+    ag._last_fitness_turn = -1
+    ag._maybe_snapshot_fitness(100, str(out))
+    written = json.loads(out.read_text())
+    assert written["turns"] == 100
+
+    out.unlink()
+    ag._maybe_snapshot_fitness(100, str(out))  # same turn -> no rewrite
+    assert not out.exists()
+
+    ag.turn_count = 150  # off-interval -> no write
+    ag._maybe_snapshot_fitness(100, str(out))
+    assert not out.exists()
+
+
+def test_fitness_snapshot_disabled_without_path_or_interval(tmp_path):
+    ag = _make_agent(tmp_path)
+    ag.turn_count = 100
+    ag._last_fitness_turn = -1
+    ag._maybe_snapshot_fitness(0, str(tmp_path / "a.json"))
+    ag._maybe_snapshot_fitness(100, None)
+    ag.turn_count = 0
+    ag._maybe_snapshot_fitness(100, str(tmp_path / "a.json"))
+    assert list(tmp_path.glob("*.json")) == []
