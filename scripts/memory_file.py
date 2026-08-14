@@ -31,6 +31,14 @@ class MemoryFile:
         self.path.write_text(content)
         return True
 
+    def append(self, text: str) -> None:
+        """Append one line, clamped to max_tokens (the cap drops the tail, matching replace())."""
+        content = self.read().rstrip("\n") + "\n" + text + "\n"
+        char_limit = self.max_tokens * 4
+        if len(content) > char_limit:
+            content = content[:char_limit]
+        self.path.write_text(content)
+
     def token_count(self) -> int:
         """Rough token count (1 token ~ 4 chars)."""
         return max(1, len(self.read()) // 4)

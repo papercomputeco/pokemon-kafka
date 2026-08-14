@@ -62,3 +62,15 @@ class TestMemoryFile:
         path.write_text("# Existing Notes\n\nKeep this")
         mf = MemoryFile(str(path))
         assert "Keep this" in mf.read()
+
+    def test_append_adds_line_after_existing_content(self, tmp_path):
+        mf = MemoryFile(str(tmp_path / "notes.md"))
+        mf.append("- [advice:flink] heal before the forest")
+        content = mf.read()
+        assert content.startswith("# Agent Notes")
+        assert content.endswith("- [advice:flink] heal before the forest\n")
+
+    def test_append_respects_char_limit(self, tmp_path):
+        mf = MemoryFile(str(tmp_path / "notes.md"), max_tokens=10)  # 40-char cap
+        mf.append("x" * 100)
+        assert len(mf.read()) <= 40
