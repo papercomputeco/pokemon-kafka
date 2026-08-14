@@ -8,6 +8,7 @@ All events share a common envelope: schema, event_type, turn, occurred_at, data.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 SCHEMA_GAME_EVENT = "pokemon.game.v1"
@@ -302,15 +303,23 @@ class GameEventCollector:
     the telemetry sink immediately instead of being batched after the run.
     """
 
-    def __init__(self, publisher=None, recorder=None, game: str = "red_blue"):
+    def __init__(self, publisher=None, recorder=None, game: str = "red_blue", run_id: str | None = None):
         self.events: list[dict] = []
         self._publisher = publisher
         self._recorder = recorder
         self.game = game
+        # Identity for the closed loop: run_id keys/partitions the stream and
+        # correlates events to runs/<run_id>; event_id ("<run_id>:<seq>") is the
+        # at-least-once dedup key for downstream consumers.
+        self.run_id = run_id or uuid.uuid4().hex[:12]
+        self._seq = 0
 
     def _emit(self, event: dict) -> None:
         """Append *event* to the local list, publish, and record if configured."""
+        self._seq += 1
         event["game"] = self.game
+        event["run_id"] = self.run_id
+        event["event_id"] = f"{self.run_id}:{self._seq}"
         self.events.append(event)
         if self._publisher is not None:
             try:

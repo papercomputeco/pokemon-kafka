@@ -2298,18 +2298,18 @@ def main():
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
 
+    # One run identity for the whole session: recorder folder, live tile, and
+    # every game event's run_id/event_id all derive from it.
+    run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
+
     producer = None
-    run_id = None
     if args.live:
         from live_producer import LiveProducer as _LiveProducer
 
-        run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
         producer = _LiveProducer(f"{args.viewer_url}/ws/produce/{run_id}", run_id)
 
     recorder = None
     if args.record or args.live:
-        if run_id is None:
-            run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
         recorder = build_recorder(
             record=True,
             runs_dir=Path(args.runs_dir),
@@ -2322,7 +2322,9 @@ def main():
             ephemeral=not args.record,
         )
     if game_pub is not None or recorder is not None:
-        agent.collector = GameEventCollector(publisher=game_pub, recorder=recorder, game=agent.profile.name)
+        agent.collector = GameEventCollector(
+            publisher=game_pub, recorder=recorder, game=agent.profile.name, run_id=run_id
+        )
     if recorder is not None:
         recorder.start({"strategy": args.strategy, "rom": args.rom, "label": args.label})
 

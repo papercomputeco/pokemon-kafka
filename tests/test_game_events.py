@@ -371,3 +371,20 @@ def test_collector_decision_and_agent_state_emit():
     )
     assert [e["event_type"] for e in c.events] == ["decision", "agent_state"]
     assert all(e["game"] == "red_blue" for e in c.events)
+
+
+def test_envelope_carries_run_id_and_monotonic_event_id():
+    c = GameEventCollector(game="red_blue", run_id="run-abc")
+    c.milestone(1, "first")
+    c.milestone(2, "second")
+    first, second = c.events
+    assert first["run_id"] == "run-abc"
+    assert first["event_id"] == "run-abc:1"
+    assert second["event_id"] == "run-abc:2"
+
+
+def test_collector_generates_distinct_run_ids_when_absent():
+    a, b = GameEventCollector(), GameEventCollector()
+    assert a.run_id and b.run_id and a.run_id != b.run_id
+    a.milestone(0, "x")
+    assert a.events[0]["run_id"] == a.run_id
