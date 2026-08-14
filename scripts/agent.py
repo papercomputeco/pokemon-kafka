@@ -35,6 +35,7 @@ try:
 except ImportError:
     Image = None
 
+import advice
 from game_events import GameEventCollector
 from game_profile import RED_BLUE, YELLOW, detect_profile
 from memory_file import MemoryFile
@@ -704,6 +705,15 @@ class PokemonAgent:
         self.in_run_heal_streak = 50
         self._in_run_heal = None  # in-flight InRunHeal race, at most one per run
         self._in_run_heal_done = False
+        # Advice inbox: the in-run return path of the feedback loop. JSONL
+        # advice (from the Flink alerts-consumer, an operator, or a cassette)
+        # is polled between turns and applied without stopping the run — the
+        # agent stays broker-free, mirroring the JSONL-out telemetry sink.
+        self.advice_inbox_dir: str | None = None
+        self.advice_poll_turns = 50
+        self._advice_offsets: dict[str, int] = {}
+        self._advice_seen: set[str] = set()
+        self._advice_ticks = 0
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -915,6 +925,55 @@ class PokemonAgent:
         self.collector.milestone(self.turn_count, msg)
         self._in_run_heal = None
         self._in_run_heal_done = True
+
+    def _tick_advice(self) -> None:
+        """Per-turn hook: poll the advice inbox every N loop turns, apply what's new."""
+        if not self.advice_inbox_dir:
+            return
+        self._advice_ticks += 1
+        if self._advice_ticks % self.advice_poll_turns:
+            return
+        try:
+            items, self._advice_offsets = advice.poll_inbox(self.advice_inbox_dir, self._advice_offsets)
+        except OSError as exc:
+            self.log(f"ADVICE | inbox read failed: {exc}")
+            return
+        for item in items:
+            self._apply_advice(item)
+
+    def _apply_advice(self, item: dict) -> None:
+        """Apply one advice dict: dedupe by id, drop expired, dispatch on type."""
+        advice_id = str(item.get("id") or "")
+        if not advice_id or advice_id in self._advice_seen:
+            return
+        self._advice_seen.add(advice_id)
+        if advice.is_expired(item):
+            return
+        data = item.get("data") or {}
+        source = item.get("source", "?")
+        kind = item.get("type")
+        if kind == "genome_patch":
+            from evolve import PARAM_BOUNDS, clamp_params
+
+            patch = {k: v for k, v in data.items() if k in PARAM_BOUNDS}
+            if not patch:
+                return
+            merged = clamp_params({**self.evolve_params, **patch})
+            applied = {k: merged[k] for k in patch}
+            self.apply_genome_live(applied)
+            changed = ", ".join(f"{k}={v}" for k, v in sorted(applied.items()))
+            msg = f"Advice applied ({source}): {changed}"
+        elif kind == "note":
+            text = str(data.get("text", "")).strip()
+            if not text:
+                return
+            if self.strategy_engine.notes is not None:
+                self.strategy_engine.notes.append(f"- [advice:{source}] {text}")
+            msg = f"Advice noted ({source}): {text}"
+        else:
+            return
+        self.log(f"ADVICE | {msg}")
+        self.collector.milestone(self.turn_count, msg)
 
     def choose_overworld_action(self, state: OverworldState) -> str:
         """Pick the next overworld action."""
@@ -2022,6 +2081,8 @@ class PokemonAgent:
             # race, and hot-apply an accepted genome without stopping the run.
             self._tick_in_run_heal()
 
+            self._tick_advice()
+
             self.collector.tick(self.turn_count)
 
             if self.turn_count % 10 == 0:
@@ -2268,6 +2329,17 @@ def main():
         default=50,
         help="Stuck streak that triggers the in-run heal (default: 50, the terminal-wedge threshold)",
     )
+    parser.add_argument(
+        "--advice-inbox",
+        default=None,
+        help="Poll this directory's *.jsonl for pokemon.advice.v1 lines and apply them mid-run (default: off)",
+    )
+    parser.add_argument(
+        "--advice-poll-turns",
+        type=int,
+        default=50,
+        help="Poll the advice inbox every N loop turns (default: 50)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2297,6 +2369,8 @@ def main():
         agent.world.block_expiry_observations = expiry
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
+    agent.advice_inbox_dir = args.advice_inbox
+    agent.advice_poll_turns = max(1, args.advice_poll_turns)
 
     # One run identity for the whole session: recorder folder, live tile, and
     # every game event's run_id/event_id all derive from it.
