@@ -35,6 +35,7 @@ try:
 except ImportError:
     Image = None
 
+import advice
 from game_events import GameEventCollector
 from game_profile import RED_BLUE, YELLOW, detect_profile
 from memory_file import MemoryFile
@@ -704,6 +705,15 @@ class PokemonAgent:
         self.in_run_heal_streak = 50
         self._in_run_heal = None  # in-flight InRunHeal race, at most one per run
         self._in_run_heal_done = False
+        # Advice inbox: the in-run return path of the feedback loop. JSONL
+        # advice (from the Flink alerts-consumer, an operator, or a cassette)
+        # is polled between turns and applied without stopping the run — the
+        # agent stays broker-free, mirroring the JSONL-out telemetry sink.
+        self.advice_inbox_dir: str | None = None
+        self.advice_poll_turns = 50
+        self._advice_offsets: dict[str, int] = {}
+        self._advice_seen: set[str] = set()
+        self._advice_ticks = 0
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -915,6 +925,55 @@ class PokemonAgent:
         self.collector.milestone(self.turn_count, msg)
         self._in_run_heal = None
         self._in_run_heal_done = True
+
+    def _tick_advice(self) -> None:
+        """Per-turn hook: poll the advice inbox every N loop turns, apply what's new."""
+        if not self.advice_inbox_dir:
+            return
+        self._advice_ticks += 1
+        if self._advice_ticks % self.advice_poll_turns:
+            return
+        try:
+            items, self._advice_offsets = advice.poll_inbox(self.advice_inbox_dir, self._advice_offsets)
+        except OSError as exc:
+            self.log(f"ADVICE | inbox read failed: {exc}")
+            return
+        for item in items:
+            self._apply_advice(item)
+
+    def _apply_advice(self, item: dict) -> None:
+        """Apply one advice dict: dedupe by id, drop expired, dispatch on type."""
+        advice_id = str(item.get("id") or "")
+        if not advice_id or advice_id in self._advice_seen:
+            return
+        self._advice_seen.add(advice_id)
+        if advice.is_expired(item):
+            return
+        data = item.get("data") or {}
+        source = item.get("source", "?")
+        kind = item.get("type")
+        if kind == "genome_patch":
+            from evolve import PARAM_BOUNDS, clamp_params
+
+            patch = {k: v for k, v in data.items() if k in PARAM_BOUNDS}
+            if not patch:
+                return
+            merged = clamp_params({**self.evolve_params, **patch})
+            applied = {k: merged[k] for k in patch}
+            self.apply_genome_live(applied)
+            changed = ", ".join(f"{k}={v}" for k, v in sorted(applied.items()))
+            msg = f"Advice applied ({source}): {changed}"
+        elif kind == "note":
+            text = str(data.get("text", "")).strip()
+            if not text:
+                return
+            if self.strategy_engine.notes is not None:
+                self.strategy_engine.notes.append(f"- [advice:{source}] {text}")
+            msg = f"Advice noted ({source}): {text}"
+        else:
+            return
+        self.log(f"ADVICE | {msg}")
+        self.collector.milestone(self.turn_count, msg)
 
     def choose_overworld_action(self, state: OverworldState) -> str:
         """Pick the next overworld action."""
@@ -1750,6 +1809,22 @@ class PokemonAgent:
             "brock_lead_level": self.brock_lead_level,
         }
 
+    @staticmethod
+    def _turns_remaining(loop_turns: int, max_turns: int) -> bool:
+        """Negative max_turns = unlimited (the long-loop mode); 0 keeps its
+        established meaning of zero loop iterations (bookkeeping-only runs)."""
+        return max_turns < 0 or loop_turns < max_turns
+
+    def _maybe_snapshot_fitness(self, fitness_every: int, fitness_path: str | None) -> None:
+        """Rolling fitness for unlimited runs: healer rules and observers read a live
+        window from the same file end-of-run fitness would land in."""
+        if not fitness_path or fitness_every <= 0 or self.turn_count <= 0:
+            return
+        if self.turn_count % fitness_every or self.turn_count == self._last_fitness_turn:
+            return
+        Path(fitness_path).write_text(json.dumps(self.compute_fitness(), indent=2) + "\n")
+        self._last_fitness_turn = self.turn_count
+
     def _advance_intro(self):
         """Advance through the title screen, Oak's intro, and name selection."""
         # Advance through title screen (needs ~1500 frames to reach "Press Start")
@@ -1810,9 +1885,16 @@ class PokemonAgent:
         save_state_on_map=None,
         save_state_on_trainer=None,
         save_state_every=None,
+        fitness_every: int = 0,
+        fitness_path: str | None = None,
     ):
         """Main agent loop. Returns fitness dict at end.
 
+        max_turns: loop bound; negative runs unlimited (the long-loop mode), 0 runs
+            no turns at all (intro/end bookkeeping only).
+        fitness_every / fitness_path: rewrite *fitness_path* with compute_fitness()
+            every N turns, so healer rules and observers can evaluate a live window
+            on a run that never ends.
         load_state: path to a PyBoy save state to load instead of running the intro.
         save_state_on_battle: path to dump a save state at the first detected battle.
         save_state_on_map: "MAPID:PATH" to dump a state when first reaching that map.
@@ -1853,7 +1935,10 @@ class PokemonAgent:
             _every, save_every_path = save_state_every.split(":", 1)
             save_every_n = int(_every)
         self._last_checkpoint_turn = -1
-        for _ in range(max_turns):
+        self._last_fitness_turn = -1
+        loop_turns = 0
+        while self._turns_remaining(loop_turns, max_turns):
+            loop_turns += 1
             battle = self.memory.read_battle_state()
 
             if battle.battle_type > 0:
@@ -2022,6 +2107,8 @@ class PokemonAgent:
             # race, and hot-apply an accepted genome without stopping the run.
             self._tick_in_run_heal()
 
+            self._tick_advice()
+
             self.collector.tick(self.turn_count)
 
             if self.turn_count % 10 == 0:
@@ -2043,6 +2130,8 @@ class PokemonAgent:
             # Periodically persist the learned WorldMap so a killed/reset run keeps its geometry.
             if self.worldmap_file and self.turn_count > 0 and self.turn_count % 500 == 0:
                 self.world.save(self.worldmap_file)
+
+            self._maybe_snapshot_fitness(fitness_every, fitness_path)
 
         if self.worldmap_file:
             self.world.save(self.worldmap_file)  # final persist of everything learned this segment
@@ -2196,7 +2285,7 @@ def main():
         "--max-turns",
         type=int,
         default=100_000,
-        help="Maximum turns before stopping (default: 100000)",
+        help="Maximum turns before stopping (default: 100000; -1 = unlimited, 0 = no turns)",
     )
     parser.add_argument(
         "--battle-limit",
@@ -2214,6 +2303,12 @@ def main():
         type=str,
         default=None,
         help="Write fitness metrics JSON to this path at end of run",
+    )
+    parser.add_argument(
+        "--fitness-every",
+        type=int,
+        default=0,
+        help="Rewrite --output-json with a rolling fitness snapshot every N turns (0 = end of run only)",
     )
     parser.add_argument(
         "--telemetry-dir",
@@ -2268,6 +2363,17 @@ def main():
         default=50,
         help="Stuck streak that triggers the in-run heal (default: 50, the terminal-wedge threshold)",
     )
+    parser.add_argument(
+        "--advice-inbox",
+        default=None,
+        help="Poll this directory's *.jsonl for pokemon.advice.v1 lines and apply them mid-run (default: off)",
+    )
+    parser.add_argument(
+        "--advice-poll-turns",
+        type=int,
+        default=50,
+        help="Poll the advice inbox every N loop turns (default: 50)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2297,19 +2403,21 @@ def main():
         agent.world.block_expiry_observations = expiry
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
+    agent.advice_inbox_dir = args.advice_inbox
+    agent.advice_poll_turns = max(1, args.advice_poll_turns)
+
+    # One run identity for the whole session: recorder folder, live tile, and
+    # every game event's run_id/event_id all derive from it.
+    run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
 
     producer = None
-    run_id = None
     if args.live:
         from live_producer import LiveProducer as _LiveProducer
 
-        run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
         producer = _LiveProducer(f"{args.viewer_url}/ws/produce/{run_id}", run_id)
 
     recorder = None
     if args.record or args.live:
-        if run_id is None:
-            run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
         recorder = build_recorder(
             record=True,
             runs_dir=Path(args.runs_dir),
@@ -2322,7 +2430,9 @@ def main():
             ephemeral=not args.record,
         )
     if game_pub is not None or recorder is not None:
-        agent.collector = GameEventCollector(publisher=game_pub, recorder=recorder, game=agent.profile.name)
+        agent.collector = GameEventCollector(
+            publisher=game_pub, recorder=recorder, game=agent.profile.name, run_id=run_id
+        )
     if recorder is not None:
         recorder.start({"strategy": args.strategy, "rom": args.rom, "label": args.label})
 
@@ -2336,6 +2446,8 @@ def main():
             save_state_on_map=args.save_state_on_map,
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
+            fitness_every=args.fitness_every,
+            fitness_path=args.output_json,
         )
     finally:
         if recorder is not None:

@@ -2324,6 +2324,8 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            fitness_every=0,
+            fitness_path=None,
         )
 
     def test_main_rom_not_found(self, tmp_path):
@@ -2358,6 +2360,8 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            fitness_every=0,
+            fitness_path=None,
         )
 
     def test_main_default_args(self, tmp_path):
@@ -2381,6 +2385,8 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            fitness_every=0,
+            fitness_path=None,
         )
 
 

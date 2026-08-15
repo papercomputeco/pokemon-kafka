@@ -21,9 +21,9 @@ CREATE TABLE tapes_alerts (
 -- Game Events: reads pokemon.game.v1 events from Kafka
 -- ============================================================
 -- Union schema: `data` is a flat ROW containing fields from ALL event types
--- (battle, overworld, map_change, stuck, milestone, session). Most fields
--- are NULL for any given event. This avoids per-type tables while keeping
--- queries simple — filter on `event_type` to get the relevant columns.
+-- (battle, battle_end, overworld, map_change, stuck, milestone, session).
+-- Most fields are NULL for any given event. This avoids per-type tables while
+-- keeping queries simple — filter on `event_type` to get the relevant columns.
 CREATE TABLE game_events (
     `schema` STRING,
     `event_type` STRING,
@@ -47,7 +47,8 @@ CREATE TABLE game_events (
         `description` STRING,
         `phase` STRING,
         `battles_won` INT,
-        `maps_visited` INT
+        `maps_visited` INT,
+        `won` BOOLEAN
     >,
     WATERMARK FOR `occurred_at` AS `occurred_at` - INTERVAL '5' SECONDS
 ) WITH (
@@ -234,3 +235,49 @@ FROM TABLE(
 WHERE event_type = 'stuck'
 GROUP BY data.map_id, data.`position`.x, data.`position`.y, data.last_action, window_start, window_end
 HAVING COUNT(*) >= 3;
+
+-- ============================================================
+-- Resource-exhaustion rules (added 2026-08)
+-- ============================================================
+-- The wedge rules above catch the agent not MOVING. These catch it not
+-- SURVIVING — the class behind the reproducible turn-385 Viridian Forest
+-- blackout: HP bleeding away across fights with no heal. Both fire while
+-- the run is still alive, so the alerts-consumer can write advice into
+-- the agent's inbox before the blackout instead of after it.
+
+-- Low-HP grind: sustained fighting in the red. 10+ battle turns in 2
+-- minutes with the lead at <=25% HP and never recovering.
+INSERT INTO tapes_alerts
+SELECT
+    'LOW_HP_GRIND' AS alert_type,
+    '' AS root_hash,
+    CONCAT('player_hp=', CAST(MIN(data.player_hp) AS STRING),
+           '/', CAST(MAX(data.player_max_hp) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(TABLE game_events, DESCRIPTOR(occurred_at), INTERVAL '2' MINUTES)
+)
+WHERE event_type = 'battle'
+  AND data.player_hp > 0
+  AND data.player_hp * 4 <= data.player_max_hp
+GROUP BY window_start, window_end
+HAVING COUNT(*) >= 10;
+
+-- Loss streak: 2+ lost battles in 10 minutes — the run is out of its
+-- depth (level gap or no healing), not merely unlucky once.
+INSERT INTO tapes_alerts
+SELECT
+    'BATTLE_LOSS_STREAK' AS alert_type,
+    '' AS root_hash,
+    CONCAT('losses=', CAST(COUNT(*) AS STRING)) AS detail,
+    window_start,
+    window_end,
+    COUNT(*) AS event_count
+FROM TABLE(
+    TUMBLE(TABLE game_events, DESCRIPTOR(occurred_at), INTERVAL '10' MINUTES)
+)
+WHERE event_type = 'battle_end' AND data.won = false
+GROUP BY window_start, window_end
+HAVING COUNT(*) >= 2;

@@ -160,14 +160,16 @@ Agent → JSONL (data/telemetry/game/*.jsonl)
             ├→ game-consumer (prints + writes JSONL)
             ├→ Flink SQL (anomaly detection)
             │    └→ Kafka (agent.telemetry.alerts)
-            │         └→ alerts-consumer (prints + writes observations to pokedex/memory)
+            │         └→ alerts-consumer (prints + observations + advice)
+            │              └→ pokedex/memory/inbox (advice.jsonl)
+            │                   └→ Agent polls mid-run  ← the loop closes here
             └→ DuckDB (ad-hoc queries on JSONL sink)
 
 JSONL sink (data/telemetry/*.jsonl)
   └→ dlt pipeline → DuckDB warehouse (local)
 ```
 
-Each event carries the event type (`battle`, `overworld`, `map_change`, `stuck`, `milestone`, `session`), turn, timestamp, and a flat data payload (map, position, HP, action, badges, …). Flink reads these to flag navigation deadlocks and battle loops in real time: `GAME_STUCK_LOOP`, `BATTLE_WIPE`, `BATTLE_LOOP`, `POSITION_DEADLOCK`, `NO_PROGRESS`.
+Each event carries the event type (`battle`, `overworld`, `map_change`, `stuck`, `milestone`, `session`), turn, timestamp, `run_id`/`event_id` (partitioning and dedup identity), and a flat data payload (map, position, HP, action, badges, …). Flink reads these to flag navigation deadlocks and battle loops in real time: `GAME_STUCK_LOOP`, `BATTLE_WIPE`, `BATTLE_LOOP`, `POSITION_DEADLOCK`, `NO_PROGRESS`.
 
 ```bash
 # Start the full pipeline (Kafka, Flink, bridge, consumers)
@@ -191,6 +193,22 @@ open http://localhost:8081
 
 LLM sessions are recorded by Paper (paperd) on the host — point the agent at it with `ANTHROPIC_BASE_URL`. A local-first alternative for the game-event stream exists without a broker: pass `--telemetry-dir` to the agent and it writes JSONL files directly via `scripts/publisher.py`.
 
+### Closing the loop: the advice inbox
+
+Feedback flows back into a *live* run the same way telemetry flows out — as JSONL. Writers (the Flink alerts-consumer, an operator, or a future cassette) append `pokemon.advice.v1` lines to an inbox directory; the agent polls new complete lines between turns and applies them mid-run:
+
+- `genome_patch` — hot-applies navigation knobs through the healer's clamp rules
+- `note` — lands in strategy notes and the Pokédex feed as a milestone
+
+```bash
+uv run scripts/agent.py rom/pokemon_red.gb \
+  --max-turns -1 \
+  --advice-inbox pokedex/memory/inbox \
+  --output-json data/telemetry/live_fitness.json --fitness-every 500
+```
+
+`--max-turns -1` runs unlimited (the long-loop mode) and `--fitness-every` keeps rewriting the fitness JSON so healer rules and observers can evaluate a live window on a run that never ends. Every advice line carries an `id` (deduped per run) and an `expires_at` TTL, so at-least-once writers are safe and stale anomalies can't steer a run that has already moved on. The alerts-consumer writes Flink anomaly alerts into the inbox when `ADVICE_INBOX_DIR` is set (on by default in compose).
+
 ## Flink Anomaly Detection
 
 Apache Flink (1.18) runs SQL jobs against the `agent.game.events` stream:
@@ -202,8 +220,10 @@ Apache Flink (1.18) runs SQL jobs against the `agent.game.events` stream:
 | `BATTLE_LOOP` | 30s tumbling | 20+ battle events at same enemy HP | Input spam not dealing damage |
 | `POSITION_DEADLOCK` | 2min tumbling | 50+ overworld events at one position | Bouncing off an impassable obstacle |
 | `NO_PROGRESS` | 5min tumbling | 100+ overworld events, ≤5 unique tiles | Navigation completely stalled |
+| `LOW_HP_GRIND` | 2min tumbling | 10+ battle turns at ≤25% HP | Bleeding out with no heal (the blackout class) |
+| `BATTLE_LOSS_STREAK` | 10min tumbling | 2+ lost battles | Out of its depth: level gap or no healing |
 
-The jobs write alerts to the `agent.telemetry.alerts` Kafka topic. The alerts consumer picks them up and appends each as an `[important]` observation to `pokedex/memory/observations.md`, feeding anomalies into the observational memory the agent loads at session start.
+The jobs write alerts to the `agent.telemetry.alerts` Kafka topic. The alerts consumer picks them up and appends each as an `[important]` observation to `pokedex/memory/observations.md`, feeding anomalies into the observational memory the agent loads at session start — and, when `ADVICE_INBOX_DIR` is set, into the advice inbox a live run polls mid-run.
 
 Flink SQL definitions live in `docker/flink-sql/init.sql`. The connector JAR is downloaded automatically at startup.
 

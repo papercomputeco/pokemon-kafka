@@ -42,6 +42,7 @@ services:
       KAFKA_TOPIC: agent.telemetry.alerts
       KAFKA_GROUP_ID: alerts-consumer
       MEMORY_DIR: /memory
+      ADVICE_INBOX_DIR: /memory/inbox
     volumes:
       - ./pokedex/memory:/memory
       - ./scripts/memory_writer.py:/app/memory_writer.py

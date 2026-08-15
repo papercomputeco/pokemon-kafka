@@ -121,3 +121,35 @@ class TestAppendAlertLine:
         assert len(lines) == 2
         assert json.loads(lines[0]) == data
         assert json.loads(lines[1])["alert_type"] == "NO_PROGRESS"
+
+
+class TestAdviceSink:
+    def test_advice_from_alert_shapes_note(self):
+        from datetime import datetime, timezone
+
+        consumer = _import_consumer()
+        data = {"alert_type": "LOW_HP_GRIND", "detail": "player_hp=3/19", "event_count": 12}
+        adv = consumer.advice_from_alert(data, now=datetime(2026, 8, 14, tzinfo=timezone.utc))
+        assert adv["schema"] == "pokemon.advice.v1"
+        assert adv["type"] == "note"
+        assert adv["source"] == "flink:LOW_HP_GRIND"
+        assert adv["id"].startswith("flink:LOW_HP_GRIND:")
+        assert adv["data"]["text"] == "[LOW_HP_GRIND] player_hp=3/19"
+        assert adv["expires_at"] == "2026-08-14T00:10:00Z"  # default 600s TTL
+
+    def test_advice_id_is_deterministic_per_alert(self):
+        consumer = _import_consumer()
+        a = {"alert_type": "DOOR_STALL", "detail": "map=40"}
+        assert consumer.advice_from_alert(a)["id"] == consumer.advice_from_alert(a)["id"]
+        b = {"alert_type": "DOOR_STALL", "detail": "map=42"}
+        assert consumer.advice_from_alert(a)["id"] != consumer.advice_from_alert(b)["id"]
+
+    def test_append_advice_line_creates_dir_and_appends(self, tmp_path):
+        import json
+
+        consumer = _import_consumer()
+        inbox = tmp_path / "inbox"
+        consumer.append_advice_line(str(inbox), {"id": "x1"})
+        consumer.append_advice_line(str(inbox), {"id": "x2"})
+        lines = (inbox / "advice.jsonl").read_text().splitlines()
+        assert [json.loads(ln)["id"] for ln in lines] == ["x1", "x2"]
