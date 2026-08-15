@@ -146,3 +146,52 @@ def test_run_once_missing_schema_uses_empty_key(bridge, tmp_path):
     producer = bridge.Producer({})
     bridge.run_once(producer, "t", tmp_path, {})
     assert producer.produced[0][1] == b""
+
+
+def test_produce_with_backpressure_drains_full_queue(bridge):
+    """A full librdkafka queue (BufferError) polls to drain, then retries — never crashes."""
+
+    class _FullThenOkProducer:
+        def __init__(self):
+            self.produced = []
+            self.polls = 0
+            self.rejects_left = 2
+
+        def produce(self, topic, key=None, value=None):
+            if self.rejects_left > 0:
+                raise BufferError("Local: Queue full")
+            self.produced.append((topic, key, value))
+
+        def poll(self, timeout):
+            self.polls += 1
+            self.rejects_left -= 1
+            return 0
+
+    p = _FullThenOkProducer()
+    bridge.produce_with_backpressure(p, "t", b"k", b"v")
+    assert p.produced == [("t", b"k", b"v")]
+    assert p.polls == 2
+
+
+def test_run_once_survives_buffer_full(bridge, tmp_path):
+    """The cold replay of a large sink must not die when the producer queue fills."""
+
+    class _FlakyProducer:
+        def __init__(self):
+            self.produced = []
+            self._fail_next = True
+
+        def produce(self, topic, key=None, value=None):
+            if self._fail_next:
+                self._fail_next = False
+                raise BufferError("Local: Queue full")
+            self.produced.append((topic, key, value))
+
+        def poll(self, timeout):
+            return 0
+
+    _write(tmp_path / "a.jsonl", json.dumps({"schema": "pokemon.game.v1"}) + "\n")
+    p = _FlakyProducer()
+    state = bridge.run_once(p, "t", tmp_path, {})
+    assert len(p.produced) == 1
+    assert state["a.jsonl"] > 0
