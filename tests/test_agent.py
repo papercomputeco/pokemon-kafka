@@ -2372,6 +2372,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -2408,6 +2411,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -2433,6 +2439,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -4360,3 +4369,24 @@ def test_compute_fitness_reports_lead_hp():
 
 def test_compute_fitness_lead_hp_zero_when_party_empty():
     assert PokemonAgent.compute_fitness(_fitness_stub([]))["lead_hp"] == 0
+
+
+# ===================================================================
+# Task 2: Stop Conditions
+# ===================================================================
+
+
+def test_stop_condition_met_on_target_map():
+    ow = OverworldState(map_id=51)
+    assert PokemonAgent._stop_condition_met(ow, stop_on_map=51)
+    assert not PokemonAgent._stop_condition_met(ow, stop_on_map=2)
+
+
+def test_stop_condition_counts_badge_bits():
+    ow = OverworldState(badges=0b101)  # two badges set
+    assert PokemonAgent._stop_condition_met(ow, stop_on_badge=2)
+    assert not PokemonAgent._stop_condition_met(ow, stop_on_badge=3)
+
+
+def test_stop_condition_defaults_never_fire():
+    assert not PokemonAgent._stop_condition_met(OverworldState(map_id=51, badges=7))

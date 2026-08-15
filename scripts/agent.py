@@ -1847,6 +1847,15 @@ class PokemonAgent:
         }
 
     @staticmethod
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None) -> bool:
+        """True once the overworld state satisfies a --stop-on-* condition."""
+        if stop_on_map is not None and ow.map_id == stop_on_map:
+            return True
+        if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
+            return True
+        return False
+
+    @staticmethod
     def _turns_remaining(loop_turns: int, max_turns: int) -> bool:
         """Negative max_turns = unlimited (the long-loop mode); 0 keeps its
         established meaning of zero loop iterations (bookkeeping-only runs)."""
@@ -1922,6 +1931,9 @@ class PokemonAgent:
         save_state_on_map=None,
         save_state_on_trainer=None,
         save_state_every=None,
+        stop_on_map=None,
+        stop_on_badge=None,
+        stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
     ):
@@ -2137,6 +2149,16 @@ class PokemonAgent:
                             self.pyboy.save_state(f)
                         self._map_state_saved = True
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
+                if stop_on_map is not None or stop_on_badge is not None:
+                    ow = self.memory.read_overworld_state()
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge):
+                        if stop_state:
+                            with open(stop_state, "wb") as f:
+                                self.pyboy.save_state(f)
+                            self.log(f"STOP | condition met at turn {self.turn_count} -> {stop_state}")
+                        else:
+                            self.log(f"STOP | condition met at turn {self.turn_count}")
+                        break
                 self.run_overworld()
                 self.turn_count += 1
 
@@ -2377,6 +2399,23 @@ def main():
         help='Overwrite a checkpoint state every N turns, as "N:PATH" (for segmented resume)',
     )
     parser.add_argument(
+        "--stop-on-map",
+        type=int,
+        default=None,
+        help="End the run once this map id is reached (state dumped to --stop-state first)",
+    )
+    parser.add_argument(
+        "--stop-on-badge",
+        type=int,
+        default=None,
+        help="End the run once the badge count reaches N",
+    )
+    parser.add_argument(
+        "--stop-state",
+        default=None,
+        help="Save-state path written when a --stop-on-* condition ends the run",
+    )
+    parser.add_argument(
         "--worldmap-file",
         default=None,
         help="Load/save the accumulated WorldMap (learned geometry) here, so a reset run keeps it",
@@ -2483,6 +2522,9 @@ def main():
             save_state_on_map=args.save_state_on_map,
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
+            stop_on_map=args.stop_on_map,
+            stop_on_badge=args.stop_on_badge,
+            stop_state=args.stop_state,
             fitness_every=args.fitness_every,
             fitness_path=args.output_json,
         )
