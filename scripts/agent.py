@@ -714,6 +714,11 @@ class PokemonAgent:
         self._advice_offsets: dict[str, int] = {}
         self._advice_seen: set[str] = set()
         self._advice_ticks = 0
+        # Sideloop spawning: every sideloop_every turns, snapshot the live state and race AlphaEvolve
+        # variants in the background (sideloop.py); the winning genome comes back through the advice inbox.
+        self.sideloop_every = 0  # turns between live-snapshot sideloops (0 = off)
+        self.sideloop_proc = None  # at most one AlphaEvolve subloop in flight
+        self.sideloop_popen = subprocess.Popen  # injectable for tests
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -946,6 +951,45 @@ class PokemonAgent:
             return
         for item in items:
             self._apply_advice(item)
+
+    def _tick_sideloop(self) -> None:
+        """The while loop as a harness: spawn an AlphaEvolve subloop from the live state.
+
+        Every sideloop_every turns, snapshot the running game and race decision variants
+        from it in the background (sideloop.py); the winner comes back through the advice
+        inbox as a genome_patch. One in flight max; a spawn that fails must not hurt the run.
+        """
+        if not self.sideloop_every or not self.advice_inbox_dir:
+            return
+        if self.sideloop_proc is not None:
+            if self.sideloop_proc.poll() is None:
+                return
+            self.log(f"SIDELOOP | finished rc={self.sideloop_proc.returncode}")
+            self.sideloop_proc = None
+        if self.turn_count == 0 or self.turn_count % self.sideloop_every:
+            return
+        try:
+            work_dir = Path(tempfile.mkdtemp(prefix="sideloop-"))
+            state_path = work_dir / "live.state"
+            with open(state_path, "wb") as f:
+                self.pyboy.save_state(f)
+            cmd = [
+                sys.executable,
+                str(SCRIPT_DIR / "sideloop.py"),
+                self.rom_path,
+                "--state",
+                str(state_path),
+                "--genome-json",
+                json.dumps(self.evolve_params),
+                "--work-dir",
+                str(work_dir),
+                "--advice-out",
+                str(Path(self.advice_inbox_dir) / "sideloop.jsonl"),
+            ]
+            self.sideloop_proc = self.sideloop_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.log(f"SIDELOOP | spawned at turn {self.turn_count} -> {work_dir}")
+        except Exception as exc:  # noqa: BLE001 — a sideloop that cannot start must not hurt the run
+            self.log(f"SIDELOOP | spawn failed: {exc}")
 
     def _apply_advice(self, item: dict) -> None:
         """Apply one advice dict: dedupe by id, drop expired, dispatch on type."""
@@ -2168,6 +2212,8 @@ class PokemonAgent:
 
             self._tick_advice()
 
+            self._tick_sideloop()
+
             self.collector.tick(self.turn_count)
 
             if self.turn_count % 10 == 0:
@@ -2450,6 +2496,12 @@ def main():
         default=50,
         help="Poll the advice inbox every N loop turns (default: 50)",
     )
+    parser.add_argument(
+        "--sideloop-every",
+        type=int,
+        default=0,
+        help="Spawn an AlphaEvolve sideloop from the live state every N turns (0 = off; needs --advice-inbox)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2481,6 +2533,7 @@ def main():
     agent.in_run_heal_streak = args.in_run_heal_streak
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.sideloop_every = max(0, args.sideloop_every)
 
     # One run identity for the whole session: recorder folder, live tile, and
     # every game event's run_id/event_id all derive from it.

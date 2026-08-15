@@ -4390,3 +4390,63 @@ def test_stop_condition_counts_badge_bits():
 
 def test_stop_condition_defaults_never_fire():
     assert not PokemonAgent._stop_condition_met(OverworldState(map_id=51, badges=7))
+
+
+# ===================================================================
+# Task 9: Sideloop (--sideloop-every)
+# ===================================================================
+
+
+def _sideloop_stub(turn, every=100, inbox="inbox", proc=None):
+    calls = []
+
+    def fake_popen(cmd, stdout=None, stderr=None):
+        calls.append(cmd)
+        return SimpleNamespace(poll=lambda: None, returncode=None)
+
+    stub = SimpleNamespace(
+        turn_count=turn,
+        sideloop_every=every,
+        sideloop_proc=proc,
+        sideloop_popen=fake_popen,
+        advice_inbox_dir=inbox,
+        rom_path="rom.gb",
+        evolve_params={"door_cooldown": 5},
+        pyboy=SimpleNamespace(save_state=lambda f: f.write(b"state")),
+        log=lambda msg: None,
+    )
+    return stub, calls
+
+
+def test_tick_sideloop_spawns_on_interval(tmp_path):
+    stub, calls = _sideloop_stub(turn=200)
+    PokemonAgent._tick_sideloop(stub)
+    assert len(calls) == 1
+    cmd = " ".join(calls[0])
+    assert "sideloop.py" in cmd
+    assert "--advice-out" in cmd
+    assert stub.sideloop_proc is not None
+
+
+def test_tick_sideloop_skips_off_interval_and_turn_zero():
+    for turn in (0, 150):
+        stub, calls = _sideloop_stub(turn=turn)
+        PokemonAgent._tick_sideloop(stub)
+        assert calls == []
+
+
+def test_tick_sideloop_one_in_flight_max():
+    running = SimpleNamespace(poll=lambda: None, returncode=None)
+    stub, calls = _sideloop_stub(turn=200, proc=running)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []
+    assert stub.sideloop_proc is running
+
+
+def test_tick_sideloop_requires_inbox_and_enable():
+    stub, calls = _sideloop_stub(turn=200, inbox=None)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []
+    stub, calls = _sideloop_stub(turn=200, every=0)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []

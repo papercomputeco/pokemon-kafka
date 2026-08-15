@@ -468,6 +468,12 @@ Artifacts land in `data/relay/<run-id>/`: per-lane `agent.log` + `fitness.json`,
 and `report.json`. The `pewter_to_badge` segment also captures `batons/pre_brock.state` for the
 autotune brock loop.
 
+The while loop can also act as its own harness: with `--sideloop-every 500 --advice-inbox
+data/advice`, the live agent snapshots its state every 500 turns and spawns
+`scripts/sideloop.py` in the background — an AlphaEvolve subloop that races decision variants
+from that snapshot, scores them with `evolve.score`, and feeds the winning genome back through
+the advice inbox as a `genome_patch`. The game never stops; it just gets better mid-run.
+
 ## FLE-Style Backtracking
 
 Inspired by the [Factorio Learning Environment](https://arxiv.org/abs/2503.09617)'s `BacktrackingAgent`, the agent snapshots game state at key moments (map changes, periodic intervals) and restores when stuck. This directly addresses navigation dead-ends like Route 1's y=28 blocker — instead of wasting turns in a loop, the agent reverts to a known-good state and tries an alternate path.
