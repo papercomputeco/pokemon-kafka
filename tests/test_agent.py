@@ -8,6 +8,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 # Import the agent module — pyboy is available in this env via deps
@@ -4320,3 +4321,42 @@ def test_run_epilogue_notes_in_flight_heal(tmp_path):
     with patch.object(agent, "Image", None):
         ag.run(max_turns=0)
     assert any("still racing" in e for e in ag.events)
+
+
+# ===================================================================
+# Task 1: lead_hp in fitness dict
+# ===================================================================
+
+
+def _fitness_stub(party_hp):
+    """Bare attribute bag standing in for a PokemonAgent inside compute_fitness."""
+    mem = SimpleNamespace(
+        read_overworld_state=lambda: OverworldState(
+            map_id=2, x=1, y=1, badges=1, party_count=len(party_hp), party_hp=party_hp
+        )
+    )
+    return SimpleNamespace(
+        memory=mem,
+        turn_count=10,
+        battles_won=1,
+        maps_visited={2},
+        events=[],
+        max_stuck_streak=0,
+        backtrack=SimpleNamespace(total_restores=0),
+        encounter_log=[],
+        level_ups=0,
+        evolution_log=[],
+        brock_turns=None,
+        brock_won=None,
+        brock_lead_species=None,
+        brock_lead_level=None,
+    )
+
+
+def test_compute_fitness_reports_lead_hp():
+    fitness = PokemonAgent.compute_fitness(_fitness_stub([17, 30]))
+    assert fitness["lead_hp"] == 17
+
+
+def test_compute_fitness_lead_hp_zero_when_party_empty():
+    assert PokemonAgent.compute_fitness(_fitness_stub([]))["lead_hp"] == 0

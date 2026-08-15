@@ -1832,6 +1832,7 @@ class PokemonAgent:
             "final_y": final.y,
             "badges": final.badges,
             "party_size": final.party_count,
+            "lead_hp": (final.party_hp or [0])[0],
             "stuck_count": len([e for e in self.events if "STUCK" in e]),
             "max_stuck_streak": self.max_stuck_streak,
             "backtrack_restores": self.backtrack.total_restores,
