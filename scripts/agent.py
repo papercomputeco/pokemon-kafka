@@ -801,6 +801,12 @@ class PokemonAgent:
             self.evolve_params.get("block_expiry_observations", self.world.block_expiry_observations)
         )
 
+        # Consecutive swallowed movement presses tolerated before we clear the text box eating
+        # them (see run_overworld). Evolvable: too eager wastes an A during a warp settle, too
+        # patient leaves the agent walking into a sign box for tens of turns.
+        self._swallowed_input_tolerance = int(self.evolve_params.get("swallowed_input_tolerance", 2))
+        self._swallowed_presses = 0
+
         # Rebuild navigator and battle strategy with evolved params
         if self.evolve_params:
             self.navigator = Navigator(
@@ -1581,6 +1587,27 @@ class PokemonAgent:
                 self.world.block(*attempted)  # turned into it twice → a real wall
         self._last_fail_tile = attempted  # None on a move or an ignored input, resetting the streak
 
+        # The other half of that test: the press moved us nowhere AND turned us nowhere, so it was
+        # swallowed outright. An open text box eats movement input — the sign reader opens one with
+        # A and dismisses it with a single A, and when that press doesn't close it the box stays up.
+        # wd730's flags clear as soon as the line prints, so ``text_box_active`` reads False and
+        # nothing else notices; the agent then walks into the box forever (run 20260811-163219-3331:
+        # 88 turns pressing "right" at (4,23) into the forest's "No stealing of POKeMON" sign, five
+        # such wedges in 700 turns). Wall learning can't save us here — it needs the sprite to turn,
+        # which a swallowed press never does. So count consecutive swallowed presses and clear the
+        # box with A once we're past the tolerance (a warp settle legitimately eats one or two).
+        if (
+            prev is not None
+            and last_act in ("up", "down", "left", "right")
+            and state.map_id == prev.map_id
+            and state.x == prev.x
+            and state.y == prev.y
+            and attempted is None  # facing never turned to the pressed direction
+        ):
+            self._swallowed_presses += 1
+        else:
+            self._swallowed_presses = 0
+
         self.update_overworld_progress(state)
         try:
             self.collision_map.update(self.pyboy)
@@ -1737,6 +1764,12 @@ class PokemonAgent:
                     self.take_screenshot("oak_after_wait", force=True)
 
         action = self.choose_overworld_action(state)
+
+        # Our movement is being eaten by a text box: clear it before planning anything else,
+        # otherwise every direction we pick is discarded and the agent never leaves this tile.
+        if self._swallowed_presses >= self._swallowed_input_tolerance:
+            action = "a"
+            self._swallowed_presses = 0
 
         if action == "wait":
             self.controller.wait(30)

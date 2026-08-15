@@ -1952,6 +1952,53 @@ class TestRunOverworld:
         ag.controller.wait.assert_called_once_with(24)
         assert ag.last_overworld_action == "a"
 
+    # --- swallowed movement input (run 20260811-163219-3331) --------------------
+    # The sign reader opens a text box with A and dismisses it with a single A. When that
+    # press does not close it, the box eats every later movement press: position frozen and
+    # facing frozen too (a real wall at least turns the sprite). wd730's flags clear as soon
+    # as the line prints, so text_box_active reads False and nothing notices — the agent
+    # pressed "right" into the forest's "No stealing of POKeMON" sign for 88 turns, five such
+    # wedges in one 700-turn run. Consecutive swallowed presses now clear the box with A.
+
+    def _swallow_setup(self, ag, facing="down"):
+        """Freeze the agent: every move leaves position and facing untouched."""
+        state = OverworldState(map_id=51, x=4, y=23)
+        ag.memory.read_overworld_state = MagicMock(return_value=state)
+        ag.memory.read_player_facing_name = MagicMock(return_value=facing)
+        ag.choose_overworld_action = MagicMock(return_value="right")
+        ag.controller = MagicMock()
+        return state
+
+    def test_swallowed_presses_clear_the_text_box_with_a(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag._swallowed_input_tolerance = 2
+        self._swallow_setup(ag)
+        for _ in range(4):
+            ag.run_overworld()
+        # Without the fix every turn is controller.move("right") and the agent never escapes.
+        assert ag.controller.press.call_args_list.count(call("a", hold_frames=20, release_frames=12)) >= 1
+
+    def test_wall_bump_still_blocks_and_does_not_press_a(self, tmp_path):
+        """A real wall turns the sprite (facing == pressed dir): that must stay a hard-block,
+        not be mistaken for a swallowed press."""
+        ag = _make_agent(tmp_path)
+        ag._swallowed_input_tolerance = 2
+        self._swallow_setup(ag, facing="right")  # the press DID turn us -> a real wall
+        for _ in range(4):
+            ag.run_overworld()
+        assert ag.world.walkable(51, 5, 23) == 0  # learned as a wall
+        assert call("a", hold_frames=20, release_frames=12) not in ag.controller.press.call_args_list
+
+    def test_a_successful_move_resets_the_swallowed_streak(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag._swallowed_input_tolerance = 2
+        self._swallow_setup(ag)
+        ag.run_overworld()  # one swallowed press
+        moved = OverworldState(map_id=51, x=5, y=23)
+        ag.memory.read_overworld_state = MagicMock(return_value=moved)
+        ag.run_overworld()  # we moved: streak resets
+        assert ag._swallowed_presses == 0
+
     def test_logs_every_100_steps(self, tmp_path):
         ag = _make_agent(tmp_path)
         state = OverworldState(map_id=12, x=5, y=10, badges=1, party_count=2)
@@ -3450,6 +3497,21 @@ class TestEvolveParams:
             assert ag._evolve_door_cooldown == 8
             assert ag.navigator.stuck_threshold == 8
             assert ag.navigator.skip_distance == 3
+        finally:
+            if saved is not None:
+                os.environ["EVOLVE_PARAMS"] = saved
+
+    def test_swallowed_input_tolerance_flows_from_evolve_params(self, tmp_path):
+        """swallowed_input_tolerance is evolvable, so the healer can tune how fast a
+        movement-eating text box is cleared."""
+        ag = _make_agent_with_evolve(tmp_path, evolve_params={"swallowed_input_tolerance": 5})
+        assert ag._swallowed_input_tolerance == 5
+
+    def test_swallowed_input_tolerance_defaults_without_evolve_params(self, tmp_path):
+        saved = os.environ.pop("EVOLVE_PARAMS", None)
+        try:
+            ag = _make_agent_with_evolve(tmp_path)
+            assert ag._swallowed_input_tolerance == 2
         finally:
             if saved is not None:
                 os.environ["EVOLVE_PARAMS"] = saved

@@ -38,6 +38,7 @@ DEFAULT_PARAMS = {
     "unknown_move_score": 10.0,
     "status_move_score": 1.0,
     "block_expiry_observations": 25,
+    "swallowed_input_tolerance": 2,
 }
 
 # Bounds for each evolvable parameter: (min, max, type) or tuple of valid values for enums
@@ -55,6 +56,7 @@ PARAM_BOUNDS = {
     "unknown_move_score": (1.0, 30.0, float),
     "status_move_score": (0.0, 10.0, float),
     "block_expiry_observations": (5, 200, int),
+    "swallowed_input_tolerance": (1, 20, int),
 }
 
 
