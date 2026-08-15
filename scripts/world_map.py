@@ -268,42 +268,62 @@ class WorldMap:
                 return True  # unexplored — could be open ground or the exit
             return v == 0 and f[1] == edge_y  # a boundary "wall" may be a warp
 
+        start = (px, py)
+
+        def sweep(candidate) -> str | None:
+            """First step toward the nearest ``candidate`` tile, preferring ones whose press
+            lands past the current row. Returns None when none is reachable."""
+            came: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+            q = deque([start])
+            nodes = 0
+            target = None
+            backup = None  # nearest candidate that doesn't gain ground, kept as plan B
+            while q and nodes < max_nodes:
+                cur = q.popleft()
+                nodes += 1
+                cx, cy = cur
+                if cur != start and candidate(cx, cy):
+                    if (cy + sign - py) * sign > 0:  # its press lands past our current row
+                        target = cur
+                        break
+                    if backup is None:
+                        backup = cur
+                for _name, dx, dy in _DIRS:
+                    nb = (cx + dx, cy + dy)
+                    # Sweep only over ground *known* walkable (and really on the map):
+                    # unknown tiles are probe targets (the forward press), never corridors.
+                    # Optimistic traversal let the BFS wrap around a real border wall through
+                    # the unstamped void and "gain ground" in fantasy space (the Pallet<->
+                    # Route 1 flap), and phantom stamps beyond recorded bounds are just as fake.
+                    if nb in came or m.get(nb) != 1 or not self._passable(map_id, m, nb[0], nb[1]):
+                        continue
+                    came[nb] = cur
+                    q.append(nb)
+            step = self._first_step(came, start, target if target is not None else backup)
+            return step and self._dir(px, py, step)
+
         if pressable(px, py):
             return fwd  # the press right here may be the exit — try it before sweeping
-        start = (px, py)
-        came: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
-        q = deque([start])
-        nodes = 0
-        target = None
-        backup = None  # nearest candidate that doesn't gain ground, kept as plan B
-        while q and nodes < max_nodes:
-            cur = q.popleft()
-            nodes += 1
-            cx, cy = cur
-            if cur != start and pressable(cx, cy):
-                if (cy + sign - py) * sign > 0:  # its press lands past our current row
-                    target = cur
-                    break
-                if backup is None:
-                    backup = cur
-            for _name, dx, dy in _DIRS:
-                nb = (cx + dx, cy + dy)
-                # Sweep only over ground *known* walkable (and really on the map): unknown
-                # tiles are probe targets (the forward press), never corridors. Optimistic
-                # traversal let the BFS wrap around a real border wall through the unstamped
-                # void and "gain ground" in fantasy space (the Pallet<->Route 1 flap), and
-                # legacy phantom stamps beyond the recorded bounds are just as fake.
-                if nb in came or m.get(nb) != 1 or not self._passable(map_id, m, nb[0], nb[1]):
-                    continue
-                came[nb] = cur
-                q.append(nb)
-        step = self._first_step(came, start, target if target is not None else backup)
-        d = step and self._dir(px, py, step)
+        d = sweep(pressable)
         if d:
             return d
-        # No pressable candidate reachable: map the frontier instead of mashing into a proven
-        # wall; nudge forward only as the very last resort (nothing else is left to learn).
-        return self.explore_step(map_id, px, py, max_nodes=max_nodes) or fwd
+        # No pressable candidate reachable: map the frontier instead of mashing into a wall.
+        d = self.explore_step(map_id, px, py, max_nodes=max_nodes)
+        if d:
+            return d
+
+        # Fully mapped, every probe retired, and still on the map: the way forward must be a
+        # door warp in an *interior* wall — building doors sit rows away from the sweep's edge
+        # row (Route 2's forest-gate door is above the (3,43) mat, mid-map). Probe untried
+        # walls: each press either warps through a door or hard-blocks after two fails and
+        # retires the tile, so this tier provably shrinks to nothing instead of looping.
+        def untried_wall(cx: int, cy: int) -> bool:
+            f = (cx, cy + sign)
+            return f not in blocked and m.get(f) == 0
+
+        if untried_wall(px, py):
+            return fwd
+        return sweep(untried_wall) or fwd
 
     def known_reachable(self, map_id: int, px: int, py: int, tx: int, ty: int) -> bool:
         """Can ``(tx, ty)`` be reached from ``(px, py)`` over tiles *known* to be walkable?

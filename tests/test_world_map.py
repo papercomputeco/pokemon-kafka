@@ -708,6 +708,34 @@ def _route2_worldmap() -> WorldMap:
     return wm
 
 
+def test_cross_step_explores_the_frontier_before_probing_doors():
+    # Every northern probe is retired but unmapped ground remains: the sweep hands off to
+    # frontier exploration rather than the door-probe tier or a blind forward nudge.
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 5):
+        m[(x, 1)] = 0
+        wm.block(0, x, 1)  # the whole learned north row: pressed twice, failed, retired
+        m[(x, 2)] = 1
+        m[(x, 3)] = 1
+    d = wm.explore_step(0, 2, 2)
+    assert d is not None
+    assert wm.cross_step(0, 2, 2, "north") == d  # delegated to the frontier walk
+
+
+def test_cross_step_probes_interior_walls_for_doors_when_contained():
+    # Route 2's south section is a closed room: the only way forward is the forest-gate door
+    # — an *interior* wall tile above the (3,43) mat, rows below the sweep's edge row. Once
+    # every boundary probe is retired and no frontier remains, the sweep must fall back to
+    # testing untried walls as potential door warps instead of mashing forward forever
+    # (observed: 2,182 consecutive `up` presses into the hard-blocked (4,61)).
+    wm = _route2_worldmap()
+    wm.bounds[13] = (20, 72)
+    wm.block(13, 4, 61)  # the wall it mashed — pressed twice, failed, retired
+    assert wm.cross_step(13, 4, 62, "north") != "up"  # never back into the retired tile
+    assert wm.cross_step(13, 3, 44, "north") == "up"  # onto the mat, probing the door
+
+
 def test_bounds_stop_the_sweep_walking_off_the_trailing_edge():
     # With the real 20x72 bounds known, the phantom rows below y=71 are off-map: neither the
     # sweep nor the explore fallback may answer "down" from the south boundary row.
