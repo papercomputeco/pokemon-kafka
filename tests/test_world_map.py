@@ -123,9 +123,11 @@ def test_cross_step_presses_off_the_known_edge_row():
 
 def test_cross_step_sweeps_to_an_open_column_at_a_wall():
     wm = WorldMap()
+    wm.observe(0, 5, 5, _full(1))  # the observed window around the player, as every turn stamps
     wm.block(0, 5, 4)  # north of the player's column is a (learned) wall
     wm.block(0, 4, 4)  # and the column to the left
-    # north of x=6 (i.e. (6,4)) is unknown -> open, so sweep right toward it
+    # the sweep must route around the blocks toward the window's unknown frontier; the right
+    # column is a step closer than looping around the left block, so head right
     assert wm.cross_step(0, 5, 5, "north") == "right"
 
 
@@ -560,3 +562,89 @@ def test_cross_step_still_presses_into_a_boundary_warp():
         m[(x, 0)] = 0
         m[(x, 1)] = 1
     assert wm.cross_step(51, 2, 1, "north") == "up"
+
+
+# --- Route 1 south-entry flap (uncovered by the map 37 fix) -----------------------
+# With Red's house passable, fresh runs reached Route 1 (map 12) — and ping-ponged between
+# its south edge and Pallet Town 1,019 times in a 3,000-turn run. With the whole map known,
+# the only real exit north is the x=10/11 passage at row 0; but a BFS that traverses unknown
+# tiles optimistically wraps around the *known* west border wall through the unstamped void,
+# finds a "gains ground" candidate in fantasy space a dozen steps away (vs ~40 through the
+# real corridor), and the path's first step is `down` — off the south edge. The geometry
+# below is the flapping agent's own persisted worldmap.
+
+
+def _route1_worldmap() -> WorldMap:
+    rows = {
+        0: "#.....#..#.....#.",
+        1: "#######..#######.",
+        2: "#..............#.",
+        3: "#..............#.",
+        4: "#.....#........#.",
+        5: "###########....#.",
+        6: "#.....#........#.",
+        7: "#.....#........#.",
+        8: "#.....#........#.",
+        9: "#######........#.",
+        10: "#..............#.",
+        11: "#..............#.",
+        12: "#..............#.",
+        13: "###########....#.",
+        14: "#..............#.",
+        15: "#..............#.",
+        16: "#..............#.",
+        17: "#..............#.",
+        18: "#..............#.",
+        19: "##.###.#########.",
+        20: "#..............#.",
+        21: "#..............#.",
+        22: "#..............#.",
+        23: "#########....###?",
+        24: "#..............#?",
+        25: "#..............#?",
+        26: "#..............#?",
+        27: "###...##########?",
+        28: "#..............#?",
+        29: "#..............#?",
+        30: "#..............#?",
+        31: "#..............#?",
+        32: "#######..#######?",
+        33: "#.....#..#.....#?",
+        34: "#.....#..#.....#?",
+        35: "#.....#..#.....#?",
+        36: "???...#..#....???",
+        37: "???####..#####???",
+        38: "???...........???",
+        39: "???##....####.???",
+    }
+    wm = WorldMap()
+    m = wm.cells.setdefault(12, {})
+    for y, row in rows.items():
+        for i, ch in enumerate(row):
+            if ch != "?":
+                m[(3 + i, y)] = 1 if ch == "." else 0
+    return wm
+
+
+def test_cross_step_takes_a_sideways_probe_when_nothing_gains_ground():
+    # Whole known boundary tried and retired, and the only remaining probe (an unknown
+    # forward tile) sits level with the player: no candidate gains ground, so the sweep
+    # falls back to the nearest probe anywhere rather than giving up.
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 5):
+        m[(x, 0)] = 0
+        wm.block(0, x, 0)  # every boundary wall pressed twice and failed — retired
+        m[(x, 1)] = 1
+    for x in range(0, 6):
+        m[(x, 2)] = 1  # row 2 reaches one column further east; (5,1) is unknown
+    d = wm.cross_step(0, 2, 1, "north")
+    assert d in ("down", "right")  # route toward the (5,2) probe under the unknown (5,1)
+
+
+def test_cross_step_does_not_chase_candidates_through_the_unknown_ocean():
+    # Entering from Pallet at the south corridor, the sweep must head north through known
+    # ground, never south off the edge toward a phantom route around the border wall.
+    wm = _route1_worldmap()
+    assert wm.cross_step(12, 10, 35, "north") == "up"
+    assert wm.cross_step(12, 11, 35, "north") == "up"

@@ -271,7 +271,11 @@ class WorldMap:
                     backup = cur
             for _name, dx, dy in _DIRS:
                 nb = (cx + dx, cy + dy)
-                if nb in came or not self._passable(map_id, m, nb[0], nb[1]):
+                # Sweep only over ground *known* walkable: unknown tiles are probe targets
+                # (the forward press), never corridors. Optimistic traversal let the BFS wrap
+                # around a real border wall through the unstamped void and "gain ground" in
+                # fantasy space — walking off the wrong edge (the Pallet<->Route 1 flap).
+                if nb in came or nb in blocked or m.get(nb) != 1:
                     continue
                 came[nb] = cur
                 q.append(nb)
