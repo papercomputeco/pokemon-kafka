@@ -43,9 +43,13 @@ services:
       KAFKA_GROUP_ID: alerts-consumer
       MEMORY_DIR: /memory
       ADVICE_INBOX_DIR: /memory/inbox
+      # Healer race history: the decide step defers genome patches while the
+      # healer's last race is fresh (see consumer.healer_recently_raced).
+      HEALER_STATE_FILE: /host-data/healer_state.json
     volumes:
       - ./pokedex/memory:/memory
       - ./scripts/memory_writer.py:/app/memory_writer.py
+      - ./data:/host-data:ro
 
   game-consumer:
     build: docker/game-consumer
