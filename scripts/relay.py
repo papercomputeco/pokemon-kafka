@@ -385,5 +385,5 @@ def _write_report(run_dir, report):
     (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

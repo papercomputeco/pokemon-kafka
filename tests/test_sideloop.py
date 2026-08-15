@@ -1,6 +1,7 @@
 import json
 
-from sideloop import advice_line, pick_by_score, run_sideloop, sideloop_segment
+import sideloop
+from sideloop import advice_line, main, pick_by_score, run_sideloop, sideloop_segment
 
 
 class FakeProc:
@@ -171,3 +172,58 @@ def test_run_sideloop_returns_none_without_lanes_finishing(tmp_path):
     )
     assert winner is None
     assert not advice_out.exists()
+
+
+def test_main_returns_0_and_forwards_args_when_winner_found(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_sideloop(rom, state, genome, work_dir, advice_out, horizon=800, parallel=4, timeout=600.0, **_kw):
+        captured["args"] = (rom, state, genome, work_dir, advice_out, horizon, parallel, timeout)
+        return {"label": "winner"}
+
+    monkeypatch.setattr(sideloop, "run_sideloop", fake_run_sideloop)
+    rc = main(
+        [
+            "rom.gb",
+            "--state",
+            str(tmp_path / "live.state"),
+            "--genome-json",
+            '{"door_cooldown": 5}',
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--advice-out",
+            str(tmp_path / "advice.jsonl"),
+            "--horizon",
+            "500",
+            "--parallel",
+            "2",
+            "--timeout",
+            "60",
+        ]
+    )
+    assert rc == 0
+    rom, state, genome, work_dir, advice_out, horizon, parallel, timeout = captured["args"]
+    assert rom == "rom.gb"
+    assert state == str(tmp_path / "live.state")
+    assert genome == {"door_cooldown": 5}
+    assert work_dir == str(tmp_path / "work")
+    assert advice_out == str(tmp_path / "advice.jsonl")
+    assert horizon == 500
+    assert parallel == 2
+    assert timeout == 60.0
+
+
+def test_main_returns_1_when_no_winner(tmp_path, monkeypatch):
+    monkeypatch.setattr(sideloop, "run_sideloop", lambda *a, **k: None)
+    rc = main(
+        [
+            "rom.gb",
+            "--state",
+            str(tmp_path / "live.state"),
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--advice-out",
+            str(tmp_path / "advice.jsonl"),
+        ]
+    )
+    assert rc == 1

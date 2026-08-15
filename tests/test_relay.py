@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 
+import relay
 from relay import (
     BASE_GENOME,
     SEGMENTS,
     Baton,
     Segment,
+    _kill_lane,
+    _select_segments,
     build_agent_cmd,
     main,
     pick_winner,
@@ -342,3 +345,119 @@ def test_main_rejects_unknown_segment(tmp_path, capsys):
     rc = main(["rom.gb", "--dry-run", "--run-dir", str(tmp_path / "r"), "--segments", "nope"])
     assert rc == 1
     assert "unknown segment" in capsys.readouterr().out.lower()
+
+
+def test_select_segments_empty_spec_returns_full_list():
+    assert _select_segments("") == list(SEGMENTS)
+
+
+class WaitRaisesProc:
+    """No pid attribute (like the test doubles) and wait() raises after being reaped elsewhere."""
+
+    def __init__(self):
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        raise RuntimeError("already reaped")
+
+
+def test_kill_lane_swallows_wait_errors():
+    proc = WaitRaisesProc()
+    _kill_lane(proc)  # must not raise
+    assert proc.killed
+
+
+def test_main_runs_segment_end_to_end_success(tmp_path, monkeypatch):
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"rom")
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"seed")
+    run_dir = tmp_path / "run"
+
+    def fake_run_segment(rom_arg, seg, baton, seg_dir, run_dir_arg, parallel=6, timeout=1200.0, grace=90.0, **_kw):
+        vdir = seg_dir / "winner"
+        vdir.mkdir(parents=True, exist_ok=True)
+        (vdir / "stop.state").write_bytes(b"state-bytes")
+        (vdir / "world.map").write_bytes(b"map-bytes")
+        winner = {
+            "label": "winner",
+            "vdir": vdir,
+            "genome": {"door_cooldown": 5},
+            "success": True,
+            "fitness": {"lead_hp": 20, "turns": 300, "final_map_id": 51},
+        }
+        results = [{"label": "winner", "success": True, "killed": False, "fitness": winner["fitness"]}]
+        return winner, results
+
+    monkeypatch.setattr(relay, "run_segment", fake_run_segment)
+    rc = main([str(rom), "--run-dir", str(run_dir), "--segments", "route1_to_forest", "--seed-state", str(seed)])
+    assert rc == 0
+    assert (run_dir / "report.json").exists()
+    report = json.loads((run_dir / "report.json").read_text())
+    assert report["segments"][0]["winner"] == "winner"
+    assert (run_dir / "batons" / "route1_to_forest.state").read_bytes() == b"state-bytes"
+    assert (run_dir / "batons" / "route1_to_forest.worldmap").read_bytes() == b"map-bytes"
+
+
+def test_main_retries_and_reports_failure_after_two_attempts(tmp_path, monkeypatch):
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"rom")
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"seed")
+    run_dir = tmp_path / "run"
+    calls = []
+
+    def fake_run_segment_fail(rom_arg, seg, baton, seg_dir, run_dir_arg, parallel=6, timeout=1200.0, grace=90.0, **_kw):
+        calls.append((seg, seg_dir))
+        return None, [{"label": "a", "success": False, "killed": False, "fitness": {}}]
+
+    monkeypatch.setattr(relay, "run_segment", fake_run_segment_fail)
+    rc = main([str(rom), "--run-dir", str(run_dir), "--segments", "route1_to_forest", "--seed-state", str(seed)])
+    assert rc == 1
+    assert (run_dir / "report.json").exists()
+    report = json.loads((run_dir / "report.json").read_text())
+    assert report["segments"][0]["winner"] is None
+    assert len(calls) == 2
+    first_seg, first_dir = calls[0]
+    second_seg, second_dir = calls[1]
+    assert second_seg.max_turns == first_seg.max_turns * 2
+    assert second_dir.name == "route1_to_forest_retry"
+
+
+def test_main_missing_rom_returns_1(tmp_path, capsys):
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"seed")
+    rc = main(
+        [
+            str(tmp_path / "nope.gb"),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--segments",
+            "route1_to_forest",
+            "--seed-state",
+            str(seed),
+        ]
+    )
+    assert rc == 1
+    assert "ROM not found" in capsys.readouterr().out
+
+
+def test_main_missing_seed_state_returns_1(tmp_path, capsys):
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"rom")
+    rc = main(
+        [
+            str(rom),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--segments",
+            "route1_to_forest",
+            "--seed-state",
+            str(tmp_path / "nope.state"),
+        ]
+    )
+    assert rc == 1
+    assert "seed state not found" in capsys.readouterr().out
