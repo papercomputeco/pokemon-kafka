@@ -1,6 +1,7 @@
 import json
+from pathlib import Path
 
-from relay import BASE_GENOME, SEGMENTS, Baton, Segment, build_agent_cmd
+from relay import BASE_GENOME, SEGMENTS, Baton, Segment, build_agent_cmd, pick_winner, segment_success
 
 
 def _baton(tmp_path, genome=None):
@@ -48,3 +49,37 @@ def test_build_agent_cmd_formats_run_dir_in_extra_args(tmp_path):
     seg = SEGMENTS[2]  # pewter_to_badge carries the pre_brock capture hook
     cmd, _ = build_agent_cmd("rom.gb", seg, seg.variants[0], tmp_path / "v", _baton(tmp_path), tmp_path)
     assert f"54:{tmp_path}/batons/pre_brock.state" in " ".join(cmd)
+
+
+def test_segment_success_by_map_and_badge():
+    map_seg = Segment("m", stop_on_map=51, stop_on_badge=None, max_turns=1, variants=())
+    badge_seg = Segment("b", stop_on_map=None, stop_on_badge=1, max_turns=1, variants=())
+    assert segment_success({"final_map_id": 51}, map_seg)
+    assert not segment_success({"final_map_id": 13}, map_seg)
+    assert segment_success({"badges": 1}, badge_seg)
+    assert not segment_success({"badges": 0}, badge_seg)
+    assert not segment_success({}, map_seg)
+
+
+def _result(label, success, lead_hp, turns):
+    return {
+        "label": label,
+        "vdir": Path(label),
+        "genome": {},
+        "success": success,
+        "fitness": {"lead_hp": lead_hp, "turns": turns},
+    }
+
+
+def test_pick_winner_prefers_healthiest_then_fastest():
+    results = [
+        _result("fast_but_hurt", True, lead_hp=2, turns=100),
+        _result("healthy_slow", True, lead_hp=25, turns=900),
+        _result("healthy_fast", True, lead_hp=25, turns=400),
+        _result("failed", False, lead_hp=30, turns=50),
+    ]
+    assert pick_winner(results)["label"] == "healthy_fast"
+
+
+def test_pick_winner_none_when_no_success():
+    assert pick_winner([_result("a", False, 10, 10)]) is None

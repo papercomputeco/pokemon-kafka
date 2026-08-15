@@ -119,3 +119,22 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir):
         cmd += ["--stop-on-badge", str(seg.stop_on_badge)]
     cmd += [a.format(run_dir=run_dir) for a in seg.extra_args]
     return cmd, {"EVOLVE_PARAMS": json.dumps(genome)}
+
+
+def segment_success(fitness, seg):
+    """Did this lane's final fitness satisfy the segment's stop condition?"""
+    if not fitness:
+        return False
+    if seg.stop_on_map is not None:
+        return fitness.get("final_map_id") == seg.stop_on_map
+    if seg.stop_on_badge is not None:
+        return bin(int(fitness.get("badges", 0))).count("1") >= seg.stop_on_badge
+    return False
+
+
+def pick_winner(results):
+    """Healthiest successful lane wins; ties go to the fewest turns."""
+    winners = [r for r in results if r["success"]]
+    if not winners:
+        return None
+    return max(winners, key=lambda r: (r["fitness"].get("lead_hp", 0), -r["fitness"].get("turns", 10**9)))
