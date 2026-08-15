@@ -14,6 +14,7 @@ import dataclasses
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -129,6 +130,18 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir):
     return cmd, {"EVOLVE_PARAMS": json.dumps(genome)}
 
 
+def _kill_lane(proc):
+    """Kill the lane's entire process group (uv run spawns python as a child; plain kill orphans it)."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError):
+        proc.kill()  # test fakes and already-dead lanes
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        pass
+
+
 def segment_success(fitness, seg):
     """Did this lane's final fitness satisfy the segment's stop condition?"""
     if not fitness:
@@ -195,7 +208,14 @@ def run_segment(
         cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir)
         genome = json.loads(extra_env["EVOLVE_PARAMS"])
         log = open(vdir / "agent.log", "wb")
-        proc = popen(cmd, env={**os.environ, **extra_env}, cwd=str(WORKSPACE), stdout=log, stderr=subprocess.STDOUT)
+        proc = popen(
+            cmd,
+            env={**os.environ, **extra_env},
+            cwd=str(WORKSPACE),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
         lanes[variant["label"]] = (proc, vdir, genome, log)
         print(f"[relay] {seg.name}/{variant['label']} launched")
 
@@ -210,12 +230,15 @@ def run_segment(
             log.close()
             fitness_file = vdir / "fitness.json"
             fitness = json.loads(fitness_file.read_text()) if fitness_file.exists() else {}
+            success = segment_success(fitness, seg)
+            if seg.stop_on_map is not None or seg.stop_on_badge is not None:
+                success = success and (vdir / "stop.state").exists()
             result = {
                 "label": label,
                 "vdir": vdir,
                 "genome": genome,
                 "fitness": fitness,
-                "success": segment_success(fitness, seg),
+                "success": success,
                 "returncode": proc.returncode,
             }
             results.append(result)
@@ -229,8 +252,7 @@ def run_segment(
         now = clock()
         if now > deadline or (first_success_at is not None and now > first_success_at + grace):
             for label, (proc, vdir, genome, log) in lanes.items():
-                proc.kill()
-                proc.wait(timeout=10)
+                _kill_lane(proc)
                 log.close()
                 results.append(
                     {"label": label, "vdir": vdir, "genome": genome, "fitness": {}, "success": False, "killed": True}
@@ -269,6 +291,12 @@ def main(argv=None):
     parser.add_argument("--seed-state", default=str(DEFAULT_SEED))
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Print the lane commands; launch nothing")
+    parser.add_argument(
+        "--max-turns-scale",
+        type=float,
+        default=1.0,
+        help="Multiply every segment's max_turns (e.g. 0.25 for a quick smoke)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -286,10 +314,11 @@ def main(argv=None):
 
     if args.dry_run:
         for seg in segments:
-            for variant in seg.variants[: args.parallel]:
-                vdir = run_dir / seg.name / variant["label"]
-                cmd, env = build_agent_cmd(args.rom, seg, variant, vdir, baton, run_dir)
-                print(f"# {seg.name}/{variant['label']}")
+            scaled_seg = dataclasses.replace(seg, max_turns=max(1, int(seg.max_turns * args.max_turns_scale)))
+            for variant in scaled_seg.variants[: args.parallel]:
+                vdir = run_dir / scaled_seg.name / variant["label"]
+                cmd, env = build_agent_cmd(args.rom, scaled_seg, variant, vdir, baton, run_dir)
+                print(f"# {scaled_seg.name}/{variant['label']}")
                 print(f"EVOLVE_PARAMS='{env['EVOLVE_PARAMS']}' \\\n  {' '.join(cmd)}")
             print(f"# ... then baton = {run_dir / 'batons' / (seg.name + '.state')}")
         return 0
@@ -301,11 +330,14 @@ def main(argv=None):
         print(f"[relay] seed state not found: {baton.state_path}")
         return 1
 
+    (run_dir / "batons").mkdir(parents=True, exist_ok=True)
+
     report = {"run_dir": str(run_dir), "segments": []}
     for seg in segments:
         winner = None
         attempts = []
-        for attempt, seg_variant in enumerate((seg, dataclasses.replace(seg, max_turns=seg.max_turns * 2))):
+        scaled = dataclasses.replace(seg, max_turns=max(1, int(seg.max_turns * args.max_turns_scale)))
+        for attempt, seg_variant in enumerate((scaled, dataclasses.replace(scaled, max_turns=scaled.max_turns * 2))):
             seg_dir = run_dir / (seg.name if attempt == 0 else f"{seg.name}_retry")
             print(f"[relay] === {seg.name} (attempt {attempt + 1}, max_turns={seg_variant.max_turns}) ===")
             winner, results = run_segment(

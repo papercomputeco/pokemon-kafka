@@ -462,6 +462,7 @@ the healthiest winner's state + WorldMap + genome become the next segment's bato
 uv run python scripts/relay.py --dry-run          # print every lane's command, launch nothing
 uv run python scripts/relay.py                    # full relay: all four segments
 uv run python scripts/relay.py --segments forest_to_pewter --seed-state data/relay/<run>/batons/route1_to_forest.state
+uv run python scripts/relay.py --max-turns-scale 0.25   # quick smoke: quarter-length segments
 ```
 
 Artifacts land in `data/relay/<run-id>/`: per-lane `agent.log` + `fitness.json`, `batons/*.state`,

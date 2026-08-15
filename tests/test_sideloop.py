@@ -124,7 +124,7 @@ def test_run_sideloop_writes_winner_advice(tmp_path):
     ]
     queue = list(procs)
 
-    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None):
+    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None, start_new_session=False):
         assert "--no-self-heal" in cmd and "--sideloop-every" not in " ".join(cmd)
         return queue.pop(0)
 
@@ -153,7 +153,7 @@ def test_run_sideloop_returns_none_without_lanes_finishing(tmp_path):
     clock = FakeClock()
     queue = [FakeProc(tmp_path / "work" / "lanes" / "base", polls_until_done=10**6)]
 
-    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None):
+    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None, start_new_session=False):
         return queue.pop(0)
 
     advice_out = tmp_path / "inbox" / "sideloop.jsonl"

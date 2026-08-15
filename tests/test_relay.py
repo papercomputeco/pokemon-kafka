@@ -180,7 +180,7 @@ def _fake_popen_factory(procs):
     """Hands out FakeProcs in launch order, asserting the harness shape."""
     queue = list(procs)
 
-    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None):
+    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None, start_new_session=False):
         assert "--no-self-heal" in cmd
         return queue.pop(0)
 
@@ -214,6 +214,58 @@ def test_run_segment_picks_winner_and_kills_straggler(tmp_path):
     assert procs[1].killed
     by_label = {r["label"]: r for r in results}
     assert by_label["b"].get("killed") is True
+
+
+def test_run_segment_launches_lanes_in_their_own_process_group(tmp_path):
+    """uv run spawns python as a child; without start_new_session=True a kill orphans it (see _kill_lane)."""
+    seg = _tiny_seg(({"label": "a"},))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg_dir = tmp_path / "seg"
+    (seg_dir / "a").mkdir(parents=True)
+    clock = FakeClock()
+    procs = [FakeProc(seg_dir / "a", fitness={"final_map_id": 51, "lead_hp": 20, "turns": 100})]
+    (seg_dir / "a" / "stop.state").write_bytes(b"x")
+    queue = list(procs)
+    captured_kwargs = []
+
+    def capturing_popen(cmd, env=None, cwd=None, stdout=None, stderr=None, start_new_session=False):
+        captured_kwargs.append(start_new_session)
+        return queue.pop(0)
+
+    run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        seg_dir,
+        tmp_path,
+        popen=capturing_popen,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert captured_kwargs == [True]
+
+
+def test_run_segment_success_requires_stop_state_file(tmp_path):
+    """Fitness can claim success even when the winning lane never wrote its baton file."""
+    seg = _tiny_seg(({"label": "a"},))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg_dir = tmp_path / "seg"
+    (seg_dir / "a").mkdir(parents=True)
+    # Deliberately no stop.state written for this lane.
+    clock = FakeClock()
+    procs = [FakeProc(seg_dir / "a", fitness={"final_map_id": 51, "lead_hp": 20, "turns": 100})]
+    winner, results = run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        seg_dir,
+        tmp_path,
+        popen=_fake_popen_factory(procs),
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert winner is None
+    assert results[0]["success"] is False
 
 
 def test_run_segment_returns_none_when_all_lanes_fail(tmp_path):
@@ -264,6 +316,25 @@ def test_main_dry_run_prints_commands_without_launching(tmp_path, capsys):
     assert rc == 0
     assert "--stop-on-map 51" in out
     assert "EVOLVE_PARAMS" in out
+    assert not (tmp_path / "r").exists()  # dry-run touches nothing
+
+
+def test_main_dry_run_applies_max_turns_scale(tmp_path, capsys):
+    rc = main(
+        [
+            "rom.gb",
+            "--dry-run",
+            "--max-turns-scale",
+            "0.5",
+            "--run-dir",
+            str(tmp_path / "r"),
+            "--segments",
+            "route1_to_forest",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "--max-turns 2000" in out  # route1_to_forest is 4000 * 0.5
     assert not (tmp_path / "r").exists()  # dry-run touches nothing
 
 
