@@ -1,0 +1,11 @@
+{
+  "name": "forest-crossing-1hp",
+  "learning": "docs/learnings/viridian-forest-1hp-entry-unresolved.md",
+  "category": "navigation",
+  "seed_state": "demo-runs/states/forest-entry-1hp.state",
+  "stop_on_map": 2,
+  "max_turns": 3000,
+  "genome": {},
+  "pass": {"final_map_id": 2},
+  "expected_fail": true
+}

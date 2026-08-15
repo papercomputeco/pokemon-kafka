@@ -1,0 +1,8 @@
+obstacle:      baton-transition-failure
+category:      system, navigation, game-state
+symptom:       segment 1 succeeds and reaches map 51 (Viridian Forest); segment 2 loads the baton and starts at map 51 as expected, but the saved game state is corrupted—agent has 0/21 HP (fainted state) and is in the middle of an incomplete quest sequence. After "winning" the corrupted Weedle battle, the agent travels back through Pallet Town → Viridian City → Route 1, where it encounters another Weedle battle with 2/21 HP and gets stuck in an infinite flee loop
+failed:        batons saved from segment 1 are not at clean game boundaries; they capture intermediate quest/exploration states rather than stable starting points. all 6 lanes in segment 2 fail identically; retry with doubled turn limit (4000 turns) also fails
+winner:        unresolved
+why it worked:  N/A — the baton save mechanism captures the exact moment the agent reaches map 51, which is still mid-quest (navigating through Pallet Town) rather than at a stable checkpoint
+generalizes:   relay batons must be saved at clean game boundaries (after quests complete, not during travel). current relay.py saves at stop-on-map condition, but that doesn't guarantee a stable game state. either: (1) implement a state validation check before saving batons, (2) add a post-stop grace period to let the agent reach a stable state, or (3) switch to quest/milestone-based segment boundaries
+artifacts:     data/relay/260815-170915/batons/route1_to_forest.state (corrupted), data/relay/260815-171923/forest_to_pewter/base/agent.log (shows progression from map 51 through 0→12→0→12→1→13 before getting stuck)

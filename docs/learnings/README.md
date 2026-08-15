@@ -25,3 +25,19 @@ segment, not a tuning problem for the next one.
 Artifacts (local, gitignored like every savestate): `demo-runs/states/forest-entry-healthy-17hp.state`,
 `demo-runs/states/forest-entry-1hp.state`, `demo-runs/states/forest-very-cautious.genome.json`.
 Operator traces are in tapes; game events in Kafka `agent.game.events`.
+
+## Per-run originals (2026-08-15, five models on the pi harness)
+
+Unedited entries from each operator run live under `by-run/2026-08-15-<model>/`; the table above is
+the curated set. Highlights worth reading in the originals:
+
+| model | notable entries |
+|---|---|
+| [sonnet-5](by-run/2026-08-15-sonnet-5/) | `route2-battle-menu-desync-blackout` (a second, compatible root cause for the Route 1 flee loop), `pewter-waypoint-index-reset-loop` (real nav bug: waypoint index starts at 0 when loading mid-map), `brock-approach-deadend-unresolved` (the (16,11) Gym waypoint is a wall) |
+| [kimi-k2.6](by-run/2026-08-15-kimi-k2.6/) | `pewter-corrupted-transition-save` (`--stop-on-map` saves on the first frame after `wCurMap` flips) |
+| [haiku-4.5](by-run/2026-08-15-haiku-4.5/) · [haiku-4.5-claude-code](by-run/2026-08-15-haiku-4.5-claude-code/) | tidy but partly wrong root causes — useful as a contrast; the Claude Code run's `NEXT_STEPS.md` hypothesised the transition-save bug before Kimi confirmed it |
+| [qwen3.5-35b](by-run/2026-08-15-qwen3.5-35b/) | free-form (its context was silently truncated by Ollama's `num_ctx`) |
+| [gemma4-8b](by-run/2026-08-15-gemma4-8b/) | follows the format; files the Route 1 flee loop under the forest obstacle's name |
+
+Regression evals derived from these live in [`evals/`](../../evals/README.md); dated benchmark
+tables in [`benchmarks/`](../../benchmarks/README.md).

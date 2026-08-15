@@ -1,0 +1,11 @@
+{
+  "name": "pewter-to-gym",
+  "learning": "docs/learnings/by-run/2026-08-15-sonnet-5/brock-approach-deadend-unresolved.md",
+  "category": "navigation",
+  "seed_state": "demo-runs/states/forest-to-pewter.state",
+  "stop_on_map": 54,
+  "max_turns": 4000,
+  "genome": {},
+  "pass": {"final_map_id": 54},
+  "expected_fail": true
+}
