@@ -10,6 +10,7 @@ from relay import (
     pick_winner,
     prepare_variant_dir,
     promote_winner,
+    run_segment,
     segment_success,
 )
 
@@ -129,3 +130,128 @@ def test_promote_winner_builds_next_baton(tmp_path):
     assert baton.genome == {"door_cooldown": 2}
     saved = json.loads((tmp_path / "batons" / "route1_to_forest.genome.json").read_text())
     assert saved == {"door_cooldown": 2}
+
+
+class FakeProc:
+    """Completes after N polls; writes its fitness.json at completion like agent.py does."""
+
+    def __init__(self, vdir, fitness=None, polls_until_done=1):
+        self.vdir, self.fitness = vdir, fitness
+        self.polls_left = polls_until_done
+        self.returncode = None
+        self.killed = False
+
+    def poll(self):
+        if self.killed:
+            self.returncode = -9
+            return self.returncode
+        if self.polls_left > 0:
+            self.polls_left -= 1
+            return None
+        if self.fitness is not None:
+            (self.vdir / "fitness.json").write_text(json.dumps(self.fitness))
+        self.returncode = 0
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class FakeClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.t += seconds
+
+
+def _tiny_seg(variants):
+    return Segment("seg", stop_on_map=51, stop_on_badge=None, max_turns=10, variants=variants)
+
+
+def _fake_popen_factory(procs):
+    """Hands out FakeProcs in launch order, asserting the harness shape."""
+    queue = list(procs)
+
+    def fake_popen(cmd, env=None, cwd=None, stdout=None, stderr=None):
+        assert "--no-self-heal" in cmd
+        return queue.pop(0)
+
+    return fake_popen
+
+
+def test_run_segment_picks_winner_and_kills_straggler(tmp_path):
+    seg = _tiny_seg(({"label": "a"}, {"label": "b"}))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg_dir = tmp_path / "seg"
+    va, vb = seg_dir / "a", seg_dir / "b"
+    va.mkdir(parents=True), vb.mkdir(parents=True)
+    (va / "stop.state").write_bytes(b"x")
+    clock = FakeClock()
+    procs = [
+        FakeProc(va, fitness={"final_map_id": 51, "lead_hp": 20, "turns": 100}, polls_until_done=1),
+        FakeProc(vb, polls_until_done=10**6),  # never finishes on its own
+    ]
+    winner, results = run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        seg_dir,
+        tmp_path,
+        popen=_fake_popen_factory(procs),
+        sleep=clock.sleep,
+        clock=clock,
+        grace=10.0,
+    )
+    assert winner["label"] == "a"
+    assert procs[1].killed
+    by_label = {r["label"]: r for r in results}
+    assert by_label["b"].get("killed") is True
+
+
+def test_run_segment_returns_none_when_all_lanes_fail(tmp_path):
+    seg = _tiny_seg(({"label": "a"},))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg_dir = tmp_path / "seg"
+    (seg_dir / "a").mkdir(parents=True)
+    clock = FakeClock()
+    procs = [FakeProc(seg_dir / "a", fitness={"final_map_id": 13, "lead_hp": 5, "turns": 10})]
+    winner, results = run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        seg_dir,
+        tmp_path,
+        popen=_fake_popen_factory(procs),
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert winner is None
+    assert results[0]["success"] is False
+
+
+def test_run_segment_timeout_kills_everything(tmp_path):
+    seg = _tiny_seg(({"label": "a"},))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    (tmp_path / "seg" / "a").mkdir(parents=True)
+    clock = FakeClock()
+    procs = [FakeProc(tmp_path / "seg" / "a", polls_until_done=10**6)]
+    winner, results = run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        tmp_path / "seg",
+        tmp_path,
+        popen=_fake_popen_factory(procs),
+        sleep=clock.sleep,
+        clock=clock,
+        timeout=20.0,
+    )
+    assert winner is None
+    assert procs[0].killed

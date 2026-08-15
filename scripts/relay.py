@@ -10,7 +10,10 @@ only variable per lane is the decision variant.
 """
 
 import json
+import os
 import shutil
+import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -163,3 +166,73 @@ def promote_winner(run_dir, seg, winner):
         shutil.copy2(map_src, map_dst)
     (batons / f"{seg.name}.genome.json").write_text(json.dumps(winner["genome"], indent=2) + "\n")
     return Baton(state_path=state_dst, worldmap_path=map_dst, genome=winner["genome"])
+
+
+def run_segment(
+    rom,
+    seg,
+    baton,
+    seg_dir,
+    run_dir,
+    parallel=6,
+    timeout=1200.0,
+    grace=90.0,
+    popen=subprocess.Popen,
+    sleep=time.sleep,
+    clock=time.monotonic,
+    pick=None,
+):
+    """Race up to `parallel` decision variants from the same baton; return (pick(results), results)."""
+    if pick is None:
+        pick = pick_winner
+    lanes = {}
+    for variant in seg.variants[:parallel]:
+        vdir = prepare_variant_dir(seg_dir, variant, baton)
+        cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir)
+        genome = json.loads(extra_env["EVOLVE_PARAMS"])
+        log = open(vdir / "agent.log", "wb")
+        proc = popen(cmd, env={**os.environ, **extra_env}, cwd=str(WORKSPACE), stdout=log, stderr=subprocess.STDOUT)
+        lanes[variant["label"]] = (proc, vdir, genome, log)
+        print(f"[relay] {seg.name}/{variant['label']} launched")
+
+    results = []
+    first_success_at = None
+    deadline = clock() + timeout
+    while lanes:
+        for label in list(lanes):
+            proc, vdir, genome, log = lanes[label]
+            if proc.poll() is None:
+                continue
+            log.close()
+            fitness_file = vdir / "fitness.json"
+            fitness = json.loads(fitness_file.read_text()) if fitness_file.exists() else {}
+            result = {
+                "label": label,
+                "vdir": vdir,
+                "genome": genome,
+                "fitness": fitness,
+                "success": segment_success(fitness, seg),
+                "returncode": proc.returncode,
+            }
+            results.append(result)
+            del lanes[label]
+            state = "SUCCESS" if result["success"] else "no"
+            print(f"[relay] {seg.name}/{label} exited rc={proc.returncode} success={state}")
+            if result["success"] and first_success_at is None:
+                first_success_at = clock()
+        if not lanes:
+            break
+        now = clock()
+        if now > deadline or (first_success_at is not None and now > first_success_at + grace):
+            for label, (proc, vdir, genome, log) in lanes.items():
+                proc.kill()
+                proc.wait(timeout=10)
+                log.close()
+                results.append(
+                    {"label": label, "vdir": vdir, "genome": genome, "fitness": {}, "success": False, "killed": True}
+                )
+                print(f"[relay] {seg.name}/{label} killed (straggler)")
+            lanes.clear()
+            break
+        sleep(2.0)
+    return pick(results), results
