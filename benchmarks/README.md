@@ -15,9 +15,14 @@ Every table carries the same columns so files are comparable:
 | out tok/s | output tokens ÷ model time |
 | s/turn | model time ÷ turns |
 | input / cache read / output | tokens as reported by the provider |
-| cost | provider-reported USD (local models: GPU only) |
+| provider $ | what the provider reported (Ollama cloud is a flat subscription, local models and the Claude Max sub report $0 — not comparable) |
+| cloud $ | the same tokens priced at published per-million cloud rates (`bench_report.py --rate-*`) — the cost to run this at scale; always fill this in |
+| Wh / energy $ | local power from `scripts/power_sampler.py` (GPU + iGPU; CPU when RAPL is readable) integrated by `bench_report.py --power-log`, and `--kwh-price` |
 | code fix | did the model change agent code (vs. only genome/config) |
 | learnings / commits | `docs/learnings/*` entries and commits left on the run branch |
+
+Local runs: start `uv run python scripts/power_sampler.py --out data/power/<run>.csv` before
+launching the operator and stop it after; pass the CSV to `bench_report.py --power-log`.
 
 How the numbers are produced: `scripts/bench_report.py <pi-session.jsonl>...` prints one row per
 session from pi's transcript (`~/.pi/agent/sessions/<cwd-slug>/*.jsonl`). Game-side stats come from

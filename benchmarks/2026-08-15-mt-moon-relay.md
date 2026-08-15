@@ -11,9 +11,9 @@ saves on the first frame of a map change). Full narrative: `docs/learnings/by-ru
 
 ## Scoreboard
 
-| model | segs | wall | model time | turns | tools | out tok/s | s/turn | input tok | cache read | output tok | cost | code fix | learnings | commits |
+| model | segs | wall | model time | turns | tools | out tok/s | s/turn | input tok | cache read | output tok | provider $ | code fix | learnings | commits |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Sonnet 5 (`claude-sonnet-5`, adaptive thinking) | 2/4 | 49 m | 28.9 m | 186 | 187 | 72.8 | 9.3 | 372 | 24.8 M | 126 k | $17.14 | yes — RUN/menu desync; waypoint-index reset | 5 + summary | 3 |
+| Sonnet 5 (`claude-sonnet-5`, adaptive thinking) | 2/4 | 49 m | 28.9 m | 186 | 187 | 72.8 | 9.3 | 372 | 24.8 M | 126 k | $17.14 (pi fallback rate; true $6.86) | yes — RUN/menu desync; waypoint-index reset | 5 + summary | 3 |
 | Kimi K2.6 (`kimi-k2.6:cloud`, Ollama cloud) | 2/4 | 158 m | ≥34.8 m¹ | ≥190 | ≥228 | 56.4 | 11.0 | ≥26.7 M | 0 | ≥118 k | n/a | yes — flee-loop cap; Pewter targets; transition-save diagnosis | 3 | 3 |
 | Haiku 4.5 (`claude-haiku-4-5-20251001`) | 2/4 | 67 m | 5.9 m | 74 | 73 | 91.9 | 4.8 | 4.7 k | 3.5 M | 32 k | $0.87 | no (variant spreads, seed swap) | 3 + summary | 3 |
 | Qwen3.5-35B Q4 (`qwen35b-64k`, local RTX 5090) | 2/4 | 38 m | 27.1 m | 101 | 123 | 20.1 | 16.1 | 4.9 M | 0 | 33 k | local | edits, uncommitted, off-format² | 1 (free-form) | 0 |
@@ -27,6 +27,35 @@ of the front of the prompt (the mission) for the second half of the run. ³ Gemm
 Reference (not same-harness): Haiku 4.5 on Claude Code with the superpowers plugin loaded — 39 min,
 $1.28, 1/4 segments, wrong root cause; the plugin's SessionStart hook turned the headless run into a
 plan + a question and exited at 70 s. Plugin since removed.
+
+## True cost — priced as cloud tokens
+
+Provider-reported cost is not comparable across rows (Ollama cloud is a flat subscription, local
+models and the Claude Max sub report $0, and pi priced `claude-sonnet-5` with a fallback rate). So
+every run is re-priced at published per-million-token cloud rates on the tokens it actually used
+(`scripts/bench_report.py --rate-in/--rate-out/--rate-cache-read/--rate-cache-write`). This is what
+the run costs *at scale*.
+
+| model | tokens (in / cache read / cache write / out) | rate used ($/M in / out; cache read / write) | **cloud $** | notes |
+|---|---|---|---|---|
+| Sonnet 5 | 372 / 24.8 M / 256 k / 126 k | 2 / 10; 0.20 / 2.50 (Anthropic list) | **$6.86** | pi reported $17.14 using a fallback rate — wrong |
+| Kimi K2.6 | ≥26.7 M / 0 / 0 / ≥118 k (first 66 min) | 0.95 / 4.00; cache-hit 0.16 (Moonshot list) | **≥$25.87** (≈$60 for the full 158 min) | uncached — every turn re-sent ~108 k tokens. Same tokens with 90 % cache hits ≈ $6.9. Ollama cloud billed a flat sub instead |
+| Haiku 4.5 | 4.7 k / 3.5 M / 285 k / 32 k | 1 / 5; 0.10 / 1.25 (Anthropic list) | **$0.87** | matches pi |
+| Qwen3.5-35B (local) | 4.9 M / 0 / 0 / 33 k | 0.14 / 1.00 (OpenRouter, Qwen3.5-35B-A3B) | **$0.73** | cloud-equivalent |
+| Gemma4-8B (local) | 751 k / 0 / 0 / 8 k | 0.20 / 0.20 (proxy: Gemma 4 E4B; no 8B cloud SKU) | **$0.15** | cloud-equivalent |
+
+Reading: uncached Kimi is the most expensive run by 4×; caching is the single biggest cost lever
+(Sonnet's 24.8 M tokens were 99 % cache reads). Cost per segment cleared: Sonnet $3.43, Kimi ≥$13,
+Haiku $0.44, Qwen $0.37, Gemma $0.08 — but only Sonnet/Kimi produced code fixes.
+
+### Local energy (measured after the fact)
+
+`scripts/power_sampler.py` did not exist during today's runs, so local energy is estimated from a
+calibration: on the RTX 5090, `gemma4-64k` and `qwen35b-64k` generation peaks at 290–350 W
+(226 / 175 tok/s on a 700-token burst; idle 19 W). Using 300 W over model time: Qwen ≈ 27 min →
+≈0.14 kWh (≈$0.04 at $0.30/kWh); Gemma ≈ 0.9 min → ≈5 Wh. CPU package power is not readable
+without root on this box (RAPL), so these are GPU-only. Future rows carry measured Wh and $ from the
+sampler CSV via `bench_report.py --power-log --kwh-price`.
 
 ## Game-side (from `data/telemetry/game`, the Kafka `agent.game.events` feed)
 
