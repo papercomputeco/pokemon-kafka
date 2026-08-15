@@ -7,6 +7,7 @@ from relay import (
     Baton,
     Segment,
     build_agent_cmd,
+    main,
     pick_winner,
     prepare_variant_dir,
     promote_winner,
@@ -255,3 +256,18 @@ def test_run_segment_timeout_kills_everything(tmp_path):
     )
     assert winner is None
     assert procs[0].killed
+
+
+def test_main_dry_run_prints_commands_without_launching(tmp_path, capsys):
+    rc = main(["rom.gb", "--dry-run", "--run-dir", str(tmp_path / "r"), "--segments", "route1_to_forest"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "--stop-on-map 51" in out
+    assert "EVOLVE_PARAMS" in out
+    assert not (tmp_path / "r").exists()  # dry-run touches nothing
+
+
+def test_main_rejects_unknown_segment(tmp_path, capsys):
+    rc = main(["rom.gb", "--dry-run", "--run-dir", str(tmp_path / "r"), "--segments", "nope"])
+    assert rc == 1
+    assert "unknown segment" in capsys.readouterr().out.lower()

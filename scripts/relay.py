@@ -9,12 +9,16 @@ Children are plain subprocesses (never `paper start claude`) with self-healing d
 only variable per lane is the decision variant.
 """
 
+import argparse
+import dataclasses
 import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -236,3 +240,118 @@ def run_segment(
             break
         sleep(2.0)
     return pick(results), results
+
+
+DEFAULT_ROM = WORKSPACE / "rom" / "Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb"
+DEFAULT_SEED = WORKSPACE / "demo-runs" / "states" / "route1.state"
+
+
+def _select_segments(spec):
+    if not spec:
+        return list(SEGMENTS)
+    by_name = {s.name: s for s in SEGMENTS}
+    picked = []
+    for name in spec.split(","):
+        name = name.strip()
+        if name not in by_name:
+            raise KeyError(name)
+        picked.append(by_name[name])
+    return picked
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Divide-and-conquer relay to Mt. Moon")
+    parser.add_argument("rom", nargs="?", default=str(DEFAULT_ROM))
+    parser.add_argument("--segments", default="", help="Comma-separated segment names (default: all)")
+    parser.add_argument("--parallel", type=int, default=6)
+    parser.add_argument("--timeout", type=float, default=1200.0, help="Per-segment wall clock (s)")
+    parser.add_argument("--grace", type=float, default=90.0, help="Straggler grace after first success (s)")
+    parser.add_argument("--seed-state", default=str(DEFAULT_SEED))
+    parser.add_argument("--run-dir", default=None)
+    parser.add_argument("--dry-run", action="store_true", help="Print the lane commands; launch nothing")
+    args = parser.parse_args(argv)
+
+    try:
+        segments = _select_segments(args.segments)
+    except KeyError as exc:
+        print(f"[relay] unknown segment: {exc.args[0]} (choose from {', '.join(s.name for s in SEGMENTS)})")
+        return 1
+
+    run_dir = (
+        Path(args.run_dir)
+        if args.run_dir
+        else (WORKSPACE / "data" / "relay" / datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S"))
+    )
+    baton = Baton(state_path=Path(args.seed_state), worldmap_path=None, genome={})
+
+    if args.dry_run:
+        for seg in segments:
+            for variant in seg.variants[: args.parallel]:
+                vdir = run_dir / seg.name / variant["label"]
+                cmd, env = build_agent_cmd(args.rom, seg, variant, vdir, baton, run_dir)
+                print(f"# {seg.name}/{variant['label']}")
+                print(f"EVOLVE_PARAMS='{env['EVOLVE_PARAMS']}' \\\n  {' '.join(cmd)}")
+            print(f"# ... then baton = {run_dir / 'batons' / (seg.name + '.state')}")
+        return 0
+
+    if not Path(args.rom).exists():
+        print(f"[relay] ROM not found: {args.rom}")
+        return 1
+    if not baton.state_path.exists():
+        print(f"[relay] seed state not found: {baton.state_path}")
+        return 1
+
+    report = {"run_dir": str(run_dir), "segments": []}
+    for seg in segments:
+        winner = None
+        attempts = []
+        for attempt, seg_variant in enumerate((seg, dataclasses.replace(seg, max_turns=seg.max_turns * 2))):
+            seg_dir = run_dir / (seg.name if attempt == 0 else f"{seg.name}_retry")
+            print(f"[relay] === {seg.name} (attempt {attempt + 1}, max_turns={seg_variant.max_turns}) ===")
+            winner, results = run_segment(
+                args.rom,
+                seg_variant,
+                baton,
+                seg_dir,
+                run_dir,
+                parallel=args.parallel,
+                timeout=args.timeout,
+                grace=args.grace,
+            )
+            attempts.append(
+                [
+                    {
+                        "label": r["label"],
+                        "success": r["success"],
+                        "killed": r.get("killed", False),
+                        "fitness": r["fitness"],
+                    }
+                    for r in results
+                ]
+            )
+            if winner is not None:
+                break
+        report["segments"].append(
+            {"name": seg.name, "winner": winner["label"] if winner else None, "attempts": attempts}
+        )
+        if winner is None:
+            _write_report(run_dir, report)
+            print(f"[relay] FAILED at {seg.name} after 2 attempts — report: {run_dir / 'report.json'}")
+            return 1
+        baton = promote_winner(run_dir, seg, winner)
+        f = winner["fitness"]
+        print(f"[relay] {seg.name} -> {winner['label']} (turns={f.get('turns')} lead_hp={f.get('lead_hp')})")
+
+    _write_report(run_dir, report)
+    print(f"[relay] CONQUERED {' -> '.join(s.name for s in segments)}")
+    print(f"[relay] final baton: {baton.state_path} | report: {run_dir / 'report.json'}")
+    return 0
+
+
+def _write_report(run_dir, report):
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
