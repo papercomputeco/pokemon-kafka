@@ -112,11 +112,22 @@ def test_cross_step_advances_toward_edge_when_open():
     assert wm.cross_step(0, 5, 5, "south") == "down"
 
 
+def test_cross_step_presses_off_the_known_edge_row():
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 8):  # a fully mapped strip along the top: everything above is off-map
+        m[(x, 0)] = 1
+        m[(x, 1)] = 1
+    assert wm.cross_step(0, 4, 0, "north") == "up"  # pressing off the edge row IS the crossing
+
+
 def test_cross_step_sweeps_to_an_open_column_at_a_wall():
     wm = WorldMap()
+    wm.observe(0, 5, 5, _full(1))  # the observed window around the player, as every turn stamps
     wm.block(0, 5, 4)  # north of the player's column is a (learned) wall
     wm.block(0, 4, 4)  # and the column to the left
-    # north of x=6 (i.e. (6,4)) is unknown -> open, so sweep right toward it
+    # the sweep must route around the blocks toward the window's unknown frontier; the right
+    # column is a step closer than looping around the left block, so head right
     assert wm.cross_step(0, 5, 5, "north") == "right"
 
 
@@ -448,3 +459,313 @@ def test_block_loads_from_legacy_pair_format():
     # Worldmap files written before expiry stored blocked as bare [x, y] pairs.
     wm = WorldMap.from_dict({"blocked": {"51": [[2, 18]]}})
     assert wm.walkable(51, 2, 18) == 0
+
+
+# --- map 37 cross_step wedge (issue #64) -----------------------------------------
+# Red's house 1F (map 37) is the blackout respawn (51 -> 0 -> 37) and has NO north exit — the
+# way out is the door warp at the bottom row. Piloting north there, the agent wedged at the
+# top-left: (2,1) is an enterable dead-end pocket ((2,0), (1,1) and (3,1) all stamped walls),
+# and phantom "walkable" tiles stamped beyond the real 8-tile-wide map (x >= 8) kept feeding
+# the boundary sweep a fake exit column. cross_step's local fast path ("(2,1) is enterable ->
+# up") and its global BFS ("dead end -> go around") disagreed, so the agent two-cycled
+# (2,2) <-> (2,1) without progress — 41k+ turns of (2,2)+up / (2,1)+down in the 2026-08-15
+# event stream, plus 17k+ parked (2,1)+up presses into the known wall (run 20260810-231918-5212
+# and data/game/2026-08-15.jsonl). The geometry below is the agent's own persisted worldmap.
+
+
+def _reds_house_worldmap() -> WorldMap:
+    """Map 37 exactly as the wedged agent had learned it (persisted worldmap snapshot)."""
+    rows = {
+        0: "########???",
+        1: "##.#....##.",
+        2: "...........",
+        3: "...........",
+        4: "...##......",
+        5: "...##......",
+        6: "...........",
+        7: "...........",
+        8: "########..#",
+        9: "########..#",
+        10: "########???",
+        11: "########???",
+    }
+    wm = WorldMap()
+    m = wm.cells.setdefault(37, {})
+    for y, row in rows.items():
+        for x, ch in enumerate(row):
+            if ch != "?":
+                m[(x, y)] = 1 if ch == "." else 0
+    return wm
+
+
+def _real_house_walkable(wm):
+    """Ground-truth oracle: the real house is 8x8; stamps inside it are accurate, everything
+    beyond (the phantom x>=8 / y>=8 tiles) is off-map and every move into it fails."""
+    cells = dict(wm.cells[37])
+    return lambda t: 0 <= t[0] <= 7 and 0 <= t[1] <= 7 and cells.get(t) == 1
+
+
+def _simulate_pilot_north(wm, map_id, start, real_walkable, turns):
+    """Drive cross_step the way run_overworld does: apply each step against the *real* map and
+    hard-block a tile after two consecutive failed presses into it (agent.py's two-fail rule)."""
+    deltas = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+    pos, last_fail, visited = start, None, [start]
+    for _ in range(turns):
+        dx, dy = deltas[wm.cross_step(map_id, pos[0], pos[1], "north")]
+        nxt = (pos[0] + dx, pos[1] + dy)
+        if real_walkable(nxt):
+            pos, last_fail = nxt, None
+        else:
+            if nxt == last_fail:
+                wm.block(map_id, *nxt)
+            last_fail = nxt
+        visited.append(pos)
+    return visited
+
+
+def test_map37_pocket_two_cycle_breaks_out():
+    # The wedge itself: from (2,2) the old code bounced (2,2)+up / (2,1)+down forever. The
+    # fixed sweep may press the (2,0) warp hypothesis once (two presses, then hard-blocked),
+    # but must then leave the pocket and sweep the top boundary column by column.
+    wm = _reds_house_worldmap()
+    visited = _simulate_pilot_north(wm, 37, (2, 2), _real_house_walkable(wm), turns=60)
+    assert any(x >= 4 for x, _y in visited)  # escaped the pocket and swept east
+    # Boundary columns get tested and permanently retired, not mashed forever.
+    assert (4, 0) in wm.blocked[37] and (5, 0) in wm.blocked[37]
+
+
+def test_map37_tried_wall_is_not_pressed_again():
+    # The parked regime (2026-08-14: (2,1)+up streaks of 1341): (2,0) has already been pressed
+    # and failed. Neither wedge tile may keep pointing back into a tried-and-failed tile.
+    wm = _reds_house_worldmap()
+    wm.block(37, 2, 0)
+    assert wm.cross_step(37, 2, 1, "north") != "up"
+    assert wm.cross_step(37, 2, 2, "north") != "up"
+
+
+def test_cross_step_presses_an_untried_boundary_wall_once():
+    # A stamped wall on the boundary row may really be a warp (the forest exit reads as a
+    # wall), so the sweep presses it once — and a hard-block (tried twice, failed) retires
+    # the candidate for good instead of letting the agent mash it.
+    wm = _reds_house_worldmap()
+    assert wm.cross_step(37, 2, 1, "north") == "up"  # test the warp hypothesis at (2,0)
+    wm.block(37, 2, 0)  # ...it failed twice: a real wall
+    assert wm.cross_step(37, 2, 1, "north") != "up"
+
+
+def test_cross_step_still_presses_into_a_boundary_warp():
+    # Forest-exit shape: the whole top row reads as trees/wall, but the tile overhead is the
+    # (untried) exit warp. The sweep must step into it rather than drifting off to a frontier.
+    wm = WorldMap()
+    m = wm.cells.setdefault(51, {})
+    for x in range(0, 8):
+        m[(x, 0)] = 0
+        m[(x, 1)] = 1
+    assert wm.cross_step(51, 2, 1, "north") == "up"
+
+
+# --- Route 1 south-entry flap (uncovered by the map 37 fix) -----------------------
+# With Red's house passable, fresh runs reached Route 1 (map 12) — and ping-ponged between
+# its south edge and Pallet Town 1,019 times in a 3,000-turn run. With the whole map known,
+# the only real exit north is the x=10/11 passage at row 0; but a BFS that traverses unknown
+# tiles optimistically wraps around the *known* west border wall through the unstamped void,
+# finds a "gains ground" candidate in fantasy space a dozen steps away (vs ~40 through the
+# real corridor), and the path's first step is `down` — off the south edge. The geometry
+# below is the flapping agent's own persisted worldmap.
+
+
+def _route1_worldmap() -> WorldMap:
+    rows = {
+        0: "#.....#..#.....#.",
+        1: "#######..#######.",
+        2: "#..............#.",
+        3: "#..............#.",
+        4: "#.....#........#.",
+        5: "###########....#.",
+        6: "#.....#........#.",
+        7: "#.....#........#.",
+        8: "#.....#........#.",
+        9: "#######........#.",
+        10: "#..............#.",
+        11: "#..............#.",
+        12: "#..............#.",
+        13: "###########....#.",
+        14: "#..............#.",
+        15: "#..............#.",
+        16: "#..............#.",
+        17: "#..............#.",
+        18: "#..............#.",
+        19: "##.###.#########.",
+        20: "#..............#.",
+        21: "#..............#.",
+        22: "#..............#.",
+        23: "#########....###?",
+        24: "#..............#?",
+        25: "#..............#?",
+        26: "#..............#?",
+        27: "###...##########?",
+        28: "#..............#?",
+        29: "#..............#?",
+        30: "#..............#?",
+        31: "#..............#?",
+        32: "#######..#######?",
+        33: "#.....#..#.....#?",
+        34: "#.....#..#.....#?",
+        35: "#.....#..#.....#?",
+        36: "???...#..#....???",
+        37: "???####..#####???",
+        38: "???...........???",
+        39: "???##....####.???",
+    }
+    wm = WorldMap()
+    m = wm.cells.setdefault(12, {})
+    for y, row in rows.items():
+        for i, ch in enumerate(row):
+            if ch != "?":
+                m[(3 + i, y)] = 1 if ch == "." else 0
+    return wm
+
+
+def test_cross_step_takes_a_sideways_probe_when_nothing_gains_ground():
+    # Whole known boundary tried and retired, and the only remaining probe (an unknown
+    # forward tile) sits level with the player: no candidate gains ground, so the sweep
+    # falls back to the nearest probe anywhere rather than giving up.
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 5):
+        m[(x, 0)] = 0
+        wm.block(0, x, 0)  # every boundary wall pressed twice and failed — retired
+        m[(x, 1)] = 1
+    for x in range(0, 6):
+        m[(x, 2)] = 1  # row 2 reaches one column further east; (5,1) is unknown
+    d = wm.cross_step(0, 2, 1, "north")
+    assert d in ("down", "right")  # route toward the (5,2) probe under the unknown (5,1)
+
+
+def test_cross_step_does_not_chase_candidates_through_the_unknown_ocean():
+    # Entering from Pallet at the south corridor, the sweep must head north through known
+    # ground, never south off the edge toward a phantom route around the border wall.
+    wm = _route1_worldmap()
+    assert wm.cross_step(12, 10, 35, "north") == "up"
+    assert wm.cross_step(12, 11, 35, "north") == "up"
+
+
+# --- map bounds: the collision window reads garbage beyond the real map edge ------
+# Route 2 (map 13, 20x72 tiles) exposed the flap's twin: standing on the south boundary row
+# (8,71), the observation window stamped phantom walkable rows 72-75 below the real map, so
+# with every genuine candidate exhausted the explore fallback chased the phantom southern
+# "frontier" — and the physical press exited the map (731 Viridian<->Route 2 crossings in a
+# 3,000-turn run). The game knows the loaded map's true size (wCurMapWidth/Height); once the
+# WorldMap records it, off-map garbage can neither be stamped nor treated as frontier.
+
+
+def _route2_worldmap() -> WorldMap:
+    """Map 13 as the flapping agent had learned it — phantom rows 72-75 included."""
+    rows = {
+        40: "..####....####",
+        41: "..####....####",
+        42: "..####....####",
+        43: "###.##########",
+        44: "...........#..",
+        45: "...........#..",
+        46: "...........#..",
+        47: "########...#..",
+        48: "...........#..",
+        49: "...........###",
+        50: "...........#..",
+        51: "...........#..",
+        52: "............#.",
+        53: "......########",
+        54: ".....########.",
+        55: ".....########.",
+        56: "......#######.",
+        57: "............#?",
+        58: "............#.",
+        59: "............#.",
+        60: "##..........#.",
+        61: "#######.######",
+        62: "##..........#.",
+        63: "##..........#.",
+        64: "##..........#.",
+        65: "##...#......#.",
+        66: "##..........#.",
+        67: "##..........#.",
+        68: "##..........#.",
+        69: "##........####",
+        70: "#######...####",
+        71: "#######...####",
+        72: "#######...####",
+        73: "#######..#####",
+        74: "???####...####",
+        75: "???####...####",
+    }
+    wm = WorldMap()
+    m = wm.cells.setdefault(13, {})
+    for y, row in rows.items():
+        for x, ch in enumerate(row):
+            if ch != "?":
+                m[(x, y)] = 1 if ch == "." else 0
+    return wm
+
+
+def test_cross_step_explores_the_frontier_before_probing_doors():
+    # Every northern probe is retired but unmapped ground remains: the sweep hands off to
+    # frontier exploration rather than the door-probe tier or a blind forward nudge.
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 5):
+        m[(x, 1)] = 0
+        wm.block(0, x, 1)  # the whole learned north row: pressed twice, failed, retired
+        m[(x, 2)] = 1
+        m[(x, 3)] = 1
+    d = wm.explore_step(0, 2, 2)
+    assert d is not None
+    assert wm.cross_step(0, 2, 2, "north") == d  # delegated to the frontier walk
+
+
+def test_cross_step_probes_interior_walls_for_doors_when_contained():
+    # Route 2's south section is a closed room: the only way forward is the forest-gate door
+    # — an *interior* wall tile above the (3,43) mat, rows below the sweep's edge row. Once
+    # every boundary probe is retired and no frontier remains, the sweep must fall back to
+    # testing untried walls as potential door warps instead of mashing forward forever
+    # (observed: 2,182 consecutive `up` presses into the hard-blocked (4,61)).
+    wm = _route2_worldmap()
+    wm.bounds[13] = (20, 72)
+    wm.block(13, 4, 61)  # the wall it mashed — pressed twice, failed, retired
+    assert wm.cross_step(13, 4, 62, "north") != "up"  # never back into the retired tile
+    assert wm.cross_step(13, 3, 44, "north") == "up"  # onto the mat, probing the door
+
+
+def test_bounds_stop_the_sweep_walking_off_the_trailing_edge():
+    # With the real 20x72 bounds known, the phantom rows below y=71 are off-map: neither the
+    # sweep nor the explore fallback may answer "down" from the south boundary row.
+    wm = _route2_worldmap()
+    wm.bounds[13] = (20, 72)
+    assert wm.cross_step(13, 8, 71, "north") != "down"
+    assert wm.explore_step(13, 8, 71) != "down"
+
+
+def test_observe_records_bounds_and_clips_garbage_stamps():
+    wm = WorldMap()
+    # Player at the south-east corner of a tiny 8x8 map: the window rows/cols beyond the
+    # edge carry garbage "walkable" reads that must not be stamped.
+    wm.observe(37, 7, 7, _full(1), bounds=(8, 8))
+    assert wm.bounds[37] == (8, 8)
+    assert all(x < 8 and y < 8 for (x, y) in wm.cells[37])
+
+
+def test_pressing_off_the_real_edge_is_still_the_crossing():
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 8):
+        m[(x, 2)] = 1
+        m[(x, 3)] = 1
+    wm.bounds[0] = (8, 4)  # the map really ends at y=3
+    assert wm.cross_step(0, 2, 3, "south") == "down"  # off the last row IS the crossing
+
+
+def test_bounds_roundtrip_through_dict():
+    wm = WorldMap()
+    wm.observe(13, 5, 5, _full(1), bounds=(20, 72))
+    wm2 = WorldMap.from_dict(wm.to_dict())
+    assert wm2.bounds == {13: (20, 72)}

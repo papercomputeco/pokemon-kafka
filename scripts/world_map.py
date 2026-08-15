@@ -53,9 +53,20 @@ class WorldMap:
         # asked to pay an extra ``encounter_cost`` to enter them so equal-ish paths prefer fewer
         # battles — learned from real encounters, like walls are learned from failed steps.
         self.encounters: dict[int, set[tuple[int, int]]] = {}
+        # Each map's real size in walk-tiles (width, height), read from the game's own map
+        # header when available. Near a map edge the collision window reads garbage beyond the
+        # boundary — phantom "walkable" tiles that fed the planner fake exits (map 37's east
+        # corridor, Route 2's rows below the south edge). Known bounds make them impossible:
+        # observe() refuses to stamp beyond them and _passable() refuses to route there.
+        self.bounds: dict[int, tuple[int, int]] = {}
 
-    def observe(self, map_id: int, px: int, py: int, grid: list[list[int]]) -> None:
+    def observe(
+        self, map_id: int, px: int, py: int, grid: list[list[int]], bounds: tuple[int, int] | None = None
+    ) -> None:
         """Stamp a 9x10 collision ``grid`` (player at the centre) into the map at ``(px, py)``."""
+        if bounds is not None:
+            self.bounds[map_id] = (int(bounds[0]), int(bounds[1]))
+        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
         m = self.cells.setdefault(map_id, {})
         blocked = self.blocked.get(map_id)
         for r in range(min(9, len(grid))):
@@ -63,7 +74,7 @@ class WorldMap:
             for c in range(min(10, len(row))):
                 gx = px + (c - _PLAYER_COL)
                 gy = py + (r - _PLAYER_ROW)
-                if 0 <= gx <= _MAX_COORD and 0 <= gy <= _MAX_COORD:
+                if 0 <= gx < bw and 0 <= gy < bh:
                     m[(gx, gy)] = 1 if row[c] else 0
                     # A hard-blocked tile observed walkable again: its occupant may be gone.
                     # Count the sighting; at the expiry threshold, drop the block for a re-test.
@@ -93,6 +104,7 @@ class WorldMap:
             "cells": {str(m): [[x, y, v] for (x, y), v in cells.items()] for m, cells in self.cells.items()},
             "blocked": {str(m): [[x, y, seen] for (x, y), seen in s.items()] for m, s in self.blocked.items()},
             "encounters": {str(m): [[x, y] for (x, y) in s] for m, s in self.encounters.items()},
+            "bounds": {str(m): [w, h] for m, (w, h) in self.bounds.items()},
         }
 
     @classmethod
@@ -106,6 +118,8 @@ class WorldMap:
             wm.blocked[int(m)] = {(int(it[0]), int(it[1])): int(it[2]) if len(it) > 2 else 0 for it in items}
         for m, items in (data.get("encounters") or {}).items():
             wm.encounters[int(m)] = {(int(x), int(y)) for x, y in items}
+        for m, wh in (data.get("bounds") or {}).items():
+            wm.bounds[int(m)] = (int(wh[0]), int(wh[1]))
         return wm
 
     def save(self, path) -> None:
@@ -132,8 +146,9 @@ class WorldMap:
         return self.cells.get(map_id, {}).get((x, y), default)
 
     def _passable(self, map_id: int, m: dict[tuple[int, int], int], x: int, y: int) -> bool:
-        if x < 0 or y < 0 or x > _MAX_COORD or y > _MAX_COORD:
-            return False
+        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
+        if x < 0 or y < 0 or x >= bw or y >= bh:
+            return False  # off the map's real edge (or the coordinate byte's range)
         if (x, y) in self.blocked.get(map_id, ()):
             return False  # tried and failed — never enter, even if the grid claims walkable
         return m.get((x, y), 1) != 0  # unknown -> passable (optimistic, draws search to the goal)
@@ -217,39 +232,98 @@ class WorldMap:
     def cross_step(self, map_id: int, px: int, py: int, goal: str, max_nodes: int = 6000) -> str:
         """Step that drives the agent off the map in cardinal ``goal`` ("north"/"south").
 
-        Go toward the edge whenever the tile ahead is enterable; when it's a known wall (a learned
-        map-edge non-exit), BFS to the nearest column where forward is *still* open and head there —
-        sweeping the boundary to find the real exit, instead of giving up and drifting back the way
-        a plain "go to (x, 0)" plan does once the columns straight ahead are blocked."""
+        One BFS picks a *pressable* destination — a tile whose forward press could still be the
+        way out: off the edge row, into unexplored ground, or into a boundary-row "wall" that has
+        never actually been tried (exit warps read as walls in the collision grid, so the only
+        way to tell them apart is one press; failing it twice hard-blocks the tile and retires
+        the candidate for good). Known-open floor ahead is deliberately NOT a destination by
+        itself: steering by "the tile ahead is enterable" is what wedged map 37 (issue #64) —
+        the (2,1) pocket is enterable from (2,2) but leads nowhere, so the old local fast path
+        and the global sweep disagreed and the agent two-cycled between the two tiles for tens
+        of thousands of turns. Because every candidate press either moves the agent or (via the
+        caller's failed-move hard-blocks) permanently shrinks the candidate set, successive
+        calls always make progress instead of looping.
+
+        Candidates that gain ground toward the edge are preferred (nearest first); failing
+        that, the nearest candidate anywhere, then frontier exploration, then a forward nudge."""
         m = self.cells.get(map_id, {})
         sign = -1 if goal == "north" else 1
         fwd = "up" if goal == "north" else "down"
-        if self._passable(map_id, m, px, py + sign):
+        blocked = self.blocked.get(map_id, ())
+        # The known row nearest the target edge: warps sit on the map boundary, so stamped
+        # "walls" are only worth pressing there — never interior furniture/tree rows.
+        edge_y = (min if sign < 0 else max)(y for _x, y in m) if m else None
+
+        last_y = self.bounds.get(map_id, (0, _MAX_COORD + 1))[1] - 1  # the map's real last row
+
+        def pressable(cx: int, cy: int) -> bool:
+            """Could pressing ``fwd`` from (cx, cy) still be the way off the map?"""
+            f = (cx, cy + sign)
+            if f in blocked:
+                return False  # pressed twice and failed — proven impassable, retired
+            if f[1] < 0 or f[1] > last_y:
+                return True  # pressing off the edge row IS the crossing on outdoor maps
+            v = m.get(f)
+            if v is None:
+                return True  # unexplored — could be open ground or the exit
+            return v == 0 and f[1] == edge_y  # a boundary "wall" may be a warp
+
+        start = (px, py)
+
+        def sweep(candidate) -> str | None:
+            """First step toward the nearest ``candidate`` tile, preferring ones whose press
+            lands past the current row. Returns None when none is reachable."""
+            came: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+            q = deque([start])
+            nodes = 0
+            target = None
+            backup = None  # nearest candidate that doesn't gain ground, kept as plan B
+            while q and nodes < max_nodes:
+                cur = q.popleft()
+                nodes += 1
+                cx, cy = cur
+                if cur != start and candidate(cx, cy):
+                    if (cy + sign - py) * sign > 0:  # its press lands past our current row
+                        target = cur
+                        break
+                    if backup is None:
+                        backup = cur
+                for _name, dx, dy in _DIRS:
+                    nb = (cx + dx, cy + dy)
+                    # Sweep only over ground *known* walkable (and really on the map):
+                    # unknown tiles are probe targets (the forward press), never corridors.
+                    # Optimistic traversal let the BFS wrap around a real border wall through
+                    # the unstamped void and "gain ground" in fantasy space (the Pallet<->
+                    # Route 1 flap), and phantom stamps beyond recorded bounds are just as fake.
+                    if nb in came or m.get(nb) != 1 or not self._passable(map_id, m, nb[0], nb[1]):
+                        continue
+                    came[nb] = cur
+                    q.append(nb)
+            step = self._first_step(came, start, target if target is not None else backup)
+            return step and self._dir(px, py, step)
+
+        if pressable(px, py):
+            return fwd  # the press right here may be the exit — try it before sweeping
+        d = sweep(pressable)
+        if d:
+            return d
+        # No pressable candidate reachable: map the frontier instead of mashing into a wall.
+        d = self.explore_step(map_id, px, py, max_nodes=max_nodes)
+        if d:
+            return d
+
+        # Fully mapped, every probe retired, and still on the map: the way forward must be a
+        # door warp in an *interior* wall — building doors sit rows away from the sweep's edge
+        # row (Route 2's forest-gate door is above the (3,43) mat, mid-map). Probe untried
+        # walls: each press either warps through a door or hard-blocks after two fails and
+        # retires the tile, so this tier provably shrinks to nothing instead of looping.
+        def untried_wall(cx: int, cy: int) -> bool:
+            f = (cx, cy + sign)
+            return f not in blocked and m.get(f) == 0
+
+        if untried_wall(px, py):
             return fwd
-        came: dict[tuple[int, int], tuple[int, int] | None] = {(px, py): None}
-        q = deque([(px, py)])
-        nodes = 0
-        target = None
-        while q and nodes < max_nodes:
-            cur = q.popleft()
-            nodes += 1
-            cx, cy = cur
-            fy = cy + sign
-            # A useful spot: its forward neighbour is enterable AND lies past our current row
-            # toward the edge (so stepping there gains ground we don't already hold).
-            if cur != (px, py) and (fy - py) * sign > 0 and self._passable(map_id, m, cx, fy):
-                target = cur
-                break
-            for _name, dx, dy in _DIRS:
-                nb = (cx + dx, cy + dy)
-                if nb in came or not self._passable(map_id, m, nb[0], nb[1]):
-                    continue
-                came[nb] = cur
-                q.append(nb)
-        if target is None:
-            return fwd  # nothing better known; nudge forward (it'll fail+block, then we re-plan)
-        step = self._first_step(came, (px, py), target)
-        return (step and self._dir(px, py, step)) or fwd
+        return sweep(untried_wall) or fwd
 
     def known_reachable(self, map_id: int, px: int, py: int, tx: int, ty: int) -> bool:
         """Can ``(tx, ty)`` be reached from ``(px, py)`` over tiles *known* to be walkable?

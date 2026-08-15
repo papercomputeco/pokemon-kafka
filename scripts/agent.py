@@ -1614,7 +1614,10 @@ class PokemonAgent:
         except Exception:
             pass  # game_wrapper may not be available in all contexts
         # Remember what we can see, so navigation builds a real map of each location over time.
-        self.world.observe(state.map_id, state.x, state.y, self.collision_map.grid)
+        # The real map size keeps the garbage the window reads beyond the boundary out of it.
+        self.world.observe(
+            state.map_id, state.x, state.y, self.collision_map.grid, bounds=self.memory.read_map_bounds()
+        )
 
         # --- FLE backtracking ---
         # Skip all backtracking while in Oak's Lab (map 40).

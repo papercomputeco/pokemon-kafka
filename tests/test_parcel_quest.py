@@ -6,6 +6,8 @@ from parcel_quest import (
     OAKS_LAB,
     PALLET_TOWN,
     PEWTER_CITY,
+    REDS_HOUSE_1F,
+    REDS_HOUSE_EXIT,
     ROUTE_1,
     ROUTE_2,
     TO_MART,
@@ -88,6 +90,17 @@ def test_go_north_exits_buildings_via_door_warp():
     q = ParcelQuest()
     assert "exit" in q.next_target(sig(OAKS_LAB, pokedex=True))["name"].lower()
     assert "exit" in q.next_target(sig(VIRIDIAN_MART, pokedex=True))["name"].lower()
+
+
+def test_go_north_exits_reds_house_after_blackout():
+    # Fainting with no Center visited respawns the player back home (map 37). The house has no
+    # north exit, so GO_NORTH must walk out the door — piloting north wedged in the top-left
+    # dead-end pocket for 41k+ turns (issue #64).
+    q = ParcelQuest()
+    t = q.next_target(sig(REDS_HOUSE_1F, pokedex=True))
+    assert t["pilot_to"] == REDS_HOUSE_EXIT
+    assert t["at_target"] == "down"  # press down on the mat to take the warp
+    assert "pilot" not in t  # never a bare cardinal pilot inside the house
 
 
 def test_to_oak_exits_mart_via_door_warp():

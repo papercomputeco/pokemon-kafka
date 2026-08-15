@@ -145,6 +145,20 @@ class TestRead:
         assert reader._read(0x9999) == 0
 
 
+class TestReadMapBounds:
+    def test_reads_walk_tile_dimensions(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[reader.ADDR_MAP_WIDTH] = 10  # blocks: Route 1 is 10x18 -> 20x36 tiles
+        fake_memory[reader.ADDR_MAP_HEIGHT] = 18
+        assert reader.read_map_bounds() == (20, 36)
+
+    def test_none_while_no_map_header_is_loaded(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[reader.ADDR_MAP_WIDTH] = 0
+        fake_memory[reader.ADDR_MAP_HEIGHT] = 18
+        assert reader.read_map_bounds() is None
+
+
 class TestRead16:
     def test_read_16_combines_hi_lo(self, mock_pyboy, fake_memory):
         reader = MemoryReader(mock_pyboy)

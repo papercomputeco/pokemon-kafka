@@ -27,6 +27,7 @@ ROUTE_2 = 13
 VIRIDIAN_FOREST = 51
 OAKS_LAB = 40
 VIRIDIAN_MART = 42
+REDS_HOUSE_1F = 37  # the blackout respawn point (fainting with no Center visited: 51 -> 0 -> 37)
 
 # Maps the quest actively steers through. It covers the whole corridor from Pallet up to (but not
 # including) Pewter, because the old waypoint navigator can't reliably make the Route 2 / Forest
@@ -48,6 +49,7 @@ OAK_TILE = (5, 3)  # Oak's Lab: in front of Prof. Oak (Oak object at 5,2 facing 
 VIRIDIAN_NORTH = (18, 0)  # Viridian City: the north exit to Route 2, past the Old Man at (17,5)
 MART_EXIT = (3, 7)  # Viridian Mart: the door warp back to Viridian City
 OAKS_LAB_EXIT = (5, 11)  # Oak's Lab: the door warp back to Pallet Town
+REDS_HOUSE_EXIT = (3, 7)  # Red's house 1F: the door warp back to Pallet Town (press down on the mat)
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,11 @@ class ParcelQuest:
                 return _to(OAKS_LAB_EXIT, "Oak's Lab exit", at_target="down")  # walk out the door
             if sig.map_id == VIRIDIAN_MART:
                 return _to(MART_EXIT, "Mart exit", at_target="down")
+            if sig.map_id == REDS_HOUSE_1F:
+                # Blacking out in the forest respawns the player back home. The house has no
+                # north exit, so piloting north wedges in the top-left dead-end pocket
+                # (issue #64: 41k+ two-cycle turns at (2,1)/(2,2)) — walk out the door instead.
+                return _to(REDS_HOUSE_EXIT, "Red's house exit", at_target="down")
             if sig.map_id == VIRIDIAN_CITY:
                 return _to(VIRIDIAN_NORTH, "Viridian north exit", at_target="up")
             return _pilot("north")
