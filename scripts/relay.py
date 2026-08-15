@@ -10,6 +10,7 @@ only variable per lane is the decision variant.
 """
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -138,3 +139,27 @@ def pick_winner(results):
     if not winners:
         return None
     return max(winners, key=lambda r: (r["fitness"].get("lead_hp", 0), -r["fitness"].get("turns", 10**9)))
+
+
+def prepare_variant_dir(seg_dir, variant, baton):
+    """Isolated workdir per lane; each gets its OWN copy of the baton worldmap."""
+    vdir = seg_dir / variant["label"]
+    vdir.mkdir(parents=True, exist_ok=True)
+    if baton.worldmap_path is not None and baton.worldmap_path.exists():
+        shutil.copy2(baton.worldmap_path, vdir / "world.map")
+    return vdir
+
+
+def promote_winner(run_dir, seg, winner):
+    """Copy the winning lane's artifacts into batons/ and return the next segment's Baton."""
+    batons = run_dir / "batons"
+    batons.mkdir(parents=True, exist_ok=True)
+    state_dst = batons / f"{seg.name}.state"
+    shutil.copy2(winner["vdir"] / "stop.state", state_dst)
+    map_src = winner["vdir"] / "world.map"
+    map_dst = None
+    if map_src.exists():
+        map_dst = batons / f"{seg.name}.worldmap"
+        shutil.copy2(map_src, map_dst)
+    (batons / f"{seg.name}.genome.json").write_text(json.dumps(winner["genome"], indent=2) + "\n")
+    return Baton(state_path=state_dst, worldmap_path=map_dst, genome=winner["genome"])

@@ -1,7 +1,17 @@
 import json
 from pathlib import Path
 
-from relay import BASE_GENOME, SEGMENTS, Baton, Segment, build_agent_cmd, pick_winner, segment_success
+from relay import (
+    BASE_GENOME,
+    SEGMENTS,
+    Baton,
+    Segment,
+    build_agent_cmd,
+    pick_winner,
+    prepare_variant_dir,
+    promote_winner,
+    segment_success,
+)
 
 
 def _baton(tmp_path, genome=None):
@@ -83,3 +93,39 @@ def test_pick_winner_prefers_healthiest_then_fastest():
 
 def test_pick_winner_none_when_no_success():
     assert pick_winner([_result("a", False, 10, 10)]) is None
+
+
+def test_prepare_variant_dir_copies_baton_worldmap(tmp_path):
+    seed_map = tmp_path / "seed.worldmap"
+    seed_map.write_bytes(b"geometry")
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=seed_map, genome={})
+    vdir = prepare_variant_dir(tmp_path / "seg", {"label": "cautious"}, baton)
+    assert vdir == tmp_path / "seg" / "cautious"
+    assert (vdir / "world.map").read_bytes() == b"geometry"
+
+
+def test_prepare_variant_dir_without_worldmap_starts_fresh(tmp_path):
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    vdir = prepare_variant_dir(tmp_path / "seg", {"label": "base"}, baton)
+    assert not (vdir / "world.map").exists()
+
+
+def test_promote_winner_builds_next_baton(tmp_path):
+    seg = SEGMENTS[0]
+    vdir = tmp_path / "seg" / "wide_dc2"
+    vdir.mkdir(parents=True)
+    (vdir / "stop.state").write_bytes(b"state")
+    (vdir / "world.map").write_bytes(b"map")
+    winner = {
+        "label": "wide_dc2",
+        "vdir": vdir,
+        "genome": {"door_cooldown": 2},
+        "success": True,
+        "fitness": {"lead_hp": 20, "turns": 300},
+    }
+    baton = promote_winner(tmp_path, seg, winner)
+    assert baton.state_path.read_bytes() == b"state"
+    assert baton.worldmap_path.read_bytes() == b"map"
+    assert baton.genome == {"door_cooldown": 2}
+    saved = json.loads((tmp_path / "batons" / "route1_to_forest.genome.json").read_text())
+    assert saved == {"door_cooldown": 2}
