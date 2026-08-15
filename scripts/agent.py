@@ -714,6 +714,11 @@ class PokemonAgent:
         self._advice_offsets: dict[str, int] = {}
         self._advice_seen: set[str] = set()
         self._advice_ticks = 0
+        # Sideloop spawning: every sideloop_every turns, snapshot the live state and race AlphaEvolve
+        # variants in the background (sideloop.py); the winning genome comes back through the advice inbox.
+        self.sideloop_every = 0  # turns between live-snapshot sideloops (0 = off)
+        self.sideloop_proc = None  # at most one AlphaEvolve subloop in flight
+        self.sideloop_popen = subprocess.Popen  # injectable for tests
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
         # scripted progression that pure waypoint navigation cannot pass on its own.
         self.parcel_quest = ParcelQuest()
@@ -946,6 +951,45 @@ class PokemonAgent:
             return
         for item in items:
             self._apply_advice(item)
+
+    def _tick_sideloop(self) -> None:
+        """The while loop as a harness: spawn an AlphaEvolve subloop from the live state.
+
+        Every sideloop_every turns, snapshot the running game and race decision variants
+        from it in the background (sideloop.py); the winner comes back through the advice
+        inbox as a genome_patch. One in flight max; a spawn that fails must not hurt the run.
+        """
+        if not self.sideloop_every or not self.advice_inbox_dir:
+            return
+        if self.sideloop_proc is not None:
+            if self.sideloop_proc.poll() is None:
+                return
+            self.log(f"SIDELOOP | finished rc={self.sideloop_proc.returncode}")
+            self.sideloop_proc = None
+        if self.turn_count == 0 or self.turn_count % self.sideloop_every:
+            return
+        try:
+            work_dir = Path(tempfile.mkdtemp(prefix="sideloop-"))
+            state_path = work_dir / "live.state"
+            with open(state_path, "wb") as f:
+                self.pyboy.save_state(f)
+            cmd = [
+                sys.executable,
+                str(SCRIPT_DIR / "sideloop.py"),
+                self.rom_path,
+                "--state",
+                str(state_path),
+                "--genome-json",
+                json.dumps(self.evolve_params),
+                "--work-dir",
+                str(work_dir),
+                "--advice-out",
+                str(Path(self.advice_inbox_dir) / "sideloop.jsonl"),
+            ]
+            self.sideloop_proc = self.sideloop_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.log(f"SIDELOOP | spawned at turn {self.turn_count} -> {work_dir}")
+        except Exception as exc:  # noqa: BLE001 — a sideloop that cannot start must not hurt the run
+            self.log(f"SIDELOOP | spawn failed: {exc}")
 
     def _apply_advice(self, item: dict) -> None:
         """Apply one advice dict: dedupe by id, drop expired, dispatch on type."""
@@ -1832,6 +1876,7 @@ class PokemonAgent:
             "final_y": final.y,
             "badges": final.badges,
             "party_size": final.party_count,
+            "lead_hp": (final.party_hp or [0])[0],
             "stuck_count": len([e for e in self.events if "STUCK" in e]),
             "max_stuck_streak": self.max_stuck_streak,
             "backtrack_restores": self.backtrack.total_restores,
@@ -1844,6 +1889,15 @@ class PokemonAgent:
             "brock_lead_species": self.brock_lead_species,
             "brock_lead_level": self.brock_lead_level,
         }
+
+    @staticmethod
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None) -> bool:
+        """True once the overworld state satisfies a --stop-on-* condition."""
+        if stop_on_map is not None and ow.map_id == stop_on_map:
+            return True
+        if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
+            return True
+        return False
 
     @staticmethod
     def _turns_remaining(loop_turns: int, max_turns: int) -> bool:
@@ -1921,6 +1975,9 @@ class PokemonAgent:
         save_state_on_map=None,
         save_state_on_trainer=None,
         save_state_every=None,
+        stop_on_map=None,
+        stop_on_badge=None,
+        stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
     ):
@@ -2136,6 +2193,16 @@ class PokemonAgent:
                             self.pyboy.save_state(f)
                         self._map_state_saved = True
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
+                if stop_on_map is not None or stop_on_badge is not None:
+                    ow = self.memory.read_overworld_state()
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge):
+                        if stop_state:
+                            with open(stop_state, "wb") as f:
+                                self.pyboy.save_state(f)
+                            self.log(f"STOP | condition met at turn {self.turn_count} -> {stop_state}")
+                        else:
+                            self.log(f"STOP | condition met at turn {self.turn_count}")
+                        break
                 self.run_overworld()
                 self.turn_count += 1
 
@@ -2144,6 +2211,8 @@ class PokemonAgent:
             self._tick_in_run_heal()
 
             self._tick_advice()
+
+            self._tick_sideloop()
 
             self.collector.tick(self.turn_count)
 
@@ -2376,6 +2445,23 @@ def main():
         help='Overwrite a checkpoint state every N turns, as "N:PATH" (for segmented resume)',
     )
     parser.add_argument(
+        "--stop-on-map",
+        type=int,
+        default=None,
+        help="End the run once this map id is reached (state dumped to --stop-state first)",
+    )
+    parser.add_argument(
+        "--stop-on-badge",
+        type=int,
+        default=None,
+        help="End the run once the badge count reaches N",
+    )
+    parser.add_argument(
+        "--stop-state",
+        default=None,
+        help="Save-state path written when a --stop-on-* condition ends the run",
+    )
+    parser.add_argument(
         "--worldmap-file",
         default=None,
         help="Load/save the accumulated WorldMap (learned geometry) here, so a reset run keeps it",
@@ -2410,6 +2496,12 @@ def main():
         default=50,
         help="Poll the advice inbox every N loop turns (default: 50)",
     )
+    parser.add_argument(
+        "--sideloop-every",
+        type=int,
+        default=0,
+        help="Spawn an AlphaEvolve sideloop from the live state every N turns (0 = off; needs --advice-inbox)",
+    )
     args = parser.parse_args()
 
     if not Path(args.rom).exists():
@@ -2441,6 +2533,7 @@ def main():
     agent.in_run_heal_streak = args.in_run_heal_streak
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.sideloop_every = max(0, args.sideloop_every)
 
     # One run identity for the whole session: recorder folder, live tile, and
     # every game event's run_id/event_id all derive from it.
@@ -2482,6 +2575,9 @@ def main():
             save_state_on_map=args.save_state_on_map,
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
+            stop_on_map=args.stop_on_map,
+            stop_on_badge=args.stop_on_badge,
+            stop_state=args.stop_state,
             fitness_every=args.fitness_every,
             fitness_path=args.output_json,
         )

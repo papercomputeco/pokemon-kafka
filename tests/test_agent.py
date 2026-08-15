@@ -8,6 +8,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 # Import the agent module — pyboy is available in this env via deps
@@ -2245,6 +2246,31 @@ class TestRun:
         assert ag._map_state_saved is True
         assert any("Saved map-12 state" in e for e in ag.events)
 
+    def test_run_stop_on_map_saves_stop_state_and_breaks(self, tmp_path):
+        """--stop-on-map with --stop-state dumps a state and breaks before run_overworld."""
+        ag = _make_agent(tmp_path)
+        out = tmp_path / "stop.state"
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=51, x=5, y=5))
+        ag.run_overworld = MagicMock()
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=10, stop_on_map=51, stop_state=str(out))
+        ag.pyboy.save_state.assert_called_once()
+        ag.run_overworld.assert_not_called()
+        assert any("STOP | condition met at turn" in e and str(out) in e for e in ag.events)
+
+    def test_run_stop_on_badge_without_stop_state_logs_and_breaks(self, tmp_path):
+        """--stop-on-badge with no --stop-state still breaks and logs, skipping the state dump."""
+        ag = _make_agent(tmp_path)
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=0, x=5, y=5, badges=1))
+        ag.run_overworld = MagicMock()
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=10, stop_on_badge=1)
+        ag.pyboy.save_state.assert_not_called()
+        ag.run_overworld.assert_not_called()
+        assert any("STOP | condition met at turn" in e for e in ag.events)
+
     def test_run_saves_periodic_checkpoint(self, tmp_path):
         """--save-state-every "N:PATH" overwrites a checkpoint every N turns."""
         ag = _make_agent(tmp_path)
@@ -2371,6 +2397,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -2407,6 +2436,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -2432,6 +2464,9 @@ class TestMain:
             save_state_on_map=None,
             save_state_on_trainer=None,
             save_state_every=None,
+            stop_on_map=None,
+            stop_on_badge=None,
+            stop_state=None,
             fitness_every=0,
             fitness_path=None,
         )
@@ -4320,3 +4355,162 @@ def test_run_epilogue_notes_in_flight_heal(tmp_path):
     with patch.object(agent, "Image", None):
         ag.run(max_turns=0)
     assert any("still racing" in e for e in ag.events)
+
+
+# ===================================================================
+# Task 1: lead_hp in fitness dict
+# ===================================================================
+
+
+def _fitness_stub(party_hp):
+    """Bare attribute bag standing in for a PokemonAgent inside compute_fitness."""
+    mem = SimpleNamespace(
+        read_overworld_state=lambda: OverworldState(
+            map_id=2, x=1, y=1, badges=1, party_count=len(party_hp), party_hp=party_hp
+        )
+    )
+    return SimpleNamespace(
+        memory=mem,
+        turn_count=10,
+        battles_won=1,
+        maps_visited={2},
+        events=[],
+        max_stuck_streak=0,
+        backtrack=SimpleNamespace(total_restores=0),
+        encounter_log=[],
+        level_ups=0,
+        evolution_log=[],
+        brock_turns=None,
+        brock_won=None,
+        brock_lead_species=None,
+        brock_lead_level=None,
+    )
+
+
+def test_compute_fitness_reports_lead_hp():
+    fitness = PokemonAgent.compute_fitness(_fitness_stub([17, 30]))
+    assert fitness["lead_hp"] == 17
+
+
+def test_compute_fitness_lead_hp_zero_when_party_empty():
+    assert PokemonAgent.compute_fitness(_fitness_stub([]))["lead_hp"] == 0
+
+
+# ===================================================================
+# Task 2: Stop Conditions
+# ===================================================================
+
+
+def test_stop_condition_met_on_target_map():
+    ow = OverworldState(map_id=51)
+    assert PokemonAgent._stop_condition_met(ow, stop_on_map=51)
+    assert not PokemonAgent._stop_condition_met(ow, stop_on_map=2)
+
+
+def test_stop_condition_counts_badge_bits():
+    ow = OverworldState(badges=0b101)  # two badges set
+    assert PokemonAgent._stop_condition_met(ow, stop_on_badge=2)
+    assert not PokemonAgent._stop_condition_met(ow, stop_on_badge=3)
+
+
+def test_stop_condition_defaults_never_fire():
+    assert not PokemonAgent._stop_condition_met(OverworldState(map_id=51, badges=7))
+
+
+# ===================================================================
+# Task 9: Sideloop (--sideloop-every)
+# ===================================================================
+
+
+def _sideloop_stub(turn, every=100, inbox="inbox", proc=None):
+    calls = []
+
+    def fake_popen(cmd, stdout=None, stderr=None):
+        calls.append(cmd)
+        return SimpleNamespace(poll=lambda: None, returncode=None)
+
+    stub = SimpleNamespace(
+        turn_count=turn,
+        sideloop_every=every,
+        sideloop_proc=proc,
+        sideloop_popen=fake_popen,
+        advice_inbox_dir=inbox,
+        rom_path="rom.gb",
+        evolve_params={"door_cooldown": 5},
+        pyboy=SimpleNamespace(save_state=lambda f: f.write(b"state")),
+        log=lambda msg: None,
+    )
+    return stub, calls
+
+
+def test_tick_sideloop_spawns_on_interval(tmp_path):
+    stub, calls = _sideloop_stub(turn=200)
+    PokemonAgent._tick_sideloop(stub)
+    assert len(calls) == 1
+    cmd = " ".join(calls[0])
+    assert "sideloop.py" in cmd
+    assert "--advice-out" in cmd
+    assert stub.sideloop_proc is not None
+
+
+def test_tick_sideloop_skips_off_interval_and_turn_zero():
+    for turn in (0, 150):
+        stub, calls = _sideloop_stub(turn=turn)
+        PokemonAgent._tick_sideloop(stub)
+        assert calls == []
+
+
+def test_tick_sideloop_one_in_flight_max():
+    running = SimpleNamespace(poll=lambda: None, returncode=None)
+    stub, calls = _sideloop_stub(turn=200, proc=running)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []
+    assert stub.sideloop_proc is running
+
+
+def test_tick_sideloop_requires_inbox_and_enable():
+    stub, calls = _sideloop_stub(turn=200, inbox=None)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []
+    stub, calls = _sideloop_stub(turn=200, every=0)
+    PokemonAgent._tick_sideloop(stub)
+    assert calls == []
+
+
+def test_tick_sideloop_clears_finished_proc_without_respawning():
+    """A finished lane is logged and cleared; off-interval turns never respawn."""
+    logs = []
+    finished = SimpleNamespace(poll=lambda: 0, returncode=0)
+    stub = SimpleNamespace(
+        turn_count=150,  # off the sideloop_every=100 interval
+        sideloop_every=100,
+        sideloop_proc=finished,
+        sideloop_popen=lambda *a, **k: pytest.fail("must not respawn off-interval"),
+        advice_inbox_dir="inbox",
+        rom_path="rom.gb",
+        evolve_params={},
+        pyboy=SimpleNamespace(save_state=lambda f: f.write(b"state")),
+        log=logs.append,
+    )
+    PokemonAgent._tick_sideloop(stub)
+    assert stub.sideloop_proc is None
+    assert any("SIDELOOP | finished rc=0" in m for m in logs)
+
+
+def test_tick_sideloop_spawn_failure_is_logged_and_swallowed():
+    """A spawn that raises (e.g. state-save I/O error) must not propagate into the run loop."""
+    logs = []
+    stub = SimpleNamespace(
+        turn_count=200,
+        sideloop_every=100,
+        sideloop_proc=None,
+        sideloop_popen=lambda *a, **k: pytest.fail("popen should not be reached"),
+        advice_inbox_dir="inbox",
+        rom_path="rom.gb",
+        evolve_params={},
+        pyboy=SimpleNamespace(save_state=MagicMock(side_effect=OSError("disk full"))),
+        log=logs.append,
+    )
+    PokemonAgent._tick_sideloop(stub)  # must not raise
+    assert stub.sideloop_proc is None
+    assert any("SIDELOOP | spawn failed: disk full" in m for m in logs)

@@ -450,6 +450,31 @@ Target turn counts for community benchmarking. Fork it, improve the strategy, po
 | 8 badges | ~200,000 | ~100,000 | ~60,000 |
 | Elite Four | ~300,000 | ~150,000 | ~80,000 |
 
+## Divide-and-Conquer Relay
+
+`scripts/relay.py` splits the road to Mt. Moon into segments (Route 1 → Viridian Forest → Pewter →
+Boulder Badge → Mt. Moon entrance) and races parallel decision variants over each: battle-survival
+spreads on the forest leg, navigation spreads on traversal legs. Each lane runs `agent.py` with
+`--stop-on-map`/`--stop-on-badge` so it self-terminates at the segment goal and dumps a save state;
+the healthiest winner's state + WorldMap + genome become the next segment's baton.
+
+```bash
+uv run python scripts/relay.py --dry-run          # print every lane's command, launch nothing
+uv run python scripts/relay.py                    # full relay: all four segments
+uv run python scripts/relay.py --segments forest_to_pewter --seed-state data/relay/<run>/batons/route1_to_forest.state
+uv run python scripts/relay.py --max-turns-scale 0.25   # quick smoke: quarter-length segments
+```
+
+Artifacts land in `data/relay/<run-id>/`: per-lane `agent.log` + `fitness.json`, `batons/*.state`,
+and `report.json`. The `pewter_to_badge` segment also captures `batons/pre_brock.state` for the
+autotune brock loop.
+
+The while loop can also act as its own harness: with `--sideloop-every 500 --advice-inbox
+data/advice`, the live agent snapshots its state every 500 turns and spawns
+`scripts/sideloop.py` in the background — an AlphaEvolve subloop that races decision variants
+from that snapshot, scores them with `evolve.score`, and feeds the winning genome back through
+the advice inbox as a `genome_patch`. The game never stops; it just gets better mid-run.
+
 ## FLE-Style Backtracking
 
 Inspired by the [Factorio Learning Environment](https://arxiv.org/abs/2503.09617)'s `BacktrackingAgent`, the agent snapshots game state at key moments (map changes, periodic intervals) and restores when stuck. This directly addresses navigation dead-ends like Route 1's y=28 blocker — instead of wasting turns in a loop, the agent reverts to a known-good state and tries an alternate path.
