@@ -648,3 +648,96 @@ def test_cross_step_does_not_chase_candidates_through_the_unknown_ocean():
     wm = _route1_worldmap()
     assert wm.cross_step(12, 10, 35, "north") == "up"
     assert wm.cross_step(12, 11, 35, "north") == "up"
+
+
+# --- map bounds: the collision window reads garbage beyond the real map edge ------
+# Route 2 (map 13, 20x72 tiles) exposed the flap's twin: standing on the south boundary row
+# (8,71), the observation window stamped phantom walkable rows 72-75 below the real map, so
+# with every genuine candidate exhausted the explore fallback chased the phantom southern
+# "frontier" — and the physical press exited the map (731 Viridian<->Route 2 crossings in a
+# 3,000-turn run). The game knows the loaded map's true size (wCurMapWidth/Height); once the
+# WorldMap records it, off-map garbage can neither be stamped nor treated as frontier.
+
+
+def _route2_worldmap() -> WorldMap:
+    """Map 13 as the flapping agent had learned it — phantom rows 72-75 included."""
+    rows = {
+        40: "..####....####",
+        41: "..####....####",
+        42: "..####....####",
+        43: "###.##########",
+        44: "...........#..",
+        45: "...........#..",
+        46: "...........#..",
+        47: "########...#..",
+        48: "...........#..",
+        49: "...........###",
+        50: "...........#..",
+        51: "...........#..",
+        52: "............#.",
+        53: "......########",
+        54: ".....########.",
+        55: ".....########.",
+        56: "......#######.",
+        57: "............#?",
+        58: "............#.",
+        59: "............#.",
+        60: "##..........#.",
+        61: "#######.######",
+        62: "##..........#.",
+        63: "##..........#.",
+        64: "##..........#.",
+        65: "##...#......#.",
+        66: "##..........#.",
+        67: "##..........#.",
+        68: "##..........#.",
+        69: "##........####",
+        70: "#######...####",
+        71: "#######...####",
+        72: "#######...####",
+        73: "#######..#####",
+        74: "???####...####",
+        75: "???####...####",
+    }
+    wm = WorldMap()
+    m = wm.cells.setdefault(13, {})
+    for y, row in rows.items():
+        for x, ch in enumerate(row):
+            if ch != "?":
+                m[(x, y)] = 1 if ch == "." else 0
+    return wm
+
+
+def test_bounds_stop_the_sweep_walking_off_the_trailing_edge():
+    # With the real 20x72 bounds known, the phantom rows below y=71 are off-map: neither the
+    # sweep nor the explore fallback may answer "down" from the south boundary row.
+    wm = _route2_worldmap()
+    wm.bounds[13] = (20, 72)
+    assert wm.cross_step(13, 8, 71, "north") != "down"
+    assert wm.explore_step(13, 8, 71) != "down"
+
+
+def test_observe_records_bounds_and_clips_garbage_stamps():
+    wm = WorldMap()
+    # Player at the south-east corner of a tiny 8x8 map: the window rows/cols beyond the
+    # edge carry garbage "walkable" reads that must not be stamped.
+    wm.observe(37, 7, 7, _full(1), bounds=(8, 8))
+    assert wm.bounds[37] == (8, 8)
+    assert all(x < 8 and y < 8 for (x, y) in wm.cells[37])
+
+
+def test_pressing_off_the_real_edge_is_still_the_crossing():
+    wm = WorldMap()
+    m = wm.cells.setdefault(0, {})
+    for x in range(0, 8):
+        m[(x, 2)] = 1
+        m[(x, 3)] = 1
+    wm.bounds[0] = (8, 4)  # the map really ends at y=3
+    assert wm.cross_step(0, 2, 3, "south") == "down"  # off the last row IS the crossing
+
+
+def test_bounds_roundtrip_through_dict():
+    wm = WorldMap()
+    wm.observe(13, 5, 5, _full(1), bounds=(20, 72))
+    wm2 = WorldMap.from_dict(wm.to_dict())
+    assert wm2.bounds == {13: (20, 72)}

@@ -53,9 +53,20 @@ class WorldMap:
         # asked to pay an extra ``encounter_cost`` to enter them so equal-ish paths prefer fewer
         # battles — learned from real encounters, like walls are learned from failed steps.
         self.encounters: dict[int, set[tuple[int, int]]] = {}
+        # Each map's real size in walk-tiles (width, height), read from the game's own map
+        # header when available. Near a map edge the collision window reads garbage beyond the
+        # boundary — phantom "walkable" tiles that fed the planner fake exits (map 37's east
+        # corridor, Route 2's rows below the south edge). Known bounds make them impossible:
+        # observe() refuses to stamp beyond them and _passable() refuses to route there.
+        self.bounds: dict[int, tuple[int, int]] = {}
 
-    def observe(self, map_id: int, px: int, py: int, grid: list[list[int]]) -> None:
+    def observe(
+        self, map_id: int, px: int, py: int, grid: list[list[int]], bounds: tuple[int, int] | None = None
+    ) -> None:
         """Stamp a 9x10 collision ``grid`` (player at the centre) into the map at ``(px, py)``."""
+        if bounds is not None:
+            self.bounds[map_id] = (int(bounds[0]), int(bounds[1]))
+        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
         m = self.cells.setdefault(map_id, {})
         blocked = self.blocked.get(map_id)
         for r in range(min(9, len(grid))):
@@ -63,7 +74,7 @@ class WorldMap:
             for c in range(min(10, len(row))):
                 gx = px + (c - _PLAYER_COL)
                 gy = py + (r - _PLAYER_ROW)
-                if 0 <= gx <= _MAX_COORD and 0 <= gy <= _MAX_COORD:
+                if 0 <= gx < bw and 0 <= gy < bh:
                     m[(gx, gy)] = 1 if row[c] else 0
                     # A hard-blocked tile observed walkable again: its occupant may be gone.
                     # Count the sighting; at the expiry threshold, drop the block for a re-test.
@@ -93,6 +104,7 @@ class WorldMap:
             "cells": {str(m): [[x, y, v] for (x, y), v in cells.items()] for m, cells in self.cells.items()},
             "blocked": {str(m): [[x, y, seen] for (x, y), seen in s.items()] for m, s in self.blocked.items()},
             "encounters": {str(m): [[x, y] for (x, y) in s] for m, s in self.encounters.items()},
+            "bounds": {str(m): [w, h] for m, (w, h) in self.bounds.items()},
         }
 
     @classmethod
@@ -106,6 +118,8 @@ class WorldMap:
             wm.blocked[int(m)] = {(int(it[0]), int(it[1])): int(it[2]) if len(it) > 2 else 0 for it in items}
         for m, items in (data.get("encounters") or {}).items():
             wm.encounters[int(m)] = {(int(x), int(y)) for x, y in items}
+        for m, wh in (data.get("bounds") or {}).items():
+            wm.bounds[int(m)] = (int(wh[0]), int(wh[1]))
         return wm
 
     def save(self, path) -> None:
@@ -132,8 +146,9 @@ class WorldMap:
         return self.cells.get(map_id, {}).get((x, y), default)
 
     def _passable(self, map_id: int, m: dict[tuple[int, int], int], x: int, y: int) -> bool:
-        if x < 0 or y < 0 or x > _MAX_COORD or y > _MAX_COORD:
-            return False
+        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
+        if x < 0 or y < 0 or x >= bw or y >= bh:
+            return False  # off the map's real edge (or the coordinate byte's range)
         if (x, y) in self.blocked.get(map_id, ()):
             return False  # tried and failed — never enter, even if the grid claims walkable
         return m.get((x, y), 1) != 0  # unknown -> passable (optimistic, draws search to the goal)
@@ -239,12 +254,14 @@ class WorldMap:
         # "walls" are only worth pressing there — never interior furniture/tree rows.
         edge_y = (min if sign < 0 else max)(y for _x, y in m) if m else None
 
+        last_y = self.bounds.get(map_id, (0, _MAX_COORD + 1))[1] - 1  # the map's real last row
+
         def pressable(cx: int, cy: int) -> bool:
             """Could pressing ``fwd`` from (cx, cy) still be the way off the map?"""
             f = (cx, cy + sign)
             if f in blocked:
                 return False  # pressed twice and failed — proven impassable, retired
-            if f[1] < 0 or f[1] > _MAX_COORD:
+            if f[1] < 0 or f[1] > last_y:
                 return True  # pressing off the edge row IS the crossing on outdoor maps
             v = m.get(f)
             if v is None:
@@ -271,11 +288,12 @@ class WorldMap:
                     backup = cur
             for _name, dx, dy in _DIRS:
                 nb = (cx + dx, cy + dy)
-                # Sweep only over ground *known* walkable: unknown tiles are probe targets
-                # (the forward press), never corridors. Optimistic traversal let the BFS wrap
-                # around a real border wall through the unstamped void and "gain ground" in
-                # fantasy space — walking off the wrong edge (the Pallet<->Route 1 flap).
-                if nb in came or nb in blocked or m.get(nb) != 1:
+                # Sweep only over ground *known* walkable (and really on the map): unknown
+                # tiles are probe targets (the forward press), never corridors. Optimistic
+                # traversal let the BFS wrap around a real border wall through the unstamped
+                # void and "gain ground" in fantasy space (the Pallet<->Route 1 flap), and
+                # legacy phantom stamps beyond the recorded bounds are just as fake.
+                if nb in came or m.get(nb) != 1 or not self._passable(map_id, m, nb[0], nb[1]):
                     continue
                 came[nb] = cur
                 q.append(nb)

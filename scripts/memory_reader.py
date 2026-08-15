@@ -203,6 +203,8 @@ class MemoryReader:
         self.ADDR_MAP_ID = p.addr_map_id
         self.ADDR_PLAYER_X = p.addr_player_x
         self.ADDR_PLAYER_Y = p.addr_player_y
+        self.ADDR_MAP_HEIGHT = p.addr_map_height
+        self.ADDR_MAP_WIDTH = p.addr_map_width
         self.ADDR_BADGES = p.addr_badges
         self.ADDR_MONEY_1, self.ADDR_MONEY_2, self.ADDR_MONEY_3 = (
             p.addr_money_1,
@@ -227,6 +229,18 @@ class MemoryReader:
             x = self._read(self.ADDR_NUM_SIGNS + 2 + i * 2)
             signs.append((x, y))
         return signs
+
+    def read_map_bounds(self) -> tuple[int, int] | None:
+        """Current map's real size in walk-tiles (width, height), or None mid-transition.
+
+        The map header stores dimensions in 2x2-tile blocks; a zero byte means no header is
+        loaded yet. Near a map edge the collision window reads garbage beyond the boundary, so
+        callers pass this to WorldMap.observe to keep phantom tiles out of the learned map."""
+        w = self._read(self.ADDR_MAP_WIDTH)
+        h = self._read(self.ADDR_MAP_HEIGHT)
+        if not w or not h:
+            return None
+        return (2 * w, 2 * h)
 
     def _read(self, addr: int) -> int:
         """Read a single byte from memory."""
