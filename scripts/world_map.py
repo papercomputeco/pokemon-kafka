@@ -217,39 +217,71 @@ class WorldMap:
     def cross_step(self, map_id: int, px: int, py: int, goal: str, max_nodes: int = 6000) -> str:
         """Step that drives the agent off the map in cardinal ``goal`` ("north"/"south").
 
-        Go toward the edge whenever the tile ahead is enterable; when it's a known wall (a learned
-        map-edge non-exit), BFS to the nearest column where forward is *still* open and head there —
-        sweeping the boundary to find the real exit, instead of giving up and drifting back the way
-        a plain "go to (x, 0)" plan does once the columns straight ahead are blocked."""
+        One BFS picks a *pressable* destination — a tile whose forward press could still be the
+        way out: off the edge row, into unexplored ground, or into a boundary-row "wall" that has
+        never actually been tried (exit warps read as walls in the collision grid, so the only
+        way to tell them apart is one press; failing it twice hard-blocks the tile and retires
+        the candidate for good). Known-open floor ahead is deliberately NOT a destination by
+        itself: steering by "the tile ahead is enterable" is what wedged map 37 (issue #64) —
+        the (2,1) pocket is enterable from (2,2) but leads nowhere, so the old local fast path
+        and the global sweep disagreed and the agent two-cycled between the two tiles for tens
+        of thousands of turns. Because every candidate press either moves the agent or (via the
+        caller's failed-move hard-blocks) permanently shrinks the candidate set, successive
+        calls always make progress instead of looping.
+
+        Candidates that gain ground toward the edge are preferred (nearest first); failing
+        that, the nearest candidate anywhere, then frontier exploration, then a forward nudge."""
         m = self.cells.get(map_id, {})
         sign = -1 if goal == "north" else 1
         fwd = "up" if goal == "north" else "down"
-        if self._passable(map_id, m, px, py + sign):
-            return fwd
-        came: dict[tuple[int, int], tuple[int, int] | None] = {(px, py): None}
-        q = deque([(px, py)])
+        blocked = self.blocked.get(map_id, ())
+        # The known row nearest the target edge: warps sit on the map boundary, so stamped
+        # "walls" are only worth pressing there — never interior furniture/tree rows.
+        edge_y = (min if sign < 0 else max)(y for _x, y in m) if m else None
+
+        def pressable(cx: int, cy: int) -> bool:
+            """Could pressing ``fwd`` from (cx, cy) still be the way off the map?"""
+            f = (cx, cy + sign)
+            if f in blocked:
+                return False  # pressed twice and failed — proven impassable, retired
+            if f[1] < 0 or f[1] > _MAX_COORD:
+                return True  # pressing off the edge row IS the crossing on outdoor maps
+            v = m.get(f)
+            if v is None:
+                return True  # unexplored — could be open ground or the exit
+            return v == 0 and f[1] == edge_y  # a boundary "wall" may be a warp
+
+        if pressable(px, py):
+            return fwd  # the press right here may be the exit — try it before sweeping
+        start = (px, py)
+        came: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+        q = deque([start])
         nodes = 0
         target = None
+        backup = None  # nearest candidate that doesn't gain ground, kept as plan B
         while q and nodes < max_nodes:
             cur = q.popleft()
             nodes += 1
             cx, cy = cur
-            fy = cy + sign
-            # A useful spot: its forward neighbour is enterable AND lies past our current row
-            # toward the edge (so stepping there gains ground we don't already hold).
-            if cur != (px, py) and (fy - py) * sign > 0 and self._passable(map_id, m, cx, fy):
-                target = cur
-                break
+            if cur != start and pressable(cx, cy):
+                if (cy + sign - py) * sign > 0:  # its press lands past our current row
+                    target = cur
+                    break
+                if backup is None:
+                    backup = cur
             for _name, dx, dy in _DIRS:
                 nb = (cx + dx, cy + dy)
                 if nb in came or not self._passable(map_id, m, nb[0], nb[1]):
                     continue
                 came[nb] = cur
                 q.append(nb)
-        if target is None:
-            return fwd  # nothing better known; nudge forward (it'll fail+block, then we re-plan)
-        step = self._first_step(came, (px, py), target)
-        return (step and self._dir(px, py, step)) or fwd
+        step = self._first_step(came, start, target if target is not None else backup)
+        d = step and self._dir(px, py, step)
+        if d:
+            return d
+        # No pressable candidate reachable: map the frontier instead of mashing into a proven
+        # wall; nudge forward only as the very last resort (nothing else is left to learn).
+        return self.explore_step(map_id, px, py, max_nodes=max_nodes) or fwd
 
     def known_reachable(self, map_id: int, px: int, py: int, tx: int, ty: int) -> bool:
         """Can ``(tx, ty)`` be reached from ``(px, py)`` over tiles *known* to be walkable?
