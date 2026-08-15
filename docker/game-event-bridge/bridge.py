@@ -70,6 +70,21 @@ def initial_state(telemetry_dir, from_beginning: bool) -> dict:
     return {p.name: p.stat().st_size for p in scan(telemetry_dir)}
 
 
+def produce_with_backpressure(producer, topic: str, key: bytes, value: bytes) -> None:
+    """produce(), draining the delivery queue whenever librdkafka's buffer fills.
+
+    A cold replay of a large sink produces far faster than the broker acks;
+    without this, the local queue caps out (default 100k messages), produce()
+    raises BufferError, and the bridge dies mid-replay.
+    """
+    while True:
+        try:
+            producer.produce(topic, key=key, value=value)
+            return
+        except BufferError:
+            producer.poll(1)
+
+
 def run_once(producer, topic: str, telemetry_dir, state: dict) -> dict:
     """Produce all new complete lines across the sink; return updated offsets."""
     state = dict(state)
@@ -81,7 +96,7 @@ def run_once(producer, topic: str, telemetry_dir, state: dict) -> dict:
             except json.JSONDecodeError:
                 print(f"[bridge] skipping unparseable line in {path.name}", flush=True)
                 continue
-            producer.produce(topic, key=key.encode("utf-8"), value=line.encode("utf-8"))
+            produce_with_backpressure(producer, topic, key.encode("utf-8"), line.encode("utf-8"))
         if lines:
             producer.poll(0)
         state[path.name] = new_offset
