@@ -1,0 +1,10 @@
+{
+  "name": "forest-crossing-healthy",
+  "learning": "docs/learnings/viridian-forest-turn-385-blackout.md",
+  "category": "navigation",
+  "seed_state": "demo-runs/states/forest-entry-healthy-17hp.state",
+  "stop_on_map": 2,
+  "max_turns": 3000,
+  "genome": {"hp_run_threshold": 0.5, "hp_heal_threshold": 0.5},
+  "pass": {"final_map_id": 2, "min_lead_hp": 5}
+}

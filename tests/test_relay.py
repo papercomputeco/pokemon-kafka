@@ -461,3 +461,157 @@ def test_main_missing_seed_state_returns_1(tmp_path, capsys):
     )
     assert rc == 1
     assert "seed state not found" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Memory write-back: a segment win must land in the agent's own memory
+# ---------------------------------------------------------------------------
+
+
+def _winner(genome, lead_hp=13, turns=2270):
+    return {
+        "label": "very_cautious",
+        "genome": genome,
+        "success": True,
+        "fitness": {"lead_hp": lead_hp, "turns": turns, "final_map_id": 2},
+    }
+
+
+def test_record_win_appends_observation_line(tmp_path):
+    memory_dir = tmp_path / "memory"
+    seg = relay.SEGMENTS[1]  # forest_to_pewter
+    genome = dict(relay.BASE_GENOME, hp_run_threshold=0.5, hp_heal_threshold=0.5)
+    relay.record_win(seg, _winner(genome), memory_dir=memory_dir, notes_path=None, run_dir=tmp_path / "run")
+    text = (memory_dir / "observations.md").read_text()
+    assert "[important] relay forest_to_pewter cleared by very_cautious" in text
+    assert "hp_run_threshold=0.5" in text and "hp_heal_threshold=0.5" in text
+    assert "lead_hp=13" in text and "turns=2270" in text
+    assert "(session: relay)" in text
+    # notes.md is opt-in: nothing written when notes_path is None
+    assert not (tmp_path / "notes.md").exists()
+
+
+def test_record_win_reports_only_the_genome_diff(tmp_path):
+    memory_dir = tmp_path / "memory"
+    seg = relay.SEGMENTS[0]
+    relay.record_win(seg, _winner(dict(relay.BASE_GENOME)), memory_dir=memory_dir, notes_path=None, run_dir=tmp_path)
+    text = (memory_dir / "observations.md").read_text()
+    assert "genome=base" in text  # no diff from BASE_GENOME
+
+
+def test_record_win_promotes_genome_into_notes_when_asked(tmp_path):
+    from autotune_bridge import load_genome_from_notes
+
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Agent Notes\n")
+    seg = relay.SEGMENTS[1]
+    genome = dict(relay.BASE_GENOME, hp_run_threshold=0.5)
+    relay.record_win(seg, _winner(genome), memory_dir=tmp_path / "memory", notes_path=notes, run_dir=tmp_path)
+    loaded = load_genome_from_notes(notes)
+    assert loaded["hp_run_threshold"] == 0.5
+    body = notes.read_text()
+    assert "relay forest_to_pewter" in body and "very_cautious" in body
+
+
+def test_record_win_never_raises_on_unwritable_memory(tmp_path, monkeypatch):
+    seg = relay.SEGMENTS[0]
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(relay, "append_observations", boom)
+    # Must not propagate: memory write-back is best-effort and must never fail the relay.
+    relay.record_win(
+        seg, _winner(dict(relay.BASE_GENOME)), memory_dir=tmp_path / "m", notes_path=None, run_dir=tmp_path
+    )
+
+
+def test_main_writes_memory_on_win_and_promotes_with_flag(tmp_path, monkeypatch):
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"rom")
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"seed")
+    run_dir = tmp_path / "run"
+    memory_dir = tmp_path / "memory"
+    notes = tmp_path / "notes.md"
+
+    def fake_run_segment(rom_arg, seg, baton, seg_dir, run_dir_arg, parallel=6, timeout=1200.0, grace=90.0, **_kw):
+        vdir = seg_dir / "winner"
+        vdir.mkdir(parents=True, exist_ok=True)
+        (vdir / "stop.state").write_bytes(b"state-bytes")
+        winner = {
+            "label": "winner",
+            "vdir": vdir,
+            "genome": dict(relay.BASE_GENOME, door_cooldown=9),
+            "success": True,
+            "fitness": {"lead_hp": 20, "turns": 300, "final_map_id": 51},
+        }
+        return winner, [{"label": "winner", "success": True, "killed": False, "fitness": winner["fitness"]}]
+
+    monkeypatch.setattr(relay, "run_segment", fake_run_segment)
+    argv = [
+        str(rom),
+        "--run-dir",
+        str(run_dir),
+        "--segments",
+        "route1_to_forest",
+        "--seed-state",
+        str(seed),
+        "--memory-dir",
+        str(memory_dir),
+        "--notes",
+        str(notes),
+    ]
+    assert main(argv) == 0
+    assert "relay route1_to_forest cleared by winner" in (memory_dir / "observations.md").read_text()
+    assert not notes.exists()  # no --promote-genome
+    assert main(argv + ["--promote-genome"]) == 0
+    from autotune_bridge import load_genome_from_notes
+
+    assert load_genome_from_notes(notes)["door_cooldown"] == 9
+
+
+def test_main_no_memory_disables_writeback(tmp_path, monkeypatch):
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"rom")
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"seed")
+    memory_dir = tmp_path / "memory"
+
+    def fake_run_segment(rom_arg, seg, baton, seg_dir, run_dir_arg, **_kw):
+        vdir = seg_dir / "w"
+        vdir.mkdir(parents=True, exist_ok=True)
+        (vdir / "stop.state").write_bytes(b"s")
+        w = {"label": "w", "vdir": vdir, "genome": {}, "success": True, "fitness": {"lead_hp": 1, "turns": 1}}
+        return w, [{"label": "w", "success": True, "killed": False, "fitness": w["fitness"]}]
+
+    monkeypatch.setattr(relay, "run_segment", fake_run_segment)
+    rc = main(
+        [
+            str(rom),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--segments",
+            "route1_to_forest",
+            "--seed-state",
+            str(seed),
+            "--memory-dir",
+            str(memory_dir),
+            "--no-memory",
+        ]
+    )
+    assert rc == 0
+    assert not memory_dir.exists()
+
+
+def test_record_win_never_raises_on_unwritable_notes(tmp_path, monkeypatch, capsys):
+    seg = relay.SEGMENTS[0]
+
+    def boom(*_a, **_k):
+        raise OSError("read-only notes")
+
+    monkeypatch.setattr(relay, "append_genome", boom)
+    relay.record_win(
+        seg, _winner(dict(relay.BASE_GENOME)), memory_dir=tmp_path / "m", notes_path=tmp_path / "n.md", run_dir=tmp_path
+    )
+    assert "notes promotion skipped" in capsys.readouterr().out

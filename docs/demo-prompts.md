@@ -236,3 +236,37 @@ running.
 Every beat's fix is a line the agent wrote in `pokedex/memory/observations.md`
 or a `pokedex/log*.md`. Beat 1 fails *and records that it failed*; Beats 2–6 are
 those records paying off. The notes are the product.
+
+---
+
+## Beat 7b — The 1-HP forest (before → learning → after, side by side)
+
+Two savestates at the *same* Viridian Forest entrance, produced by two operator agents racing the
+relay on 2026-08-15 (see [`learnings/README.md`](learnings/README.md)). One walked in with a 1-HP
+lead, one with 17 HP and the flee-at-50% genome. Run both live and let the viewer show the split.
+
+```
+Run demo Beat 7b (the 1-HP forest) live in the background as two tiles.
+Both start at the forest entrance; the only differences are the party's HP and the flee threshold.
+
+  ROM="$(ls rom/*.gb | head -1)"
+
+  # BEFORE — 1 HP lead, default forest genome: blacks out (map 51 -> 0 -> 12) or thrashes in place
+  uv run python scripts/agent.py "$ROM" \
+    --strategy medium --live --frame-interval 3 --runs-dir runs --max-turns 3000 \
+    --load-state demo-runs/states/forest-entry-1hp.state --stop-on-map 2 \
+    --no-self-heal --no-in-run-heal --label "7b · Forest at 1 HP"
+
+  # AFTER — 17 HP lead + very_cautious genome (flee/heal at 50%): reaches Pewter in ~2.3k turns
+  EVOLVE_PARAMS="$(cat demo-runs/states/forest-very-cautious.genome.json)" \
+  uv run python scripts/agent.py "$ROM" \
+    --strategy medium --live --frame-interval 3 --runs-dir runs --max-turns 3000 \
+    --load-state demo-runs/states/forest-entry-healthy-17hp.state --stop-on-map 2 \
+    --no-self-heal --no-in-run-heal --label "7b · Forest at 17 HP, flee@50%"
+
+Then open docs/learnings/viridian-forest-turn-385-blackout.md and read the "why it worked" line aloud.
+```
+
+**The note to say out loud:** "The forest genome was never the problem. The party that walked in
+was. Survival beats leveling in a maze — and a baton is only as good as its HP." The learning file
+is the written rule; the two tiles are the before/after.

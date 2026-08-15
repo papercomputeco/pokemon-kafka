@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from healer import append_genome
+from memory_writer import append_observations
+
 SCRIPT_DIR = Path(__file__).parent
 WORKSPACE = SCRIPT_DIR.parent
 
@@ -185,6 +188,54 @@ def promote_winner(run_dir, seg, winner):
     return Baton(state_path=state_dst, worldmap_path=map_dst, genome=winner["genome"])
 
 
+DEFAULT_MEMORY_DIR = WORKSPACE / "pokedex" / "memory"
+DEFAULT_NOTES = WORKSPACE / "notes.md"
+
+
+def _genome_diff(genome):
+    """Only the knobs that differ from BASE_GENOME — the part worth remembering."""
+    diff = {k: v for k, v in (genome or {}).items() if BASE_GENOME.get(k) != v}
+    return ", ".join(f"{k}={v}" for k, v in sorted(diff.items())) if diff else "base"
+
+
+def record_win(seg, winner, *, memory_dir, notes_path, run_dir):
+    """Write a segment win back into the agent's own memory (best-effort, never raises).
+
+    Always: an ``[important]`` line in ``<memory_dir>/observations.md`` — the same journal the
+    observer and the Flink alerts-consumer write, so a relay win shows up next to the wedges it
+    fixed. Optionally (``notes_path`` set): promote the winning genome into ``notes.md`` in the
+    exact block ``load_genome_from_notes`` reads at agent startup, so the next plain run starts
+    from it. Promotion is opt-in because a segment genome (e.g. flee-at-50% for the forest)
+    becomes the *global* baseline.
+    """
+    f = winner.get("fitness", {})
+    diff = _genome_diff(winner.get("genome"))
+    content = (
+        f"relay {seg.name} cleared by {winner['label']}: genome={diff}; "
+        f"lead_hp={f.get('lead_hp')} turns={f.get('turns')} final_map={f.get('final_map_id')}; "
+        f"run={run_dir}"
+    )
+    row = {
+        "referenced_time": datetime.now(timezone.utc).isoformat(),
+        "priority": "important",
+        "content": content,
+        "source_session": "relay",
+    }
+    try:
+        append_observations(memory_dir, [row], dedupe=True)
+    except OSError as exc:  # memory is a side channel; the relay result must survive it
+        print(f"[relay] memory write-back skipped: {exc}")
+    if notes_path is not None:
+        try:
+            reason = (
+                f"- [{row['referenced_time'][:19]}Z] relay {seg.name} won by {winner['label']} "
+                f"(turns {f.get('turns')}, lead_hp {f.get('lead_hp')}). Keep genome diffs: {diff}"
+            )
+            append_genome(notes_path, winner.get("genome") or {}, reason)
+        except OSError as exc:
+            print(f"[relay] notes promotion skipped: {exc}")
+
+
 def run_segment(
     rom,
     seg,
@@ -291,6 +342,14 @@ def main(argv=None):
     parser.add_argument("--seed-state", default=str(DEFAULT_SEED))
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Print the lane commands; launch nothing")
+    parser.add_argument("--memory-dir", default=str(DEFAULT_MEMORY_DIR), help="observations.md dir for win write-back")
+    parser.add_argument("--notes", default=str(DEFAULT_NOTES), help="notes.md to receive --promote-genome blocks")
+    parser.add_argument(
+        "--promote-genome",
+        action="store_true",
+        help="Also append each segment winner's genome to notes.md (becomes the agent's global baseline)",
+    )
+    parser.add_argument("--no-memory", action="store_true", help="Disable all memory write-back")
     parser.add_argument(
         "--max-turns-scale",
         type=float,
@@ -373,6 +432,14 @@ def main(argv=None):
         baton = promote_winner(run_dir, seg, winner)
         f = winner["fitness"]
         print(f"[relay] {seg.name} -> {winner['label']} (turns={f.get('turns')} lead_hp={f.get('lead_hp')})")
+        if not args.no_memory:
+            record_win(
+                seg,
+                winner,
+                memory_dir=Path(args.memory_dir),
+                notes_path=Path(args.notes) if args.promote_genome else None,
+                run_dir=run_dir,
+            )
 
     _write_report(run_dir, report)
     print(f"[relay] CONQUERED {' -> '.join(s.name for s in segments)}")

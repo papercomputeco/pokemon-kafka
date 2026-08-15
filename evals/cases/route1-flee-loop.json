@@ -1,0 +1,10 @@
+{
+  "name": "route1-flee-loop",
+  "learning": "docs/learnings/route1-navigation-flee-loop.md",
+  "category": "battle",
+  "seed_state": "demo-runs/states/route1.state",
+  "stop_on_map": 51,
+  "max_turns": 2000,
+  "genome": {},
+  "pass": {"final_map_id": 51, "min_lead_hp": 5}
+}
