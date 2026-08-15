@@ -310,6 +310,12 @@ the committed frames (`viewer --runs-dir demo-runs`, `/7` `/8` `/9`):
   literal: it maps the maze but doesn't walk out in one run. Persisting the map
   across runs is the mechanism that would eventually crack it — the same
   "learnings compound" thesis, at the edge where it's still hard.
+  **When it wedges, pull up the session trace** before healing anything: prompt
+  Claude Code *"pull up the session trace for this wedge"* (under the hood:
+  `paperctl search "viridian forest wedge stuck oscillation"`). The Kafka
+  anomaly said *what*; the recorded session says *why* — the turns that
+  diagnosed map 51 are already in the org's history. Ten seconds in that gap is
+  the whole papercompute pitch. Full steps in `/self-healing-live-demo`.
 - **Beat 8 — Bug hunt** (`/bug-catcher-demo`). Force-fight bug battles on Route 2
   into the forest — the type-chart battle intelligence pointed at Weedle, one env
   var away from the flee behavior of Beat 5.
