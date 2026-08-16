@@ -507,6 +507,28 @@ class TestBattleStrategy:
         assert s.choose_action(self._brock_mon(s, 30))["move_index"] == 1  # physical did 10 -> explore special
         assert s.choose_action(self._brock_mon(s, 28))["move_index"] == 0  # special did 2 < 10 -> commit physical
 
+    def test_category_damage_tie_falls_back_to_best_scored_move(self):
+        # Both categories measured equal (here: both 0 against a wall). The commit choice must not
+        # depend on set iteration order (PYTHONHASHSEED made whole eval lanes non-reproducible):
+        # on a tie the agent takes the highest-scored move instead — against a rock type Scratch
+        # (normal) is resisted in this chart and Ember (fire) is neutral, whatever the hash seed.
+        s = BattleStrategy(self.chart)
+        rock = self._make_battle(
+            battle_type=2,
+            player_hp=80,
+            player_max_hp=100,
+            enemy_hp=40,
+            enemy_max_hp=40,
+            enemy_type1=0x05,  # rock
+            moves=[0x0A, 0x34, 0x00, 0x00],  # Scratch (physical), Ember (special)
+            move_pp=[10, 10, 0, 0],
+        )
+        assert s.choose_action(rock)["move_index"] == 1  # nothing measured yet: best score (Ember)
+        assert s.choose_action(rock)["move_index"] == 0  # special did 0 -> explore physical
+        assert s._cat_dmg == {"physical": -1, "special": 0}
+        assert s.choose_action(rock)["move_index"] == 1  # physical did 0 too: tie -> best score (Ember)
+        assert s._cat_dmg == {"physical": 0, "special": 0}
+
     def test_category_memory_resets_on_new_enemy(self):
         # After committing to special on Geodude, Onix (a new species) re-probes from the type-best
         # physical move — its Defense/Special profile could differ.

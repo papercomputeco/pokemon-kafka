@@ -437,7 +437,13 @@ class BattleStrategy:
             if len(untried) == 1:
                 target = untried[0]  # explore the category we haven't measured yet
             elif not untried:
-                target = max(cats, key=lambda c: self._cat_dmg[c])  # commit to the higher-damage one
+                # Commit to the higher-damage category. On a tie (both dealt the same, e.g. both 0)
+                # fall through to the highest-scored move: `max` over the set was hash-order
+                # dependent (PYTHONHASHSEED), which made whole eval lanes non-reproducible.
+                best = max(self._cat_dmg[c] for c in cats)
+                tied = [c for c in cats if self._cat_dmg[c] == best]
+                if len(tied) == 1:
+                    target = tied[0]
             if target is not None:
                 return max((m for m in damaging if m[2] == target), key=lambda m: m[1])[0]
 
