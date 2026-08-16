@@ -116,13 +116,25 @@ Ollama models return `length` instead; one compaction was not enough for either.
 guard at ~75 % of the window is now the highest-value fix in this repo — both models had ~1.5 h of
 budget left. See `benchmarks/2026-08-16-local-relay-qwen38-27b.md`.
 
-### 7. Blackwell FP4 is not available on Linux (yet)
+### 7. "Stuck in the Pewter Gym" was the Pokémon Center all along
+
+Every model that reached Pewter — five on 08-15, Laguna today — then "stalled in the Gym interior
+at map 58". Map 58 is the **Pewter Pokémon Center** (`relay.py` says so: `PEWTER_GYM = 54`); the
+08-15 Haiku learning mislabelled it and six write-ups repeated the label. What the lanes actually
+do is walk into the Center, heal to full, then stand at (11,3) pressing "up" into the counter for
+~3000 turns. Captured as a savestate and reproduced in isolation as `evals/cases/pewter-pokecenter-exit`
+(stuck streak 2912/3000, 31 HP). The Brock leg has never been blocked by the Gym; it is blocked by
+leaving the Pokécenter. Wedges make good evals — this one took ten minutes to turn into a
+permanent regression case, and Qwen 3.8's battle-wedge watchdog was likewise checked against
+`route1-flee-loop`: the loop breaks (Forest in 916 turns vs. never), the health criterion still fails.
+
+### 8. Blackwell FP4 is not available on Linux (yet)
 
 Every `nvfp4` tag Ollama publishes 412s with "this model requires macOS". The obvious 5090
 experiment — FP4 vs Q4 on the same weights — cannot be run here today. `check_runnable()` now
 rejects `mlx`/`nvfp4` tags at the roster.
 
-### 8. Uncached local prompts are the hidden cost
+### 9. Uncached local prompts are the hidden cost
 
 12 minutes of Qwen3-Coder consumed 3.88 M input tokens with zero cache reads. Priced as cloud
 tokens that is $0.57; the same run on a cached API would be ~90 % cache hits. Electricity was 1.2

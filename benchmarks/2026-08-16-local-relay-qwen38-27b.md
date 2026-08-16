@@ -62,6 +62,14 @@ the **128k window filled**, one pi compaction, mid-run.
   to fix the bug. Without the journal these look like a thinking-only exit and a good run by two
   different models.
 
+## Checked against the agent eval
+
+`evals/cases/route1-flee-loop.json` (FAIL on `main`: 2000 turns stuck on Route 2, 4 HP) run
+against the patched `agent.py`: **reaches Viridian Forest in 916 turns** — the loop is broken —
+but arrives at 2 HP and the case requires ≥5, so it still reads FAIL. The watchdog fixes the
+wedge, not the health; the learnings' recommended fix (cap the stall-guard run and fall back to
+fight) addresses the other half.
+
 ## Next
 
 - Ship the compaction guard, then rerun both Laguna and Qwen3.8 with the wedge watchdog in place

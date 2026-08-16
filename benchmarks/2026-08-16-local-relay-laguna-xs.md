@@ -27,10 +27,13 @@ was mid-investigation, not done.
    from it — every lane cleared to Viridian Forest, winner `base` in 519 turns.
 2. `forest_to_pewter` from that baton: first pass all lanes stuck in the forest at 6000 turns;
    second pass at 12000 turns, `aggressive` reached Pewter (4496 turns, 1 HP). **2/4.**
-3. `pewter_to_badge`: every lane reaches map 58 (Pewter Gym) and stalls at 4000/8000 turns with
-   healthy HP — the known Pewter Gym interior wedge (`docs/learnings/by-run/2026-08-15-haiku-4.5/
-   pewter-gym-navigation.md`). Its last actions were grepping `relay.py` for the `pewter_to_badge`
-   waypoints — the right thread — when the context ran out.
+3. `pewter_to_badge`: every lane reaches map 58 and stalls at 4000/8000 turns with *healthy* HP
+   (42–51). **Map 58 is the Pewter Pokémon Center, not the Gym** (`relay.py`: `PEWTER_GYM = 54`);
+   the 08-15 Haiku learning (`pewter-gym-navigation.md`) mislabelled it and the label stuck. What
+   the lanes actually do: walk in, heal, then stand at (11,3) pressing "up" into the counter for
+   ~3000 turns. Reproduced in isolation as `evals/cases/pewter-pokecenter-exit.json`
+   (`max_stuck_streak` 2912 of 3000). Laguna's last actions were grepping `relay.py` for the
+   `pewter_to_badge` waypoints — the right thread — when the context ran out.
 4. One learning written, `viridian-forest-route1-blackout.md`: correctly-shaped, causal ("seed
    state started at 12/23 because the party had already fought on Route 1 … be healthy before tall
    grass"), honest artifacts. **No fabrication.** No `SPEEDRUN_SUMMARY.md`, no commit — the context
@@ -61,8 +64,8 @@ was mid-investigation, not done.
 
 - Rerun with a compaction guard (or `contextWindow` set below `num_ctx` so pi compacts before the
   model returns `length`) — this model has more run in it.
-- Give it the Pewter Gym leg from its own `forest_to_pewter` baton with the waypoint fix that
-  Sonnet found on 08-15 and see whether it can reach Brock.
+- The Brock leg is blocked by the Pokécenter exit wedge, not the Gym; fix that (the eval will flip
+  from XFAIL) and give Laguna the leg from its own `forest_to_pewter` baton.
 
 Artifacts: worktree `../pokemon-kafka-speedrun-pi-laguna-xs` (branch `speedrun/pi-laguna-xs`,
 uncommitted `docs/learnings/viridian-forest-route1-blackout.md`), pi session
