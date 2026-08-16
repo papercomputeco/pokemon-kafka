@@ -312,3 +312,86 @@ def test_investigation_punishes_the_real_failure_path():
         "and check the branch that returns run. Next: grep -n 'run' scripts/agent.py | sed -n 1,40p."
     )
     assert rme.score_answer(case, real)["score"] < 0.2 < 0.8 <= rme.score_answer(case, good)["score"]
+
+
+def test_ask_ollama_parses_chat_reply(monkeypatch):
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "message": {"content": "open choose_action", "thinking": "hmm"},
+                    "eval_count": 20,
+                    "eval_duration": 1e9,
+                }
+            ).encode()
+
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["body"] = json.loads(req.data.decode())
+        return Resp()
+
+    monkeypatch.setattr(rme.urllib.request, "urlopen", urlopen)
+    got = rme.ask_ollama("m-128k", "why?", ctx=131072, num_predict=50, seed=7)
+    assert got["answer"] == "open choose_action" and got["thinking"] == "hmm"
+    assert got["out_tok_s"] == 20.0 and got["out_tok"] == 20
+    assert seen["body"]["options"] == {"temperature": 0, "seed": 7, "num_ctx": 131072, "num_predict": 50}
+    assert seen["body"]["messages"][0]["role"] == "system"
+
+
+def test_ask_ollama_handles_empty_message_and_no_duration(monkeypatch):
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"message": null}'
+
+    monkeypatch.setattr(rme.urllib.request, "urlopen", lambda *a, **k: Resp())
+    got = rme.ask_ollama("m", "p", ctx=1, num_predict=1, seed=1)
+    assert got["answer"] == "" and got["thinking"] == "" and got["out_tok_s"] == 0.0
+
+
+def test_main_errors_without_cases(tmp_path):
+    assert rme.main(["--cases", str(tmp_path), "--models", "x"]) == 2
+
+
+def test_main_records_error_row_and_show_flag(monkeypatch, tmp_path, capsys):
+    def flaky(model, prompt, **kw):
+        if "Weedle" in prompt:
+            raise OSError("boom")
+        return {
+            "answer": "grep -n -m 5 battle log | head",
+            "thinking": "",
+            "wall_s": 1.0,
+            "out_tok": 5,
+            "out_tok_s": 50.0,
+        }
+
+    monkeypatch.setattr(rme, "ask_ollama", flaky)
+    rc = rme.main(
+        [
+            "--models",
+            "m-128k",
+            "--out-dir",
+            str(tmp_path / "o"),
+            "--results-dir",
+            str(tmp_path / "r"),
+            "--show",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "ERROR boom" in out
+    assert "grep -n -m 5" in out  # --show printed the answer
+    table = (tmp_path / "r" / f"models-{rme.datetime.now(rme.timezone.utc):%Y-%m-%d}.md").read_text()
+    assert "| m-128k |" in table
