@@ -19,6 +19,11 @@ import { buildSessionContext, SettingsManager } from "@mariozechner/pi-coding-ag
 const RELAY_TIMEOUT_S = Number(process.env.PI_GUARD_RELAY_TIMEOUT ?? 1800);   // relay.py legs
 const DEFAULT_TIMEOUT_S = Number(process.env.PI_GUARD_DEFAULT_TIMEOUT ?? 300);  // everything else
 const MAX_RESULT_BYTES = Number(process.env.PI_GUARD_MAX_RESULT ?? 40_000);
+// Un-ranged `read` calls on big files are the local models' context sink: laguna-xs r2 (2026-08-16)
+// read agent.py whole 8 times in 30 calls, each hitting the 40 KB cap (~10k tokens), so the window
+// filled and compacted every ~2 minutes and each compaction forgot what was just read (compaction
+// amnesia). Cap a `read` with no `limit` to this many lines; the model can page with offset/limit.
+const READ_LIMIT_LINES = Number(process.env.PI_GUARD_READ_LIMIT ?? 200);
 const COMPACT_AT = Number(process.env.PI_GUARD_COMPACT_AT ?? 0.75);   // fraction of contextWindow
 const NUDGE_AT = Number(process.env.PI_GUARD_NUDGE_AT ?? 0.6);        // fraction of contextWindow
 const NUDGE_TEXT =
@@ -94,6 +99,13 @@ export default async function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event) => {
+    if (event.toolName === "read") {
+      const input = event.input as { path?: string; offset?: number; limit?: number };
+      if (READ_LIMIT_LINES > 0 && (!input.limit || input.limit <= 0 || input.limit > READ_LIMIT_LINES)) {
+        input.limit = READ_LIMIT_LINES;
+        if (!input.offset || input.offset <= 0) input.offset = 1;
+      }
+    }
     if (event.toolName === "bash") {
       const input = event.input as { command: string; timeout?: number };
       if (!input.timeout || input.timeout <= 0) {
