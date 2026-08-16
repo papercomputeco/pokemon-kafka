@@ -26,6 +26,13 @@ PROMPT="${PROMPT_FILE:-$REPO/docs/prompts/operator_prompt_v2.md}"
 PI_CLI="${PI_CLI:-$(ls "$HOME"/.local/share/fnm/node-versions/*/installation/lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js | tail -1)}"
 
 [ -f "$PROMPT" ] || { echo "missing mission prompt: $PROMPT" >&2; exit 2; }
+# Gated tips (scripts/advisor.py promote) ride along with the mission; only what cleared the gate is in there.
+TIPS="$REPO/docs/prompts/tips.md"
+MISSION="$(cat "$PROMPT")"
+if [ -s "$TIPS" ]; then MISSION="$MISSION
+
+## Tips from past runs (each one proved lift on a fresh model before it was written here)
+$(grep '^- ' "$TIPS")"; fi
 curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }
 
@@ -56,12 +63,12 @@ POWER_CSV="$WT/data/power/${TAG}.csv"
 ( cd "$REPO" && exec "$REPO/.venv/bin/python" scripts/power_sampler.py --out "$POWER_CSV" --interval 5 >"$OUT/${TAG}.power.log" 2>&1 ) &
 echo $! > "$OUT/${TAG}.power.pid"
 
-echo "== pi $MODEL (budget ${BUDGET_S}s) — log $OUT/${ALIAS}.pi.log"
+echo "== pi $MODEL (budget ${BUDGET_S}s) — log $OUT/${TAG}.pi.log"
 START=$(date +%s)
 ( cd "$WT" && timeout "$BUDGET_S" node "$PI_CLI" -p --no-extensions \
     -e "$HOME/.pi/agent/extensions/tapes-gateway.ts" \
     -e "$REPO/scripts/pi-ext/guardrails.ts" \
-    --model "$MODEL" "$(cat "$PROMPT")" >"$OUT/${TAG}.pi.log" 2>&1 ) || echo "   pi exited rc=$?"
+    --model "$MODEL" "$MISSION" >"$OUT/${TAG}.pi.log" 2>&1 ) || echo "   pi exited rc=$?"
 END=$(date +%s)
 kill "$(cat "$OUT/${TAG}.power.pid")" 2>/dev/null || true
 pkill -f "power_sampler.py --out $POWER_CSV" 2>/dev/null || true

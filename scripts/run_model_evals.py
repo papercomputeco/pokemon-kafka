@@ -99,11 +99,21 @@ def score_answer(case: dict, answer: str) -> dict:
     }
 
 
-def ask_ollama(model: str, prompt: str, *, ctx: int, num_predict: int, seed: int, timeout: float = 900.0) -> dict:
+def ask_ollama(
+    model: str,
+    prompt: str,
+    *,
+    ctx: int,
+    num_predict: int,
+    seed: int,
+    timeout: float = 900.0,
+    system: str = SYSTEM,
+) -> dict:
+    """One chat completion. ``system`` is overridable so the advisor's gate can inject a tip."""
     payload = {
         "model": model,
         "stream": False,
-        "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         "options": {"temperature": 0, "seed": seed, "num_ctx": ctx, "num_predict": num_predict},
     }
     req = urllib.request.Request(

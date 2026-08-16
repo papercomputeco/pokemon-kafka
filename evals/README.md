@@ -90,3 +90,32 @@ Scoring caveats, because they decide how much the number is worth:
 Adding a case: write the JSON, then add a reference answer to
 `tests/test_run_model_evals.py::test_reference_answers_score_high` — if the learning's own wording
 cannot clear the rubric, the rubric is wrong.
+
+## Advisors (`scripts/advisor.py`) — how new cases get in
+
+Model-eval cases can also be *dreamed* from captured operator sessions instead of written by hand,
+after the shape of `pcc-labs/inception` (session → dream → gate → heal):
+
+```
+uv run python scripts/advisor.py investigate ~/.pi/agent/sessions/<slug>/<id>.jsonl --worktree <run worktree>
+uv run python scripts/advisor.py gate data/advisor/<date>/<id>.proposal.json --models laguna-xs-128k,gpt-oss-20b-128k
+uv run python scripts/advisor.py promote data/advisor/<date>/<id>.proposal.json
+uv run python scripts/advisor.py oracle "lanes stall on map 54 pressing up, stuck streak 2800"
+```
+
+* **Investigator** (write path; an investigator-class model, default `qwen38-27b-128k`) reads ONE session plus
+  the run worktree's ground truth (relay reports, learnings written, code diff) and asks the Oracle what is
+  already known, then dreams a proposal: tip, learning draft, a model-eval case (prompt + rubric), optional
+  agent-eval hint. It repairs its own rubric until the rubric recognises the proposal's reference answer.
+* **Gate**: the case is run control (no tip) vs treatment (tip in the system prompt) on fresh models; the tip is
+  the only variable. PASS = mean lift ≥ 0.2 **and** at least one model reaches ≥ 0.6 with the tip. Results
+  append to `evals/results/advisor-<date>.md`, FAIL rows included — a gate that can say no is what makes its
+  yes worth acting on. First real run (2026-08-16, Laguna r2 session): the Investigator skipped the Gym bug
+  the Oracle already knew and caught the *process* failure ("declared fixed after tests+lint; relay still
+  None"); the gate rejected two self-inconsistent rubrics before passing the repaired one — Laguna 0.00 → 1.00.
+* **Promote** writes `evals/model-cases/<name>.json`, `docs/learnings/<name>.md` (marked `source: advisor`)
+  and appends the tip to `docs/prompts/tips.md`, which `scripts/local_relay_run.sh` appends to the mission.
+  Only gated proposals can be promoted (`--force` to override, don't).
+* **Oracle** (read path) is a knowledge bearer over learnings, eval cases/results, benchmarks and past tapes
+  sessions; it cites (`path:line`, session id) or says `NO PRECEDENT`. The operator can call it at run time
+  through the `consult` tool in `scripts/pi-ext/guardrails.ts`.

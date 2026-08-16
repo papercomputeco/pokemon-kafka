@@ -206,3 +206,23 @@ learning written per obstacle *before* the next relay call), not one to keep re-
 model is a **driver** — Haiku, Laguna — pair it with an investigator for the code fixes; where it is
 an **investigator** — Sonnet, Qwen 3.8 — give it the budget and the guard. `qwen38-27b` on the
 fixed `main` is the next run worth the electricity.
+
+### 11. Two advisors and a gate — the operator no longer grades its own homework
+
+The operator wrote its own learnings; the fabricated Brock entries and Laguna's "✅ FIXED" were the
+cost. `scripts/advisor.py` adds the missing roles after `pcc-labs/inception`: an **Investigator**
+(write path — reads one session plus the worktree's ground truth, asks the Oracle first, dreams a
+tip + eval + learning, repairs its own rubric), a **gate** (control vs treatment on fresh models; the
+tip is the only variable; PASS needs mean lift and one model that can act on it), an **Oracle** (read
+path — cites learnings, evals, benchmarks and tapes sessions or says NO PRECEDENT; exposed to the
+operator as `consult`), and **promote** (only gated proposals reach `evals/`, `docs/learnings/`,
+`docs/prompts/tips.md`).
+
+First real pass over the Laguna r2 session with Qwen 3.8 as Investigator: it did *not* re-propose the
+Gym bug — the Oracle already had it — and instead named the process failure: "declared the fix
+complete after tests + lint; the relay report still shows `pewter_to_badge=None`". The gate rejected
+its first two rubrics (one leaked the answer into the prompt so control already scored; one did not
+match its own reference), the repair loop fixed the third, and the gated result was **Laguna
+0.00 → 1.00 with the tip**, gpt-oss and Gemma 0 → 0.2. That tip is now the first line of
+`docs/prompts/tips.md` and rides along with every mission. The next operator run is the first whose
+prompt contains something that proved itself before it was written down.
