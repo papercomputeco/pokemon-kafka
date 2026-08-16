@@ -45,3 +45,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# HTML/SVG generator: long markup lines are the content, not the code
+"benchmarks/artifact/build_artifact.py" = ["E501"]
