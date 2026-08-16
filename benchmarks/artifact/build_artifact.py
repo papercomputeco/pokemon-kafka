@@ -86,7 +86,8 @@ def bar_chart():
             f'peak {pk} W · mean {mean} W">'
             f'<rect x="{lab_w - 4}" y="{y - 4}" width="{w - lab_w - right + 8}" height="{row_h - 2}" class="hit"/>'
             f'<text x="{lab_w - 10}" y="{y + bar_h / 2 + 4}" class="lbl" text-anchor="end">{e(alias)}</text>'
-            f'<path d="M{lab_w},{y} h{bw - 4:.1f} a4,4 0 0 1 4,4 v{bar_h - 8} a4,4 0 0 1 -4,4 h{-(bw - 4):.1f} z" class="s-{g}"/>'
+            f'<path d="M{lab_w},{y} h{bw - 4:.1f} a4,4 0 0 1 4,4 v{bar_h - 8} a4,4 0 0 1 -4,4 '
+            f'h{-(bw - 4):.1f} z" class="s-{g}"/>'
             f'<text x="{lab_w + bw + 8:.1f}" y="{y + bar_h / 2 + 4}" class="val">{tok:g}</text>'
             f"</g>"
         )
@@ -103,8 +104,13 @@ def scatter():
     ml, mr, mt, mb = 60, 40, 24, 44
     pw, ph = w - ml - mr, h - mt - mb
     xmax, ymax = 340, 1.0
-    sx = lambda v: ml + v / xmax * pw
-    sy = lambda v: mt + (1 - v / ymax) * ph
+
+    def sx(v):
+        return ml + v / xmax * pw
+
+    def sy(v):
+        return mt + (1 - v / ymax) * ph
+
     parts = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-labelledby="sc-title">']
     parts.append('<title id="sc-title">Decode speed against diagnostic eval score</title>')
     for v in range(0, xmax + 1, 50):

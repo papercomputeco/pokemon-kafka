@@ -88,3 +88,4 @@ docker-compose.override.yml
 !demo-runs/
 !demo-runs/**
 demo-runs/states/
+benchmarks/artifact/local-vs-haiku.html
