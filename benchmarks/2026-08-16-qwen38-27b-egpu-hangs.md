@@ -75,3 +75,50 @@ The cap is now enforced rather than remembered: `qwen38-27b` carries `power_w=48
 `local_models.py power qwen38-27b` checks the card's enforced limit against it, and the launcher
 refuses to start until it says `ok` (`POWER_OVERRIDE=1` to run anyway — not a verdict row).
 `scripts/nvidia-power-cap.service` makes the cap survive a reboot; see `benchmarks/README.md` § Power.
+
+## r6 at 480 W: hung anyway — and the guard caught it, and the stack says why
+
+First run with both guards live. Preflight: `enforced power limit: 480 W — ok qwen38-27b`. Then:
+
+| attempt | wall | how it ended | power log | guard |
+|---|---|---|---|---|
+| r6 (13:27), **capped 480 W**, `num_batch 256` | 8.1 m, 32 turns | dead stream, same signature | mean 397 W, max 491 W, **71 of 98 samples ≥ 470 W**, the last five pinned at 480 | **no row**, exit 3: dead stream + kernel `Xid 8` 13:35:58 + Ollama `CUDA error` |
+
+So the power hypothesis fails its test: the cap held (never over 491 W, no HW slowdown), the card
+sat *at* the cap for most of the run, and it hung the same way. Capping lower is a guess with no
+evidence behind it now. Evidence in `data/local_runs/qwen38-27b-r6.attempt/`.
+
+Two things worth the eight minutes. **The run itself was the best local relay so far**: batons for
+`route1_to_forest`, `forest_to_pewter` *and* `pre_brock` in under 8 minutes — 2/4 and inside the Gym
+faster than any 08-15 model — plus two learnings committed on the branch, and it was mid-diagnosis of
+the Brock fight ("Lv11 Geodude, HP 29→12→6 → faint, white-out, re-walk the whole journey") when the
+card died. No row, but this is the model to get running.
+
+**And the crash stack is the same in all five dumps.** Reading the Ollama journal past the
+`CUDA error` line — which nothing had done before the guard forced the question — every core dump
+(08-15 attempt 1, r3, r4, r5, r6) ends in:
+
+```
+ggml_cuda_error
+llama_context::synchronize
+llama_get_embeddings_nextn
+common_speculative_impl_draft_mtp::process
+```
+
+That is **Ollama's MTP speculative decoding** for Qwen3.8 — the upstream Modelfile ships
+`draft_num_predict 4`, and the load log says `adding speculative implementation 'draft-mtp'` (draft
+acceptance 0.44–0.75, mean draft length ~3). Five for five in the draft path, on a card that has
+never hung under any non-MTP model. Power was a correlate (the dense 27B is also the hottest model);
+the MTP head is the suspect with the fingerprint.
+
+`draft_num_predict 0` disables it — verified: Ollama logs `no implementations specified for
+speculative decoding` and generates normally. It is now in the roster Spec for `qwen38-27b` and the
+`-128k` variant is rebuilt. Cost: MTP was worth up to ~1.5–2× on decode, so r7 will be slower per token.
+
+## Next (revised)
+
+r7 = r6 with exactly one change: no MTP draft. Cap stays at 480 W so attribution is clean.
+`RUN_TAG=qwen38-27b-r7 ASSIST=none scripts/local_relay_run.sh qwen38-27b main`. If r7 survives, r8
+at 600 W (no MTP) says whether the cap ever mattered. If r7 hangs too, it is not power and it is not
+MTP, and the next suspect is the Thunderbolt link under dense prompt processing — at which point
+`qwen38-27b` is off this box until the driver or the enclosure changes.

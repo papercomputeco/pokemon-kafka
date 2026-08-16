@@ -164,6 +164,10 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
   2774, run continued to `stop`. (pi's own threshold compaction only runs at `agent_end`, i.e. after a
   headless run has already ended; `ctx.compact()` aborts the in-flight run, hence the `context`-hook path.)
 - If the dense 27B crashes the card again at 128k, that is a finding about the 5090, not the model.
+  **Update (r6, 480 W cap, still hung):** all five llama-server core dumps share one stack —
+  `common_speculative_impl_draft_mtp::process → llama_get_embeddings_nextn → CUDA error` — Ollama's
+  MTP speculative decoding for Qwen3.8. The roster now sets `draft_num_predict 0` for it; r7 tests it.
+  Meanwhile r6's eight minutes were the fastest local relay yet (batons through `pre_brock`).
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.
 - Consider splitting the operator into investigator (cloud or the best local thinker) and fixer

@@ -94,12 +94,15 @@ ROSTER: tuple[Spec, ...] = (
         "qwen3.8:27b",
         "dense-27b",
         "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic",
-        # POWER: the dense 27B at 128k pins the 5090 (a Thunderbolt eGPU) at its 600 W limit and hung
-        # it four times (kernel Xid 8 "GPU is probably locked", CUDA "launch timed out") — see
-        # benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. num_batch 256 alone did NOT prevent it; the
-        # card must be capped first (`power_w`, enforced by `local_models.py power` and the launcher's
-        # preflight). Kept at 256 anyway (shorter bursts).
-        params={"num_batch": 256},
+        # HANGS: five relay runs ended in a kernel Xid 8 ("GPU is probably locked") on the eGPU — see
+        # benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. Every one of the five llama-server core dumps
+        # has the same stack: common_speculative_impl_draft_mtp::process -> llama_get_embeddings_nextn ->
+        # CUDA error. That is Ollama's MTP speculative decoding for Qwen3.8 (draft_num_predict 4 in the
+        # upstream Modelfile). Neither num_batch 256 nor a 480 W cap (r6, pinned at the cap, still died)
+        # prevented it, so the MTP draft is switched off here (`draft_num_predict 0` -> Ollama logs "no
+        # implementations specified for speculative decoding"): slower decode, one crash path removed.
+        # r7 is the test. power_w stays so r7 changes exactly one variable from r6.
+        params={"num_batch": 256, "draft_num_predict": 0},
         power_w=480,
     ),
     Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),
