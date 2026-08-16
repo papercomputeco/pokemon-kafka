@@ -28,6 +28,33 @@ How the numbers are produced: `scripts/bench_report.py <pi-session.jsonl>...` pr
 session from pi's transcript (`~/.pi/agent/sessions/<cwd-slug>/*.jsonl`). Game-side stats come from
 each run's `data/telemetry/game/*.jsonl` (the same lines the Kafka bridge publishes).
 
+## The harness-death guard — when there is no row
+
+A run can be killed by the box instead of the model, and from pi's side the two are identical: the
+stream goes silent and the last turn is written as an ordinary `stopReason: stop` with usage 0/0 and
+nothing said. Four `qwen38-27b` attempts died this way to eGPU hangs on 2026-08-15/16
+(`NVRM: Xid 8`, `CUDA error: the launch timed out`); as rows they would have read "the model quit at
+3 minutes". So `bench_report.py` checks before it prints, and **refuses to emit a row (exit 3)** when
+any of these hold:
+
+| flag | where it comes from |
+|---|---|
+| dead stream | the session itself: final assistant turn, usage 0/0, no text and no tool call |
+| kernel hang | `journalctl -k` in the run window: `NVRM: Xid`, `GPU is probably locked`, `GPU has fallen off the bus` |
+| Ollama crash | `journalctl -u ollama` in the run window: `CUDA error`, `llama-server terminated`, `core dumped` |
+
+The window starts at the run's first message and is padded only *forward* (`--hang-pad`, default
+120 s): the hang that kills a run is logged at or just after its last turn, while the crash from the
+run *before* this one is not this run's. (Padding backwards flagged the healthy `laguna-xs` r1 row,
+which started two seconds after the previous model's Xid.) A journal that cannot be read is reported
+as **unchecked**, never as clean — the row still prints, with a note saying it is not certified.
+
+`local_relay_run.sh` captures both logs for the window into `data/local_runs/<tag>.{kernel,ollama}.log`
+and passes them with `--kernel-log`/`--ollama-log`, so the check is reproducible after the journal
+rotates. `--no-hang-check` skips the guard (a cloud run on a box whose GPU is busy with something
+else); `--force` prints the row anyway — if you use it, label the row as an invalid attempt. **A
+refused run is written up, not published**: see `2026-08-16-qwen38-27b-egpu-hangs.md`.
+
 Harness recipe (keep it constant across models so only the model varies): pi + `scripts/pi-ext/guardrails.ts`
 (default bash timeouts, 40 KB tool-result cap, web tools blocked, proactive context compaction at 75 % of the
 model's `contextWindow` via pi's own compaction pipeline so a headless run no longer dies with `stopReason: length`,

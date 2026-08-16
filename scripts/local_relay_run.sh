@@ -91,7 +91,27 @@ pkill -f "power_sampler.py --out $POWER_CSV" 2>/dev/null || true
 
 echo "== done in $(( (END-START)/60 )) min; batons:"; ls "$WT"/data/relay/*/batons/ 2>/dev/null | sort -u | grep -v ':$' || echo "   none"
 echo "== learnings:"; ls "$WT/docs/learnings/" 2>/dev/null || true
+
+# Capture the run window's logs next to the row's other evidence, so the harness-death guard in
+# bench_report.py still has them after the journal rotates (2026-08-16: four Xid 8 hangs killed
+# qwen38-27b runs that pi recorded as ordinary `stop` turns). The kernel log is small enough to
+# keep whole; the Ollama unit logs every request, so only its error lines are kept. A journalctl
+# that cannot run leaves NO file, which the guard reports as unchecked rather than clean.
+KERNEL_LOG="$OUT/${TAG}.kernel.log"; OLLAMA_LOG="$OUT/${TAG}.ollama.log"
+UNTIL="@$((END + 120))"
+journalctl -k --since "@$START" --until "$UNTIL" --no-pager >"$KERNEL_LOG" 2>/dev/null || rm -f "$KERNEL_LOG"
+if journalctl -u ollama --since "@$START" --until "$UNTIL" --no-pager >"$OLLAMA_LOG.raw" 2>/dev/null; then
+  grep -E 'CUDA|ERROR|error:|terminated|core dumped' "$OLLAMA_LOG.raw" >"$OLLAMA_LOG" || true
+else
+  rm -f "$OLLAMA_LOG"
+fi
+rm -f "$OLLAMA_LOG.raw"
+
 SESSION=$(ls -t "$HOME/.pi/agent/sessions/"*"speedrun-pi-${TAG}--"/*.jsonl 2>/dev/null | head -1 || true)
 echo "== bench row (session $SESSION)"
-[ -n "$SESSION" ] && ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k, assist=${ASSIST})" \
-    --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price 0.30 )
+if [ -n "$SESSION" ]; then
+  ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k, assist=${ASSIST})" \
+      --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price 0.30 \
+      --kernel-log "$KERNEL_LOG" --ollama-log "$OLLAMA_LOG" ) \
+    || echo "   ^ no row (rc=3: the run died on the harness) — write the attempt up, do not publish a row"
+fi
