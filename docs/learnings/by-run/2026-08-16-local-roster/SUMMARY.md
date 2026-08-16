@@ -152,6 +152,12 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
 - Review Qwen 3.8's battle-wedge watchdog for `main`; it is a real fix with passing tests.
 - Harness: trigger compaction at ~75 % of the window from the guardrails extension (pi only compacts on a
   400, and local models return `length` instead); remind the operator to commit deliverables early.
+  **Done (feat/guardrails-compaction):** `scripts/pi-ext/guardrails.ts` now compacts at
+  `PI_GUARD_COMPACT_AT` (default 0.75) of `contextWindow` from the `context` hook using pi's own
+  `prepareCompaction`/`compact` + `appendCompaction`, and sends a one-shot nudge at `PI_GUARD_NUDGE_AT`
+  (default 0.6). Verified on an 8k-window model: compaction fired at 6257/8000, next input dropped to
+  2774, run continued to `stop`. (pi's own threshold compaction only runs at `agent_end`, i.e. after a
+  headless run has already ended; `ctx.compact()` aborts the in-flight run, hence the `context`-hook path.)
 - If the dense 27B crashes the card again at 128k, that is a finding about the 5090, not the model.
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.
