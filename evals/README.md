@@ -33,7 +33,10 @@ learnings were written to catch.
 ```
 
 Savestates referenced here live in `demo-runs/states/` (gitignored — copy them from a run's
-`batons/` as documented in `docs/learnings/README.md`). `pewter-pokecenter.state` is captured from
+`batons/` as documented in `docs/learnings/README.md`). `route2-weedle-flee-loop.state` is a `--save-state-every 1` checkpoint at turn 1200 of the relay `base` lane
+from `route1.state` in a *clean* worktree (the main checkout's `notes.md`/`pokedex/memory` change the
+agent's path) — the flee loop is self-sustaining, so any turn after it starts is inside it.
+`pewter-pokecenter.state` is captured from
 any `forest_to_pewter` baton with
 `uv run python scripts/agent.py rom/pokemon_red.gb --load-state <baton> --save-state-on-map 58:demo-runs/states/pewter-pokecenter.state --stop-on-map 58 --max-turns 1500 --no-self-heal --no-in-run-heal`.
 
@@ -45,6 +48,7 @@ any `forest_to_pewter` baton with
 | forest-crossing-healthy | navigation · battle | viridian-forest-turn-385-blackout | from the 17-HP forest entrance, `very_cautious` reaches Pewter (2) in ≤3000 turns with lead HP ≥5 |
 | forest-crossing-1hp | navigation · battle | viridian-forest-1hp-entry-unresolved | documents the known failure: from the 1-HP entrance the default genome does **not** reach Pewter in 3000 turns (expected_fail) |
 | pewter-to-gym | navigation | brock-approach-deadend / pewter-corrupted-transition-save | from the forest→Pewter baton, reach Pewter Gym (54) in ≤4000 turns (expected_fail until the routes.json waypoint fix) |
+| low-hp-wild-battle | battle | route1-navigation-flee-loop | from *inside* the Route 2 Weedle battle at 4/23 HP (the flee-loop state itself), reach the Forest (51) alive in ≤600 turns. `main`: 600 turns, 0 encounters — frozen in the loop. Qwen 3.8's wedge watchdog: 8 battles won, still 2 HP on Route 2 — loop broken, health not. The `battles (won/enc)` column tells the two apart |
 | pewter-pokecenter-exit | navigation | 2026-08-16-local-relay-laguna-xs | from inside the Pewter **Pokémon Center** (map 58, healed party), reach the Gym (54) in ≤3000 turns — documents the wedge every 08-15/16 model hit at (11,3): the agent heals and then presses into the counter for thousands of turns. Map 58 was mislabelled "Pewter Gym" in the 08-15 Haiku learning; the Gym is 54 (expected_fail) |
 
 ## Model evals (`evals/model-cases/`)

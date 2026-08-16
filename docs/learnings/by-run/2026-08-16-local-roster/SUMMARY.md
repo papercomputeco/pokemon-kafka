@@ -127,6 +127,10 @@ do is walk into the Center, heal to full, then stand at (11,3) pressing "up" int
 leaving the Pokécenter. Wedges make good evals — this one took ten minutes to turn into a
 permanent regression case, and Qwen 3.8's battle-wedge watchdog was likewise checked against
 `route1-flee-loop`: the loop breaks (Forest in 916 turns vs. never), the health criterion still fails.
+A second new case, `low-hp-wild-battle`, seeds the agent *inside* the Weedle battle at 4/23 HP: on
+`main` it sits there for 600 turns with 0 encounters; with the watchdog it wins 8 battles and is
+still on Route 2 at 2 HP. Two different failures, one row each — the eval now tells "frozen" from
+"alive but too weak", which is exactly the split between the wedge fix and the cap-and-fight fix.
 
 ### 8. Blackwell FP4 is not available on Linux (yet)
 

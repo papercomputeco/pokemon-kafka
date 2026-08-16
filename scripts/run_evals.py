@@ -94,6 +94,8 @@ def run_case(rom, case, out_dir, *, runner=_default_runner, timeout=900):
         "turns": fitness.get("turns"),
         "final_map_id": fitness.get("final_map_id"),
         "lead_hp": fitness.get("lead_hp"),
+        "encounters": fitness.get("encounters"),
+        "battles_won": fitness.get("battles_won"),
         "learning": case.get("learning", ""),
     }
 
@@ -107,12 +109,13 @@ def _append_results(results_dir, rows):
     if not path.exists():
         lines.append(f"# Eval results — {now:%Y-%m-%d}\n")
     lines.append(f"\n## {now:%H:%M}Z\n")
-    lines.append("| case | category | verdict | turns | final map | lead hp | learning |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| case | category | verdict | turns | final map | lead hp | battles (won/enc) | learning |")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for r in rows:
+        battles = f"{r.get('battles_won')}/{r.get('encounters')}" if r.get("encounters") is not None else "-"
         lines.append(
             f"| {r['name']} | {r['category']} | {r['verdict']} | {r['turns']} | {r['final_map_id']} "
-            f"| {r['lead_hp']} | {r['learning']} |"
+            f"| {r['lead_hp']} | {battles} | {r['learning']} |"
         )
     with open(path, "a") as f:
         f.write("\n".join(lines) + "\n")
@@ -141,7 +144,10 @@ def main(argv=None):
     rows = [run_case(args.rom, c, args.out_dir, timeout=args.timeout) for c in cases]
     path = _append_results(args.results_dir, rows)
     for r in rows:
-        print(f"[eval] {r['verdict']:5} {r['name']} turns={r['turns']} map={r['final_map_id']} hp={r['lead_hp']}")
+        print(
+            f"[eval] {r['verdict']:5} {r['name']} turns={r['turns']} map={r['final_map_id']} hp={r['lead_hp']} "
+            f"battles={r.get('battles_won')}/{r.get('encounters')}"
+        )
     print(f"[eval] results appended to {path}")
     return 1 if any(r["verdict"] == "FAIL" for r in rows) else 0
 
