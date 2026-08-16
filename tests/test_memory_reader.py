@@ -810,3 +810,70 @@ class TestIsIndoors:
     def test_any_other_tileset_is_indoors(self, mock_pyboy, fake_memory):
         fake_memory[0xD367] = 6  # POKECENTER
         assert MemoryReader(mock_pyboy).is_indoors() is True
+
+
+class TestBattleMenuScreenState:
+    """Battle-menu screen state read from RAM: the "FIGHT" tiles in wTileMap say the top battle menu
+    is drawn (nothing else in a battle puts those letters there); wTopMenuItemY/X + wCurrentMenuItem
+    give the live cursor of the battle menu (0 FIGHT / 1 ITEM / 2 PKMN / 3 RUN) and the move list
+    (1-based in RAM, 0-based here). Addresses verified from pokered's wram and a live Red battle."""
+
+    FIGHT_BASE = 0xC3A0 + 14 * 20 + 10
+
+    def _draw_menu(self, mem, *, top_x=9, cur=0):
+        for i, t in enumerate((0x85, 0x88, 0x86, 0x87, 0x93)):
+            mem[self.FIGHT_BASE + i] = t
+        mem[0xCC24], mem[0xCC25], mem[0xCC26] = 14, top_x, cur
+
+    def test_menu_not_visible_on_blank_screen(self, mock_pyboy):
+        assert MemoryReader(mock_pyboy).battle_menu_visible() is False
+
+    def test_menu_visible_when_fight_tiles_drawn(self, mock_pyboy, fake_memory):
+        self._draw_menu(fake_memory)
+        assert MemoryReader(mock_pyboy).battle_menu_visible() is True
+
+    def test_menu_not_visible_when_one_tile_differs(self, mock_pyboy, fake_memory):
+        self._draw_menu(fake_memory)
+        fake_memory[self.FIGHT_BASE + 4] = 0x7F  # a space where the T should be
+        assert MemoryReader(mock_pyboy).battle_menu_visible() is False
+
+    def test_battle_menu_cursor_left_column(self, mock_pyboy, fake_memory):
+        self._draw_menu(fake_memory, top_x=9, cur=1)
+        assert MemoryReader(mock_pyboy).read_battle_menu_cursor() == 1  # ITEM
+
+    def test_battle_menu_cursor_right_column(self, mock_pyboy, fake_memory):
+        self._draw_menu(fake_memory, top_x=15, cur=0)
+        assert MemoryReader(mock_pyboy).read_battle_menu_cursor() == 2  # PKMN
+        fake_memory[0xCC26] = 1
+        assert MemoryReader(mock_pyboy).read_battle_menu_cursor() == 3  # RUN
+
+    def test_battle_menu_cursor_none_when_menu_not_drawn(self, mock_pyboy, fake_memory):
+        fake_memory[0xCC24], fake_memory[0xCC25] = 14, 9
+        assert MemoryReader(mock_pyboy).read_battle_menu_cursor() is None
+
+    def test_battle_menu_cursor_none_when_top_y_is_not_the_menu(self, mock_pyboy, fake_memory):
+        self._draw_menu(fake_memory)
+        fake_memory[0xCC24] = 12  # stale tiles, another menu owns the cursor
+        assert MemoryReader(mock_pyboy).read_battle_menu_cursor() is None
+
+    def test_move_list_cursor_is_zero_based(self, mock_pyboy, fake_memory):
+        fake_memory[0xCC24], fake_memory[0xCC25], fake_memory[0xCC26] = 12, 5, 3
+        assert MemoryReader(mock_pyboy).read_move_list_cursor() == 2
+
+    def test_move_list_cursor_none_for_other_menus(self, mock_pyboy, fake_memory):
+        fake_memory[0xCC24], fake_memory[0xCC25], fake_memory[0xCC26] = 14, 9, 1  # battle menu
+        assert MemoryReader(mock_pyboy).read_move_list_cursor() is None
+        fake_memory[0xCC24], fake_memory[0xCC25] = 12, 12  # party screen (y=12, x=12)
+        assert MemoryReader(mock_pyboy).read_move_list_cursor() is None
+
+    def test_move_list_cursor_none_when_out_of_range(self, mock_pyboy, fake_memory):
+        fake_memory[0xCC24], fake_memory[0xCC25], fake_memory[0xCC26] = 12, 5, 0
+        assert MemoryReader(mock_pyboy).read_move_list_cursor() is None
+        fake_memory[0xCC26] = 5
+        assert MemoryReader(mock_pyboy).read_move_list_cursor() is None
+
+    def test_read_move_pp_uses_wbattlemonpp(self, mock_pyboy, fake_memory):
+        # pokered wBattleMonPP = d02d..d030 (the old d02c read was the Special stat's low byte).
+        fake_memory[0xD02D], fake_memory[0xD02E], fake_memory[0xD02F], fake_memory[0xD030] = 35, 40, 25, 10
+        fake_memory[0xD02C] = 99
+        assert MemoryReader(mock_pyboy).read_move_pp() == [35, 40, 25, 10]

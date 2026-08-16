@@ -117,6 +117,15 @@ WILD_STALL_RUN_CAP = 3
 BATTLE_WEDGE_TURNS = 2
 BATTLE_WEDGE_MAX_ATTEMPTS = 4
 
+# Battle-menu sync: before (and after) every battle action the agent presses B until the top battle
+# menu is drawn — B advances text and closes submenus but never selects. Each press+wait is ~50
+# frames, so this cap bounds one sync at ~1000 frames, longer than a full turn (two moves with
+# animation and text). Hitting the cap means a screen B cannot leave (a forced switch, a wedge).
+BATTLE_MENU_SYNC_PRESSES = 20
+# Cursor walks are verified per step (read the live cursor, press once, re-read); this caps a walk
+# that never converges (a dropped press every time) — the longest legitimate walk is 3 steps.
+BATTLE_MENU_WALK_STEPS = 8
+
 # Gen-1's physical/special split is decided by a move's TYPE (not per-move): these types are
 # physical (they hit the target's Defense); the rest (fire/water/grass/electric/psychic/ice/
 # dragon) are special (they hit its Special). This matters against physical walls that pump
@@ -247,11 +256,13 @@ class GameController:
     def battle_menu_select(self, target: str):
         """Select a corner of the 2x2 battle menu (fight/pkmn/item/run) and confirm with A.
 
-        ``navigate_menu`` only walks vertically, so it can never reach the right column
-        (PKMN/RUN) — which is why fleeing never worked and the cursor desynced (the menu
-        remembers its last position, so a stale RUN cursor made a later "press A for FIGHT"
-        re-pick RUN, freezing the fight). Normalize to FIGHT (top-left) first, then walk the
-        real grid.
+        Blind (fixed-timing) variant, kept for callers without RAM access; the agent's battle turn
+        uses ``PokemonAgent._select_battle_menu``, which syncs to the drawn menu and walks the
+        cursor it reads from RAM instead. ``navigate_menu`` only walks vertically, so it can never
+        reach the right column (PKMN/RUN) — which is why fleeing never worked and the cursor
+        desynced (the menu remembers its last position, so a stale RUN cursor made a later "press A
+        for FIGHT" re-pick RUN, freezing the fight). Normalize to FIGHT (top-left) first, then walk
+        the real grid.
         """
         # Use the default (longer) press timing — the same as ``navigate_menu``, which works for
         # the move list. The 8-frame overworld timing is too short for the battle-menu cursor to
@@ -1533,7 +1544,15 @@ class PokemonAgent:
         # recorder keys this under a protected tag so a same-turn overworld write
         # cannot clobber it (the root cause of "no battle screen" in playback).
         self.collector.battle_frame(self.turn_count)
+        # Decide from the SETTLED state: B through the intro / previous-turn text until the battle
+        # menu is up. wBattleMon (our HP, moves, PP) is only loaded once the lead is sent out, so a
+        # read on "Wild X appeared!" returns the previous battle's values (observed: a 35/35 lead
+        # read as 13/35 and fled at full health).
+        menu_up = self._await_battle_menu()
         battle = self.memory.read_battle_state()
+        if not menu_up and battle.battle_type == 0:
+            self.turn_count += 1
+            return  # the battle ended while settling (the outer loop records the outcome)
         bag_healing = self.memory.find_healing_item()
         action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
 
@@ -1595,20 +1614,31 @@ class PokemonAgent:
             # mv_idx / move_id / mv_name / mv_type / mv_power were resolved at decision time above.
             enemy_hp_before = battle.enemy_hp
             player_hp_before = battle.player_hp
-            # Execute the move RELIABLY. The fixed-timing menu selection occasionally catches the
-            # game mid-animation (from the enemy's previous move) and leaves the move list open
-            # without confirming — observed ~50% of hits missing vs Brock, enemy HP frozen for many
-            # turns. Confirm by watching the turn actually resolve (HP changes or the battle ends);
-            # if it didn't, back out (B) to the top menu and re-select. A real turn resolves first try.
+            pp_before = self.memory.read_move_pp()
+            # Execute the move RELIABLY, from the screen the game is actually on. The old fixed
+            # sequence (up, left, A, down x idx, A, A, then A x8) assumed the turn starts on the
+            # battle menu with the move-list cursor on slot 0 — neither holds: the trailing A-mash
+            # of the previous turn leaves this one anywhere between the enemy's move text and an
+            # already-open move list, and Gen 1 REMEMBERS the move-list cursor. Instrumented (Route
+            # 2, 08-16): a turn opening on the move list turned the normalising "up" into a wrap
+            # onto Growl, wPlayerMoveListIndex stuck at 1, and every following FIGHT spent Growl PP
+            # while Pidgey chipped the lead from 17 to 1 HP. So: sync to the battle menu first
+            # (B through text/submenus until "FIGHT" is drawn), open the list, read the cursor and
+            # walk RELATIVE to it, then confirm by the PP/HP delta and retry if nothing happened.
             for _attempt in range(4):
-                self.controller.battle_menu_select("fight")  # open the move list
-                self.controller.navigate_menu(mv_idx)  # pick the move (vertical list)
-                self.controller.press("a")  # confirm the selected move
-                if self._await_turn_resolved(enemy_hp_before, player_hp_before):
+                if not self._select_battle_menu("fight"):
+                    break  # battle ended (or a screen B cannot leave — nothing to select from)
+                # No list opened = Struggle auto-fires with no PP (or the A was eaten): just watch
+                # for a resolution and re-select if none comes.
+                self._select_move_slot(mv_idx)
+                if self._await_turn_resolved(enemy_hp_before, player_hp_before, pp_before):
                     break
                 self.controller.press("b")  # still at the move list — back out and retry
                 self.controller.wait(20)
-            self.controller.mash_a(8, delay=30)  # Clear all text boxes
+            # Settle: advance the rest of the turn's text (B never selects) until the next battle
+            # menu is up or the battle ends, so the outcome below and the next decision read the
+            # settled HP/PP instead of a mid-animation snapshot.
+            self._await_battle_menu()
             # OBSERVE the raw outcome via a before/after enemy-HP delta. The fight branch also runs
             # on menu/text frames (no move landed) and post-faint frames, so we EMIT ONLY a real
             # landed hit (enemy was alive and HP dropped, or it fainted) — that filters the phantom
@@ -1616,7 +1646,10 @@ class PokemonAgent:
             # label: the type chart is learned from data, not fed.
             battle_over = self.memory._read(self.memory.ADDR_BATTLE_TYPE) == 0
             after_hp = self.memory.read_enemy_hp()
-            fainted = battle_over or after_hp <= 0
+            # A trainer's next Pokemon is already out by the time we settle, so a species change is
+            # a KO too (its fresh HP would otherwise read as "healed").
+            enemy_swapped = self.memory._read(self.memory.ADDR_ENEMY_SPECIES) != battle.enemy_species
+            fainted = battle_over or after_hp <= 0 or enemy_swapped
             enemy_hp_after = 0 if fainted else after_hp
             dmg = max(0, enemy_hp_before - enemy_hp_after)
             # Record only a real landed hit: enemy was alive and HP actually dropped (or it fainted).
@@ -1643,12 +1676,16 @@ class PokemonAgent:
                 )
 
         elif action["action"] == "run":
-            self.controller.battle_menu_select("run")
-            self.controller.wait(120)
-            self.controller.mash_a(5, delay=30)
+            # Same sync as the fight branch: a RUN chosen while the enemy's move text is still up
+            # had its d-pad presses eaten and its A land on FIGHT (instrumented: PP spent, no
+            # escape attempted). Then B through "Got away safely!" / "Can't escape!" + the enemy's
+            # move to the next menu (or the battle end).
+            if self._select_battle_menu("run"):
+                self.controller.wait(60)
+            self._await_battle_menu()
 
         elif action["action"] == "item":
-            self.controller.battle_menu_select("item")
+            self._select_battle_menu("item")
             self.controller.wait(20)
             # Navigate to the correct item slot (the bag is a vertical list)
             bag_index = action.get("bag_index", 0)
@@ -1657,7 +1694,7 @@ class PokemonAgent:
             self.controller.mash_a(5, delay=30)
 
         elif action["action"] == "switch":
-            self.controller.battle_menu_select("pkmn")
+            self._select_battle_menu("pkmn")
             self.controller.wait(20)
             self.controller.navigate_menu(action.get("slot", 1))
             self.controller.wait(120)
@@ -1676,12 +1713,18 @@ class PokemonAgent:
 
         self.turn_count += 1
 
-    def _await_turn_resolved(self, enemy_hp_before: int, player_hp_before: int, frames: int = 260) -> bool:
-        """Tick up to ``frames``, returning True once the battle turn actually resolved — our HP or
-        the enemy's HP changed, or the battle ended — i.e. the selected move registered. Returns
-        False if nothing changed, so the caller re-selects (the fixed-timing menu occasionally leaves
-        the move list open without confirming). Re-selecting a move that genuinely did 0 while the
-        enemy also did nothing is harmless (it just does 0 again)."""
+    def _await_turn_resolved(
+        self,
+        enemy_hp_before: int,
+        player_hp_before: int,
+        pp_before: list[int] | None = None,
+        frames: int = 260,
+    ) -> bool:
+        """Tick up to ``frames``, returning True once the battle turn actually resolved — our move
+        spent PP (the game deducts it the moment a move executes, even for a miss or a 0-damage
+        move), our HP or the enemy's HP changed, or the battle ended — i.e. the selected move
+        registered. Returns False if nothing changed, so the caller re-selects (the fixed-timing
+        menu occasionally leaves the move list open without confirming)."""
         for _ in range(max(1, frames // 4)):
             self.controller.wait(4)
             if self.memory._read(self.memory.ADDR_BATTLE_TYPE) == 0:
@@ -1690,7 +1733,66 @@ class PokemonAgent:
             if state.enemy_hp != enemy_hp_before or state.player_hp != player_hp_before:
                 self.controller.wait(60)  # let the rest of the turn's animation/text play out
                 return True
+            if pp_before is not None and self.memory.read_move_pp() != pp_before:
+                return True
         return False
+
+    def _await_battle_menu(self, max_presses: int = BATTLE_MENU_SYNC_PRESSES) -> bool:
+        """Bring the game to the top battle menu: press B (advances text, closes the move list and
+        every submenu, is a no-op on the battle menu itself — never selects) until "FIGHT" is drawn.
+        Returns True with the menu up, False when the battle ended first or the cap ran out (a screen
+        B cannot leave, e.g. the forced switch after a faint)."""
+        for _ in range(max_presses):
+            if self.memory._read(self.memory.ADDR_BATTLE_TYPE) == 0:
+                return False
+            if self.memory.battle_menu_visible():
+                return True
+            self.controller.press("b")
+            self.controller.wait(20)
+        return False
+
+    def _select_battle_menu(self, target: str) -> bool:
+        """Sync to the top battle menu, walk the cursor to ``target`` (fight/item/pkmn/run) — one
+        verified step at a time, re-reading the live cursor, because the first d-pad press after a
+        menu is drawn is sometimes dropped — then press A. Returns False without pressing anything
+        when the menu never came up (battle over / a screen B cannot leave)."""
+        if not self._await_battle_menu():
+            return False
+        want = self.memory.BATTLE_MENU_ITEMS.index(target)
+        for _ in range(BATTLE_MENU_WALK_STEPS):
+            pos = self.memory.read_battle_menu_cursor()
+            if pos is None or pos == want:
+                break
+            if (pos & 2) != (want & 2):
+                self.controller.press("right" if want & 2 else "left")
+            else:
+                self.controller.press("down" if want & 1 else "up")
+            self.controller.wait(12)
+        self.controller.press("a")
+        self.controller.wait(20)
+        return True
+
+    def _select_move_slot(self, target: int) -> bool:
+        """After A on FIGHT: wait for the move list, walk the cursor from wherever the game
+        reopened it (it remembers last turn's slot) to ``target`` — verified step by step, like the
+        battle menu — and press A. Returns False if no list appeared (Struggle with no PP left)."""
+        cur = None
+        for _ in range(6):
+            cur = self.memory.read_move_list_cursor()
+            if cur is not None:
+                break
+            self.controller.wait(10)
+        if cur is None:
+            return False
+        for _ in range(BATTLE_MENU_WALK_STEPS):
+            cur = self.memory.read_move_list_cursor()
+            if cur is None or cur == target:
+                break
+            self.controller.press("down" if target > cur else "up")
+            self.controller.wait(12)
+        self.controller.press("a")
+        self.controller.wait(20)
+        return True
 
     def _battle_wedge_watchdog(self, battle) -> bool:
         """Detect and recover an input-locked battle before the turn's action is chosen.
