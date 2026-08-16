@@ -147,7 +147,12 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
 ## What changes next
 
 - Add a harness-death flag to `bench_report.py`; never publish a local row without checking the
-  Ollama journal for the run window.
+  Ollama journal for the run window. **Done:** `bench_report.py` refuses to print a row (exit 3) on
+  a dead stream (final turn, usage 0/0, nothing said), a kernel `Xid` or an Ollama CUDA crash in the
+  run window, and `local_relay_run.sh` captures both journals per run. Replayed over the weekend's
+  sessions it keeps the three published rows and rejects the three dead attempts — and it corrected
+  §12's own r3 diagnosis: r3 has an `Xid 8` at the second its stream died, so the eviction was a
+  trigger, not the cause. See `benchmarks/README.md` § The harness-death guard.
 - Ship the compaction guard, then rerun Laguna and Qwen 3.8 — both have most of their budget left.
 - Review Qwen 3.8's battle-wedge watchdog for `main`; it is a real fix with passing tests.
 - Harness: trigger compaction at ~75 % of the window from the guardrails extension (pi only compacts on a
