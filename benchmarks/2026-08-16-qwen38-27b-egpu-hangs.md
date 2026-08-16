@@ -115,6 +115,15 @@ the MTP head is the suspect with the fingerprint.
 speculative decoding` and generates normally. It is now in the roster Spec for `qwen38-27b` and the
 `-128k` variant is rebuilt. Cost: MTP was worth up to ~1.5–2× on decode, so r7 will be slower per token.
 
+## r7: no MTP draft, 480 W — 84 minutes, no hang, a row
+
+`RUN_TAG=qwen38-27b-r7`: same launcher, same cap, `draft_num_predict 0`. GPU mean 421 W, **83 % of
+1006 samples at ≥ 470 W** — the same pinned-at-cap profile r6 died under — for 84 minutes with a
+clean kernel log; the guard passed the row. Five hangs with the MTP draft, zero without it. The
+model shipped a tested `world_map.py` fix and two honest learnings; see
+`2026-08-16-local-relay-qwen38-27b-r7.md`. Cost: 52.7 out tok/s (MTP was worth ~1.7×). r8 at the
+stock 600 W settles whether the cap ever mattered.
+
 ## Next (revised)
 
 r7 = r6 with exactly one change: no MTP draft. Cap stays at 480 W so attribution is clean.

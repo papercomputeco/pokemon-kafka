@@ -168,6 +168,9 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
   `common_speculative_impl_draft_mtp::process → llama_get_embeddings_nextn → CUDA error` — Ollama's
   MTP speculative decoding for Qwen3.8. The roster now sets `draft_num_predict 0` for it; r7 tests it.
   Meanwhile r6's eight minutes were the fastest local relay yet (batons through `pre_brock`).
+  **r7 (no MTP, 480 W): 84 min, no hang, first clean dense-27B row** — 2/4, wins both Gym trainers,
+  a `world_map.py` livelock fix with tests that fail on the parent commit, 3 commits, no fabrication;
+  52.7 tok/s, 24.8 s/turn, 590 Wh. See `benchmarks/2026-08-16-local-relay-qwen38-27b-r7.md`.
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.
 - Consider splitting the operator into investigator (cloud or the best local thinker) and fixer
