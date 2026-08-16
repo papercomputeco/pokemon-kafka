@@ -2773,6 +2773,7 @@ class TestPokemonAgentCollisionMap:
             turn=ag.turn_count,
             stuck_turns=ag.stuck_turns,
             collision_grid=ag.collision_map.grid,
+            planner=ag._pilot_to,
         )
 
 
@@ -4514,3 +4515,143 @@ def test_tick_sideloop_spawn_failure_is_logged_and_swallowed():
     PokemonAgent._tick_sideloop(stub)  # must not raise
     assert stub.sideloop_proc is None
     assert any("SIDELOOP | spawn failed: disk full" in m for m in logs)
+
+
+# ===================================================================
+# Navigator planner hook: route waypoints via the whole-map WorldMap pilot
+# ===================================================================
+
+
+class TestNavigatorPlanner:
+    ROUTES = {"2": {"waypoints": [{"x": 19, "y": 22}, {"x": 16, "y": 17}]}}
+
+    def test_planner_is_tried_before_the_screen_astar(self):
+        nav = Navigator(self.ROUTES)
+        state = OverworldState(map_id=2, x=18, y=35)
+        calls = []
+
+        def planner(s, tx, ty):
+            calls.append((tx, ty))
+            return "left"  # something the on-screen planners would never pick here
+
+        grid = [[1] * 10 for _ in range(9)]
+        assert nav.next_direction(state, collision_grid=grid, planner=planner) == "left"
+        assert calls == [(19, 22)]
+
+    def test_planner_none_falls_through_to_local_navigation(self):
+        nav = Navigator(self.ROUTES)
+        state = OverworldState(map_id=2, x=18, y=35)
+        assert nav.next_direction(state, planner=lambda s, tx, ty: None) == "right"  # x-first greedy
+
+    def test_planner_survives_the_waypoint_advance_recursion(self):
+        # Standing on waypoint 0 advances to 1 and re-plans — with the same planner.
+        nav = Navigator(self.ROUTES)
+        state = OverworldState(map_id=2, x=19, y=22)
+        seen = []
+
+        def planner(s, tx, ty):
+            seen.append((tx, ty))
+            return "up"
+
+        assert nav.next_direction(state, planner=planner) == "up"
+        assert seen == [(16, 17)] and nav.current_waypoint == 1
+
+    def test_planner_survives_the_stuck_skip_recursion(self):
+        nav = Navigator(self.ROUTES, stuck_threshold=8, skip_distance=3)
+        state = OverworldState(map_id=2, x=19, y=23)  # one tile from waypoint 0, wedged
+        seen = []
+
+        def planner(s, tx, ty):
+            seen.append((tx, ty))
+            return "down"
+
+        assert nav.next_direction(state, stuck_turns=8, planner=planner) == "down"
+        assert seen == [(16, 17)]
+
+
+# ===================================================================
+# Building exit: leave any building the plan has no use for via its own warp table
+# ===================================================================
+
+
+def _indoors(ag, warps, tileset=6, bounds=(14, 8)):
+    """Stamp a building into the fake memory: tileset, warp table, map header size."""
+    mem = ag.pyboy.memory
+    mem[0xD367] = tileset
+    mem[0xD3AE] = len(warps)
+    for i, (x, y) in enumerate(warps):
+        base = 0xD3AF + i * 4
+        mem[base], mem[base + 1], mem[base + 2], mem[base + 3] = y, x, 0, 0xFF
+    mem[0xD369], mem[0xD368] = bounds[0] // 2, bounds[1] // 2
+
+
+class TestBuildingExit:
+    def test_outdoors_is_not_our_business(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7)], tileset=0)
+        assert ag._building_exit(OverworldState(map_id=2, x=5, y=5)) is None
+
+    def test_routed_maps_and_scripted_targets_are_left_alone(self, tmp_path):
+        ag = _make_agent(tmp_path, routes={"51": {"waypoints": [{"x": 2, "y": 0}]}})
+        _indoors(ag, [(3, 7)])
+        assert ag._building_exit(OverworldState(map_id=51, x=5, y=5)) is None  # has a route
+        assert ag._building_exit(OverworldState(map_id=37, x=5, y=5)) is None  # EARLY_GAME_TARGETS
+
+    def test_naive_mode_keeps_wandering(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.navigator.naive = True
+        _indoors(ag, [(3, 7)])
+        assert ag._building_exit(OverworldState(map_id=58, x=5, y=5)) is None
+
+    def test_no_warp_table_means_no_opinion(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [])
+        assert ag._building_exit(OverworldState(map_id=58, x=5, y=5)) is None
+
+    def test_pilots_to_the_nearest_warp_and_logs_once(self, tmp_path):
+        """The Pewter Center wedge: at (12,3) by the counter, the nearest mat is (4,7)."""
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7), (4, 7)])
+        ag._pilot_to = MagicMock(return_value="left")
+        state = OverworldState(map_id=58, x=12, y=3)
+        assert ag._building_exit(state) == "left"
+        assert ag._building_exit(state) == "left"
+        ag._pilot_to.assert_called_with(state, 4, 7)
+        exits = [e for e in ag.events if "EXIT |" in e]
+        assert len(exits) == 1 and "warp (4,7)" in exits[0]
+
+    def test_on_the_warp_steps_off_the_map_edge(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7)])  # bottom row of an 8-row Center: press down off the mat
+        assert ag._building_exit(OverworldState(map_id=58, x=3, y=7)) == "down"
+        _indoors(ag, [(4, 0)])  # a gate's north exit
+        assert ag._building_exit(OverworldState(map_id=47, x=4, y=0)) == "up"
+        _indoors(ag, [(0, 3)])
+        assert ag._building_exit(OverworldState(map_id=99, x=0, y=3)) == "left"
+        _indoors(ag, [(13, 3)])
+        assert ag._building_exit(OverworldState(map_id=99, x=13, y=3)) == "right"
+        _indoors(ag, [(5, 3)])  # a doorway inside the map body: face south like a building door
+        assert ag._building_exit(OverworldState(map_id=99, x=5, y=3)) == "down"
+
+    def test_edge_press_without_a_map_header_uses_the_warp_itself(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7)], bounds=(0, 0))  # mid-transition: no header loaded
+        assert ag._building_exit(OverworldState(map_id=58, x=3, y=7)) == "down"
+
+    def test_choose_overworld_action_leaves_an_unplanned_building(self, tmp_path):
+        """Inside the Pewter Center with the Pokédex (GO_NORTH declines to steer): walk out
+        instead of cycling directions / pressing into the counter, and count as pilot-driven so
+        the backtrack manager doesn't teleport us mid-exit."""
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7), (4, 7)])
+        ag.memory.has_pokedex = MagicMock(return_value=True)
+        ag._pilot_to = MagicMock(return_value="down")
+        assert ag.choose_overworld_action(OverworldState(map_id=58, x=11, y=3, party_count=1)) == "down"
+        assert ag._quest_nav_active is True
+
+    def test_choose_overworld_action_falls_through_outdoors(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        _indoors(ag, [(3, 7)], tileset=0)
+        ag.navigator.next_direction = MagicMock(return_value="right")
+        assert ag.choose_overworld_action(OverworldState(map_id=99, x=1, y=1, party_count=1)) == "right"
+        assert ag._quest_nav_active is False

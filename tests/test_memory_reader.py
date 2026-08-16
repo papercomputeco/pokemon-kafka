@@ -779,3 +779,34 @@ class TestReadSigns:
         reader = MemoryReader(mock_pyboy)
         fake_memory[0xD4B0] = 200  # garbage count must not scan past the table
         assert len(reader.read_signs()) == 16
+
+
+class TestReadWarps:
+    """read_warps surfaces the current map's warp table (wNumberOfWarps / wWarpEntries) — the
+    doors and exits of the loaded map, so the agent can leave a building without a per-map table."""
+
+    def test_reads_warp_records(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[0xD3AE] = 2
+        # Records are (y, x, dest warp id, dest map); 0xFF = LAST_MAP. Pewter Center's two mats.
+        fake_memory[0xD3AF], fake_memory[0xD3B0], fake_memory[0xD3B1], fake_memory[0xD3B2] = 7, 3, 6, 0xFF
+        fake_memory[0xD3B3], fake_memory[0xD3B4], fake_memory[0xD3B5], fake_memory[0xD3B6] = 7, 4, 6, 0xFF
+        assert reader.read_warps() == [(3, 7, 0xFF), (4, 7, 0xFF)]
+
+    def test_no_warps(self, mock_pyboy):
+        assert MemoryReader(mock_pyboy).read_warps() == []
+
+    def test_caps_at_thirty_two(self, mock_pyboy, fake_memory):
+        reader = MemoryReader(mock_pyboy)
+        fake_memory[0xD3AE] = 200  # garbage count must not scan past the table
+        assert len(reader.read_warps()) == 32
+
+
+class TestIsIndoors:
+    def test_overworld_tileset_is_outdoors(self, mock_pyboy, fake_memory):
+        fake_memory[0xD367] = 0
+        assert MemoryReader(mock_pyboy).is_indoors() is False
+
+    def test_any_other_tileset_is_indoors(self, mock_pyboy, fake_memory):
+        fake_memory[0xD367] = 6  # POKECENTER
+        assert MemoryReader(mock_pyboy).is_indoors() is True

@@ -7,5 +7,5 @@
   "max_turns": 4000,
   "genome": {},
   "pass": {"final_map_id": 54},
-  "expected_fail": true
+  "expected_fail": false
 }
