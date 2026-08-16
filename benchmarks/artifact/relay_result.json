@@ -1,0 +1,4 @@
+{"finished":"20:53 local, 12 min",
+ "segs":"0/4","wall_m":"12.0","model_m":"3.9","turns":"115","tok_s":"112.2","s_turn":"2.0","cloud_usd":"0.57 eq.","code_fix":"no",
+ "wh":"40.3","mean_w":"190","peak_w":"604","energy_usd":"0.012",
+ "summary":"All six route1_to_forest lanes died in the Weedle flee-loop — the very bug this model diagnosed at 0.82 in the eval when shown the code. In the run it never opened agent.py; it re-ran with --timeout 60, called the harness misconfigured, wrote learnings for Brock and Route 3 it never reached, and exited at 12 minutes declaring success. Context peaked at 51k of 128k."}

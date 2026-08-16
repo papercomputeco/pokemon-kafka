@@ -86,13 +86,26 @@ serving log is clean for the run's window; (b) `bench_report.py` should surface 
 0 / stop with no content" as a harness-death flag. Attempt 1's evidence is kept in
 `data/local_runs/qwen38-27b.attempt1/`; attempt 2 reruns in a fresh worktree.
 
-### 5. Blackwell FP4 is not available on Linux (yet)
+### 5. Laguna XS matched Haiku's cadence and segments — and the quiz had ranked it fifth
+
+Poolside's Laguna XS 2.1 (33B-A3B), the fastest decoder on the roster and only fifth on the eval
+quiz (silent on two cases, weakest honest-summary), ran the relay for 40 minutes: **2/4 segments,
+91.1 out tok/s in-run against Haiku's 91.9, 4.0 s/turn against 4.8, 77.5 Wh (2.3 ¢).** It hit
+the same flee-loop wall as Qwen3-Coder and did not blame the harness: it manufactured a healed
+seed state, cleared Route 1 → Forest and Forest → Pewter, then stalled on the known Pewter Gym
+wedge like every 08-15 model. One honest, well-formed learning; no fabrication; no code fix. It
+ended because the 128k window filled (`stopReason: length` at 130,820 tokens, 8.4 M uncached input)
+while it was grepping the right file — a harness limit, not a judgement failure. So the quiz
+mis-ranked it in the other direction: its truncations measured a thinking budget, not a behaviour.
+Runs are the instrument; the quiz is the screen. See `benchmarks/2026-08-16-local-relay-laguna-xs.md`.
+
+### 6. Blackwell FP4 is not available on Linux (yet)
 
 Every `nvfp4` tag Ollama publishes 412s with "this model requires macOS". The obvious 5090
 experiment — FP4 vs Q4 on the same weights — cannot be run here today. `check_runnable()` now
 rejects `mlx`/`nvfp4` tags at the roster.
 
-### 6. Uncached local prompts are the hidden cost
+### 7. Uncached local prompts are the hidden cost
 
 12 minutes of Qwen3-Coder consumed 3.88 M input tokens with zero cache reads. Priced as cloud
 tokens that is $0.57; the same run on a cached API would be ~90 % cache hits. Electricity was 1.2
@@ -102,7 +115,9 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
 
 - Add a harness-death flag to `bench_report.py`; never publish a local row without checking the
   Ollama journal for the run window.
-- Rerun `qwen38-27b`; run `laguna-xs`. One run is one run.
+- Rerun `qwen38-27b` (in progress). Rerun `laguna-xs` with a compaction guard — it has more run in it.
+- Harness: trigger compaction at ~75 % of the window from the guardrails extension (pi only compacts on a
+  400, and local models return `length` instead); remind the operator to commit deliverables early.
 - If the dense 27B crashes the card again at 128k, that is a finding about the 5090, not the model.
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.

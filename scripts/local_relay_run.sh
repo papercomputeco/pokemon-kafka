@@ -51,7 +51,9 @@ EOF
 
 echo "== power sampler"
 POWER_CSV="$WT/data/power/${ALIAS}.csv"
-( cd "$REPO" && uv run python scripts/power_sampler.py --out "$POWER_CSV" --interval 5 >"$OUT/${ALIAS}.power.log" 2>&1 & echo $! > "$OUT/${ALIAS}.power.pid" )
+# exec the venv python directly so the pid we record is the sampler itself, not a uv wrapper
+( cd "$REPO" && exec "$REPO/.venv/bin/python" scripts/power_sampler.py --out "$POWER_CSV" --interval 5 >"$OUT/${ALIAS}.power.log" 2>&1 ) &
+echo $! > "$OUT/${ALIAS}.power.pid"
 
 echo "== pi $MODEL (budget ${BUDGET_S}s) — log $OUT/${ALIAS}.pi.log"
 START=$(date +%s)
@@ -61,6 +63,7 @@ START=$(date +%s)
     --model "$MODEL" "$(cat "$PROMPT")" >"$OUT/${ALIAS}.pi.log" 2>&1 ) || echo "   pi exited rc=$?"
 END=$(date +%s)
 kill "$(cat "$OUT/${ALIAS}.power.pid")" 2>/dev/null || true
+pkill -f "power_sampler.py --out $POWER_CSV" 2>/dev/null || true
 
 echo "== done in $(( (END-START)/60 )) min; batons:"; ls "$WT"/data/relay/*/batons/ 2>/dev/null | sort -u | grep -v ':$' || echo "   none"
 echo "== learnings:"; ls "$WT/docs/learnings/" 2>/dev/null || true
