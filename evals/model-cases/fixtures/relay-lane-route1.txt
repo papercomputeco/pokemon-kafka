@@ -1,0 +1,29 @@
+# tail -n 12 data/relay/260816-034101/route1_to_forest/base/agent.log
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] BATTLE | Lv3 Weedle (bug/poison) | Player HP: 4/23 | Action: run
+[20:42:12] Session complete. Turns: 2000 | Wins: 5
+[20:42:12] POKEDEX | Wrote pokedex/log8.md
+
+# grep -c 'Action: run' …/base/agent.log
+1314
+
+# ls data/relay/260816-034101/route1_to_forest/
+base
+fast_stuck
+narrow
+patient
+wide_dc2
+x_axis
+
+# ls data/relay/260816-034101/route1_to_forest/base/
+agent.log
+fitness.json
+world.map

@@ -1,0 +1,102 @@
+{
+  "name": "flee-loop-cap",
+  "learning": "docs/learnings/route1-navigation-flee-loop.md",
+  "category": "code-reading",
+  "prompt": "The operator agent reached Route 2 with its lead at 4/23 HP, entered a wild battle with a Weedle, and then burned 1317 turns until the turn budget ran out. Every turn it chose the same action. Below is the battle decision code that was running.\n\nDiagnose the bug: say exactly which branch causes the loop and why the loop never breaks, then state the fix. Be specific about the code, not about configuration.",
+  "context": [
+    {
+      "path": "scripts/agent.py",
+      "start": 330,
+      "end": 384,
+      "label": "scripts/agent.py \u2014 BattleStrategy.choose_action (excerpt)"
+    }
+  ],
+  "rubric": [
+    {
+      "id": "identifies-stall-branch",
+      "weight": 3,
+      "any": [
+        "_wild_fight_turns >= WILD_BATTLE_PATIENCE",
+        "_wild_fight_turns>=WILD_BATTLE_PATIENCE",
+        "stall guard",
+        "stall-guard",
+        "patience branch"
+      ]
+    },
+    {
+      "id": "unconditional-run",
+      "weight": 3,
+      "any": [
+        "unconditional",
+        "always returns .?run",
+        "returns .?run.? (forever|every turn|unconditionally)",
+        "no cap",
+        "never falls back",
+        "without checking",
+        "returns? .{0,15}run.{0,15}(every|each) turn",
+        "no fall-?back",
+        "always run"
+      ]
+    },
+    {
+      "id": "counter-never-advances",
+      "weight": 3,
+      "any": [
+        "does not increment",
+        "doesn.t increment",
+        "never increment",
+        "not advanced",
+        "never reset",
+        "counter (stays|remains)",
+        "run turns do not",
+        "run.* bypass(es)? the increment",
+        "counter is (not|never)",
+        "stays? (at|above) .{0,20}(WILD_BATTLE_PATIENCE|the threshold)",
+        "only incremented .{0,40}fight",
+        "run .{0,20}(path|branch|action) .{0,20}(skips|bypasses)",
+        "returns? early",
+        "before .{0,20}(the )?increment"
+      ]
+    },
+    {
+      "id": "fix-cap-and-fight",
+      "weight": 2,
+      "any": [
+        "cap",
+        "limit the (number of )?run",
+        "fall ?back to fight",
+        "_run_attempts",
+        "max run attempts"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "blames-config-only",
+      "weight": 2,
+      "any": [
+        "increase max_turns",
+        "raise the turn budget",
+        "tune stuck_threshold",
+        "adjust hp_run_threshold to fix"
+      ]
+    },
+    {
+      "id": "blames-rng",
+      "weight": 1,
+      "any": [
+        "just bad (rng|luck)",
+        "nothing wrong with the code"
+      ]
+    },
+    {
+      "id": "fabricates-code-facts",
+      "weight": 3,
+      "any": [
+        "battle_type ?== ?0",
+        "wild .{0,20}battles? .{0,15}(are|is) .{0,10}0",
+        "WILD_BATTLE_PATIENCE is (never|not) reached"
+      ]
+    }
+  ]
+}

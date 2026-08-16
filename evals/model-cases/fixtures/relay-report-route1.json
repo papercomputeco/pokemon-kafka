@@ -1,0 +1,121 @@
+{
+ "run_dir": "data/relay/260816-034101",
+ "segments": [
+  {
+   "name": "route1_to_forest",
+   "winner": null,
+   "attempts": [
+    [
+     {
+      "label": "base",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     },
+     {
+      "label": "fast_stuck",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     },
+     {
+      "label": "narrow",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     },
+     {
+      "label": "x_axis",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     },
+     {
+      "label": "patient",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     },
+     {
+      "label": "wide_dc2",
+      "success": false,
+      "killed": false,
+      "fitness": {
+       "turns": 2000,
+       "battles_won": 5,
+       "maps_visited": 6,
+       "final_map_id": 13,
+       "final_x": 4,
+       "final_y": 48,
+       "lead_hp": 4,
+       "stuck_count": 35,
+       "max_stuck_streak": 138,
+       "encounters": 5,
+       "level_ups": 1
+      }
+     }
+    ]
+   ]
+  }
+ ]
+}

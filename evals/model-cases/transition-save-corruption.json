@@ -1,0 +1,97 @@
+{
+  "name": "transition-save-corruption",
+  "learning": "docs/learnings/by-run/2026-08-15-kimi-k2.6/pewter-corrupted-transition-save.md",
+  "category": "root-cause",
+  "prompt": "A relay segment ends when the agent first reaches a target map: the runner watches map_id and calls pyboy.save_state() on the frame the new map_id appears. The forest_to_pewter segment stopped on the Route 2 -> Pewter City transition (map 13 -> 2) and saved its baton state. When the next segment loads that baton, the player appears at (16,12), (16,13) or (18,34) depending on run, all outside the expected start area, and the navigator oscillates against a wall.\n\nExplain the root cause at the emulator/game level, and give the fix for the save policy. Do not propose navigator parameter changes.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "ordering",
+      "weight": 3,
+      "any": [
+        "map id .{0,30}(updates?|changes?|written) (first|before)",
+        "before .{0,20}(player )?(coordinates|position)",
+        "wCurMap",
+        "0xD35E",
+        "coordinates are updated (later|after)",
+        "position lags",
+        "coordinates? .{0,25}(are|is|were)? ?not yet (updated|set)",
+        "position .{0,25}not yet",
+        "map_?id .{0,25}(changes?|updates?|appears?) .{0,25}(before|first|immediately)",
+        "coordinates? .{0,20}(lag|trail|follow)",
+        "player .{0,20}still .{0,20}(on|at) .{0,25}(the )?(old|previous|border)",
+        "spawn position .{0,20}not",
+        "hasn.t .{0,25}(finalized|set) .{0,25}position"
+      ]
+    },
+    {
+      "id": "inconsistent-frame",
+      "weight": 3,
+      "any": [
+        "mid-?transition",
+        "inconsistent (state|frame)",
+        "first frame",
+        "partially updated",
+        "transition frame",
+        "not settled",
+        "the (very )?frame (that|where|when|in which)",
+        "same frame",
+        "mid.?way through",
+        "half.?way",
+        "still transitioning",
+        "before .{0,20}(the )?transition .{0,20}(completes?|finishes?)"
+      ]
+    },
+    {
+      "id": "fix-settle",
+      "weight": 3,
+      "any": [
+        "wait (for|until)",
+        "settle",
+        "several frames",
+        "2-3 frames",
+        "few frames",
+        "confirm .{0,30}(stable|unchanged)",
+        "tick .{0,20}before saving",
+        "delay the save",
+        "wait .{0,15}frames?",
+        "after .{0,20}(the )?transition .{0,20}(completes?|is complete|finish)",
+        "until .{0,30}(inside|within|stable|settled|no longer)",
+        "tick\\(",
+        "one frame"
+      ]
+    },
+    {
+      "id": "fix-clean-snapshot",
+      "weight": 1,
+      "any": [
+        "last known good",
+        "clean frame",
+        "previous .{0,20}snapshot",
+        "backtrack frame",
+        "re-?save after"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "navigator-tuning",
+      "weight": 2,
+      "any": [
+        "increase stuck_threshold",
+        "tune the waypoint",
+        "adjust door_cooldown",
+        "change the genome"
+      ]
+    },
+    {
+      "id": "emulator-bug",
+      "weight": 2,
+      "any": [
+        "pyboy bug",
+        "emulator is broken",
+        "corrupt(ed)? (file|disk)"
+      ]
+    }
+  ]
+}
