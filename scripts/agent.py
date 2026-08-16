@@ -92,6 +92,31 @@ GRASS_ENCOUNTER_COST = 8
 # Reset whenever real damage lands, so winnable battles are never abandoned.
 WILD_BATTLE_PATIENCE = 10
 
+# Stall-guard recovery cap for wild battles: once the guard above fires, "run" turns do not advance
+# the fight counter, so an unconditional run looped forever whenever the flee kept failing (the
+# Route 2 Weedle flee loop that burned a 2000-turn budget; its root cause was the input wedge the
+# watchdog below clears, but the branch itself had no exit either). After this many recovery run
+# attempts the agent falls back to fighting with its best move; a fresh fight streak re-arms the
+# guard, so a genuinely futile battle alternates fight/run rather than freezing on either.
+WILD_STALL_RUN_CAP = 3
+
+# Battle-wedge watchdog: a battle whose signature (battle flag, both HP values, our move PP) is
+# identical for this many consecutive turns is input-locked on screen. Observed (Route 2, 1-HP
+# lead vs Weedle, savestates in the 08-16 eval): the battle opens on the "Go! CHARMANDER!" text,
+# the run branch's d-pad presses are eaten by it and the A-mash then lands on the battle menu
+# whose REMEMBERED cursor is on PKMN — the agent is now inside the party screen
+# ("Choose a POKeMON" / SWITCH-STATS-CANCEL / "is already out!"), where every later fight/run
+# selection just cycles the submenu (one B per fight attempt is fewer than the A's that reopen
+# it), so nothing ever spends PP or moves HP. PP is in the signature because a fight turn the game
+# accepted always spends PP even when it deals 0. Recovery is B x8: it closes any nested submenu
+# or text box and is a no-op on the top battle menu, after which the normal fight/run selection
+# (which normalises the cursor to FIGHT first) lands — verified from five wedged savestates.
+# Never mash A here: from the top menu with the cursor remembered on PKMN, A re-enters the party
+# screen and re-wedges the battle. Capped per signature so a battle that is legitimately static
+# (failed escapes against a String Shot user) does not spend every turn on recovery.
+BATTLE_WEDGE_TURNS = 2
+BATTLE_WEDGE_MAX_ATTEMPTS = 4
+
 # Gen-1's physical/special split is decided by a move's TYPE (not per-move): these types are
 # physical (they hit the target's Defense); the rest (fire/water/grass/electric/psychic/ice/
 # dragon) are special (they hit its Special). This matters against physical walls that pump
@@ -271,8 +296,10 @@ class BattleStrategy:
         self.unknown_move_score = unknown_move_score
         self.status_move_score = status_move_score
         self._run_attempts = 0
-        # Stall guard: count fight turns in the current wild battle without enemy-HP progress.
+        # Stall guard: count fight turns in the current wild battle without enemy-HP progress, and
+        # the recovery run attempts spent since the guard last fired (capped by WILD_STALL_RUN_CAP).
         self._wild_fight_turns = 0
+        self._stall_run_attempts = 0
         self._last_enemy_hp: int | None = None
         # Move-category selection: the last damage each category dealt to the current enemy (-1 =
         # not yet tried), the category of our last move (to attribute the next enemy-HP delta), and
@@ -325,6 +352,7 @@ class BattleStrategy:
         if battle.enemy_species != self._stall_enemy_species:
             self._stall_enemy_species = battle.enemy_species
             self._wild_fight_turns = 0
+            self._stall_run_attempts = 0
             self._last_enemy_hp = None
             self._cat_dmg = {"physical": -1, "special": -1}
             self._last_move_cat = None
@@ -338,15 +366,23 @@ class BattleStrategy:
             dealt = self._last_enemy_hp - battle.enemy_hp
             if dealt > 0:
                 self._wild_fight_turns = 0
+                self._stall_run_attempts = 0
             if self._last_move_cat is not None and dealt >= 0:
                 self._cat_dmg[self._last_move_cat] = dealt
         self._last_enemy_hp = battle.enemy_hp
         if self._wild_fight_turns >= WILD_BATTLE_PATIENCE:
             if battle.battle_type == 1:
-                # Wild: keep fleeing until the battle ends. Unlike the low-HP run (capped, because
-                # fighting on can still level us), a stall means fighting is futile — never fall
-                # back to fight here.
-                return {"action": "run"}
+                # Wild: flee — but only WILD_STALL_RUN_CAP times. Run turns never advance the
+                # fight counter, so an uncapped run here was an infinite loop whenever the escape
+                # kept failing (a wedged menu, an unlucky escape roll): the observed 2000-turn
+                # Route 2 flee loop. Past the cap, fall back to fighting with the best-scored move
+                # and re-arm the guard, so a truly futile battle alternates fight/run instead of
+                # freezing on either branch.
+                if self._stall_run_attempts < WILD_STALL_RUN_CAP:
+                    self._stall_run_attempts += 1
+                    return {"action": "run"}
+                self._wild_fight_turns = 0
+                self._stall_run_attempts = 0
             if battle.battle_type == 2:
                 # Trainer battles can't be fled, so a stall is a stuck menu, not a futile matchup.
                 # Reset the battle menu (mash B) so the next FIGHT lands. Reset the counter so we
@@ -401,7 +437,13 @@ class BattleStrategy:
             if len(untried) == 1:
                 target = untried[0]  # explore the category we haven't measured yet
             elif not untried:
-                target = max(cats, key=lambda c: self._cat_dmg[c])  # commit to the higher-damage one
+                # Commit to the higher-damage category. On a tie (both dealt the same, e.g. both 0)
+                # fall through to the highest-scored move: `max` over the set was hash-order
+                # dependent (PYTHONHASHSEED), which made whole eval lanes non-reproducible.
+                best = max(self._cat_dmg[c] for c in cats)
+                tied = [c for c in cats if self._cat_dmg[c] == best]
+                if len(tied) == 1:
+                    target = tied[0]
             if target is not None:
                 return max((m for m in damaging if m[2] == target), key=lambda m: m[1])[0]
 
@@ -750,6 +792,12 @@ class PokemonAgent:
         self._current_enemy_type: str = ""
         self._pre_battle_species: list[int] = []
         self._pre_battle_level: int = 0
+        # Battle-wedge watchdog state (see BATTLE_WEDGE_TURNS): the last observed battle signature,
+        # how many consecutive turns it has repeated, and recovery attempts spent on it.
+        self._battle_frozen_sig: tuple | None = None
+        self._battle_frozen_count = 0
+        self._battle_wedge_attempts = 0
+        self.battle_wedge_recoveries = 0  # run total, reported in fitness (firing rate of the fix)
         self.evolution_log: list[dict] = []
         self.level_ups: int = 0
         # Per-battle tracking (snapshotted at battle start; battle RAM clears at end).
@@ -1644,6 +1692,53 @@ class PokemonAgent:
                 return True
         return False
 
+    def _battle_wedge_watchdog(self, battle) -> bool:
+        """Detect and recover an input-locked battle before the turn's action is chosen.
+
+        The signature is (battle flag, our HP, enemy HP, our move PP). A real turn moves at least
+        one of them (or ends the battle); a screen that neither RUN nor FIGHT can advance keeps them
+        all frozen. After BATTLE_WEDGE_TURNS identical repeats, run the recovery (at most
+        BATTLE_WEDGE_MAX_ATTEMPTS times per signature — anything after that is not a wedge the
+        recovery can clear). Returns True when a recovery was performed this turn.
+        """
+        sig = (battle.battle_type, battle.player_hp, battle.enemy_hp, tuple(battle.move_pp))
+        if sig == self._battle_frozen_sig:
+            self._battle_frozen_count += 1
+        else:
+            self._battle_frozen_sig = sig
+            self._battle_frozen_count = 0
+            self._battle_wedge_attempts = 0
+        if self._battle_frozen_count < BATTLE_WEDGE_TURNS or self._battle_wedge_attempts >= BATTLE_WEDGE_MAX_ATTEMPTS:
+            return False
+        self._battle_wedge_attempts += 1
+        self._battle_frozen_count = 0
+        self.battle_wedge_recoveries += 1
+        self._recover_battle_wedge()
+        return True
+
+    def _reset_battle_wedge_watchdog(self):
+        """Forget the wedge signature — called when a battle ends so the next one starts clean."""
+        self._battle_frozen_sig = None
+        self._battle_frozen_count = 0
+        self._battle_wedge_attempts = 0
+
+    def _recover_battle_wedge(self):
+        """Recover a battle that stopped responding to the normal menu input.
+
+        The screen is stuck in a submenu/text state that the run/fight selections cannot leave
+        (see BATTLE_WEDGE_TURNS). Back out with B, repeated so it registers past nested menus,
+        then idle briefly so the top battle menu is redrawn before this turn's action selects
+        from it. B only — an A here would re-enter whatever the remembered cursor points at.
+        """
+        self.log(
+            f"WEDGE | battle frozen (attempt {self._battle_wedge_attempts}/{BATTLE_WEDGE_MAX_ATTEMPTS}) — "
+            "recovery: B x8, wait 120"
+        )
+        for _ in range(8):
+            self.controller.press("b")
+            self.controller.wait(8)
+        self.controller.wait(120)
+
     def _resolve_brock_badge(self, won: bool) -> bool:
         """Whether Brock is really beaten = the Boulder Badge bit. It is awarded during Brock's
         post-battle dialogue, which plays AFTER battle_type clears, so a straight read here caught it
@@ -1941,6 +2036,7 @@ class PokemonAgent:
             "encounters": len(self.encounter_log),
             "level_ups": self.level_ups,
             "evolutions": len(self.evolution_log),
+            "battle_wedge_recoveries": self.battle_wedge_recoveries,
             # Brock (gym 1) outcome — None until the Brock fight resolves.
             "brock_turns": self.brock_turns,
             "brock_won": self.brock_won,
@@ -2145,6 +2241,10 @@ class PokemonAgent:
                     self._trainer_state_saved = True
                     self.log(f"Saved trainer-battle state (map {save_trainer_target}) to {save_trainer_path}")
 
+                # Battle-wedge watchdog: if the battle state is identical to the previous turns,
+                # the screen is frozen and neither run nor fight can land. Recover before acting.
+                self._battle_wedge_watchdog(battle)
+
                 self.run_battle_turn()
 
                 # Check if battle ended — wait long enough for turn to fully resolve
@@ -2161,6 +2261,7 @@ class PokemonAgent:
                     self._last_progress_turn = self.turn_count
                     self.battle_strategy._run_attempts = 0
                     self.battle_strategy._wild_fight_turns = 0
+                    self.battle_strategy._stall_run_attempts = 0
                     self.battle_strategy._last_enemy_hp = None
                     self.encounter_log.append(
                         {
@@ -2240,6 +2341,7 @@ class PokemonAgent:
                     # Reset pre-battle snapshots
                     self._pre_battle_species = []
                     self._pre_battle_level = 0
+                    self._reset_battle_wedge_watchdog()
 
                     if battle_limit > 0 and self.battles_won >= battle_limit:
                         self.log(f"Battle limit reached ({battle_limit}). Stopping.")

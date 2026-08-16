@@ -388,6 +388,63 @@ class TestBattleStrategy:
             assert s.choose_action(battle)["action"] == "fight"
         assert s.choose_action(battle) == {"action": "run"}
 
+    def _stalled_wild(self):
+        # A wild battle whose enemy HP never moves and whose lead is healthy (no low-HP run): the
+        # stall guard is the only thing that ever chooses "run".
+        return self._make_battle(
+            battle_type=1,
+            player_hp=60,
+            player_max_hp=100,
+            enemy_hp=6,
+            enemy_max_hp=16,
+            moves=[0x0A, 0x2D, 0x00, 0x00],
+            move_pp=[10, 10, 0, 0],  # Scratch + Growl, both PP'd
+        )
+
+    def test_stall_guard_run_is_capped_then_falls_back_to_best_move(self):
+        # The flee-loop fix: run turns don't advance the fight counter, so an uncapped stall-guard
+        # run looped forever when the escape kept failing. After WILD_STALL_RUN_CAP runs the agent
+        # fights again with its best-scored move (Scratch, index 0 — not the status move).
+        s = BattleStrategy(self.chart)
+        battle = self._stalled_wild()
+        for _ in range(WILD_BATTLE_PATIENCE):
+            assert s.choose_action(battle)["action"] == "fight"
+        for _ in range(agent.WILD_STALL_RUN_CAP):
+            assert s.choose_action(battle) == {"action": "run"}
+        assert s.choose_action(battle) == {"action": "fight", "move_index": 0}
+
+    def test_stall_guard_alternates_fight_and_run_after_cap(self):
+        # Past the cap the guard is re-armed: another patience window of fruitless fights, then
+        # another capped run streak — neither branch can consume the whole turn budget.
+        s = BattleStrategy(self.chart)
+        battle = self._stalled_wild()
+        cycle = WILD_BATTLE_PATIENCE + agent.WILD_STALL_RUN_CAP
+        actions = [s.choose_action(battle)["action"] for _ in range(2 * cycle)]
+        assert actions == (["fight"] * WILD_BATTLE_PATIENCE + ["run"] * agent.WILD_STALL_RUN_CAP) * 2
+
+    def test_stall_run_attempts_reset_on_real_damage(self):
+        # Landing damage resets both the fight counter and the spent run attempts, so a battle
+        # that resumes progressing gets the full run allowance the next time it stalls.
+        s = BattleStrategy(self.chart)
+        battle = self._stalled_wild()
+        for _ in range(WILD_BATTLE_PATIENCE):
+            s.choose_action(battle)
+        assert s.choose_action(battle) == {"action": "run"}
+        assert s._stall_run_attempts == 1
+        progressed = self._make_battle(
+            battle_type=1, player_hp=60, player_max_hp=100, enemy_hp=3, enemy_max_hp=16, moves=[0x0A, 0x2D, 0, 0]
+        )
+        assert s.choose_action(progressed)["action"] == "fight"
+        assert s._stall_run_attempts == 0
+        assert s._wild_fight_turns == 1
+
+    def test_stall_run_attempts_reset_on_new_enemy(self):
+        s = BattleStrategy(self.chart)
+        s._stall_run_attempts = 2
+        s._stall_enemy_species = 0x01
+        s.choose_action(self._make_battle(battle_type=1, enemy_species=0x02, player_hp=60, player_max_hp=100))
+        assert s._stall_run_attempts == 0
+
     def test_choose_action_unsticks_stalled_trainer_battle(self):
         # Trainer battles can't be fled, so a stall (enemy HP frozen — the observed Brock soft-lock
         # where a desynced menu never lands the move) must trigger a menu-reset 'unstick', not 'run'.
@@ -449,6 +506,28 @@ class TestBattleStrategy:
         assert s.choose_action(self._brock_mon(s, 40))["move_index"] == 0  # try physical
         assert s.choose_action(self._brock_mon(s, 30))["move_index"] == 1  # physical did 10 -> explore special
         assert s.choose_action(self._brock_mon(s, 28))["move_index"] == 0  # special did 2 < 10 -> commit physical
+
+    def test_category_damage_tie_falls_back_to_best_scored_move(self):
+        # Both categories measured equal (here: both 0 against a wall). The commit choice must not
+        # depend on set iteration order (PYTHONHASHSEED made whole eval lanes non-reproducible):
+        # on a tie the agent takes the highest-scored move instead — against a rock type Scratch
+        # (normal) is resisted in this chart and Ember (fire) is neutral, whatever the hash seed.
+        s = BattleStrategy(self.chart)
+        rock = self._make_battle(
+            battle_type=2,
+            player_hp=80,
+            player_max_hp=100,
+            enemy_hp=40,
+            enemy_max_hp=40,
+            enemy_type1=0x05,  # rock
+            moves=[0x0A, 0x34, 0x00, 0x00],  # Scratch (physical), Ember (special)
+            move_pp=[10, 10, 0, 0],
+        )
+        assert s.choose_action(rock)["move_index"] == 1  # nothing measured yet: best score (Ember)
+        assert s.choose_action(rock)["move_index"] == 0  # special did 0 -> explore physical
+        assert s._cat_dmg == {"physical": -1, "special": 0}
+        assert s.choose_action(rock)["move_index"] == 1  # physical did 0 too: tie -> best score (Ember)
+        assert s._cat_dmg == {"physical": 0, "special": 0}
 
     def test_category_memory_resets_on_new_enemy(self):
         # After committing to special on Geodude, Onix (a new species) re-probes from the type-best
@@ -1921,6 +2000,115 @@ class TestRunBattleTurn:
         ag.memory._read = MagicMock(return_value=0)
         assert ag._resolve_brock_badge(False) is False  # a loss never advances the dialogue
         ag.controller.mash_a.assert_not_called()
+
+
+class TestBattleWedgeWatchdog:
+    """The battle-wedge watchdog: a battle whose (flag, our HP, enemy HP) signature repeats for
+    BATTLE_WEDGE_TURNS turns is input-locked; recovery backs out (B), advances text (A) and idles."""
+
+    def _agent(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        return ag
+
+    @staticmethod
+    def _battle(player_hp=4, enemy_hp=15, battle_type=1):
+        return BattleState(battle_type=battle_type, player_hp=player_hp, player_max_hp=23, enemy_hp=enemy_hp)
+
+    def test_no_recovery_while_battle_state_moves(self, tmp_path):
+        ag = self._agent(tmp_path)
+        for hp in (15, 12, 9, 6):  # enemy HP dropping every turn: a live battle
+            assert ag._battle_wedge_watchdog(self._battle(enemy_hp=hp)) is False
+        ag.controller.press.assert_not_called()
+        assert ag.battle_wedge_recoveries == 0
+
+    def test_recovers_after_frozen_turns(self, tmp_path):
+        ag = self._agent(tmp_path)
+        frozen = self._battle()
+        assert ag._battle_wedge_watchdog(frozen) is False  # first sighting
+        for _ in range(agent.BATTLE_WEDGE_TURNS - 1):
+            assert ag._battle_wedge_watchdog(frozen) is False  # repeats below the threshold
+        assert ag._battle_wedge_watchdog(frozen) is True  # BATTLE_WEDGE_TURNS repeats -> recover
+        assert ag.controller.press.call_args_list.count(call("b")) == 8
+        ag.controller.mash_a.assert_not_called()  # B only: an A would re-enter the remembered PKMN submenu
+        assert ag.battle_wedge_recoveries == 1
+        assert any("WEDGE" in e for e in ag.events)
+
+    def test_recovery_attempts_capped_per_signature(self, tmp_path):
+        ag = self._agent(tmp_path)
+        frozen = self._battle()
+        fired = sum(ag._battle_wedge_watchdog(frozen) for _ in range(40))
+        assert fired == agent.BATTLE_WEDGE_MAX_ATTEMPTS
+        assert ag.battle_wedge_recoveries == agent.BATTLE_WEDGE_MAX_ATTEMPTS
+
+    def test_new_signature_rearms_the_cap(self, tmp_path):
+        ag = self._agent(tmp_path)
+        frozen = self._battle()
+        for _ in range(40):
+            ag._battle_wedge_watchdog(frozen)
+        assert ag._battle_wedge_watchdog(self._battle(player_hp=2)) is False  # state moved: fresh signature
+        assert sum(ag._battle_wedge_watchdog(self._battle(player_hp=2)) for _ in range(40)) == (
+            agent.BATTLE_WEDGE_MAX_ATTEMPTS
+        )
+
+    def test_spending_pp_is_a_live_turn(self, tmp_path):
+        # A fight turn the game accepted spends PP even when it deals 0 — that is not a wedge, so
+        # the signature (which includes PP) keeps moving and the watchdog stays quiet.
+        ag = self._agent(tmp_path)
+        for pp in (10, 9, 8, 7, 6):
+            state = BattleState(battle_type=1, player_hp=4, player_max_hp=23, enemy_hp=15, move_pp=[pp, 0, 0, 0])
+            assert ag._battle_wedge_watchdog(state) is False
+        assert ag.battle_wedge_recoveries == 0
+
+    def test_reset_forgets_signature(self, tmp_path):
+        ag = self._agent(tmp_path)
+        frozen = self._battle()
+        for _ in range(3):
+            ag._battle_wedge_watchdog(frozen)
+        ag._reset_battle_wedge_watchdog()
+        assert ag._battle_frozen_sig is None
+        assert ag._battle_frozen_count == 0
+        assert ag._battle_wedge_attempts == 0
+
+    def test_run_loop_recovers_wedged_battle_and_resets_on_end(self, tmp_path):
+        """End to end through run(): BATTLE_WEDGE_TURNS+1 identical battle turns trigger one
+        recovery before the last one's action; the battle ending clears the watchdog for the next
+        encounter."""
+        ag = _make_agent(tmp_path)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.memory.read_party_species = MagicMock(return_value=[0xB0])
+        ag.controller = MagicMock()
+        frozen = BattleState(
+            battle_type=1,
+            player_hp=4,
+            player_max_hp=23,
+            enemy_hp=15,
+            enemy_max_hp=15,
+            moves=[0x0A, 0x00, 0x00, 0x00],
+            move_pp=[10, 0, 0, 0],
+            player_level=7,
+        )
+        battle_none = BattleState(battle_type=0)
+        # Each battle turn reads the state 3x (loop check, inside run_battle_turn, post-turn check);
+        # the last frozen turn's post-turn check sees the battle over.
+        frozen_turns = agent.BATTLE_WEDGE_TURNS + 1
+        reads = [frozen] * (3 * frozen_turns - 1) + [battle_none, battle_none]
+        ag.memory.read_battle_state = MagicMock(side_effect=reads)
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=13, x=1, y=1))
+        ag._await_turn_resolved = MagicMock(return_value=True)
+
+        with patch.object(agent, "Image", None):
+            fitness = ag.run(max_turns=frozen_turns + 1)
+
+        assert ag.battle_wedge_recoveries == 1
+        assert fitness["battle_wedge_recoveries"] == 1
+        assert ag._battle_frozen_sig is None  # cleared by the battle ending
+        assert sum(1 for e in ag.events if "WEDGE" in e) == 1
+
+    def test_reports_zero_recoveries_in_fitness(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState())
+        assert ag.compute_fitness()["battle_wedge_recoveries"] == 0
 
 
 class TestRunOverworld:
@@ -4381,6 +4569,7 @@ def _fitness_stub(party_hp):
         encounter_log=[],
         level_ups=0,
         evolution_log=[],
+        battle_wedge_recoveries=0,
         brock_turns=None,
         brock_won=None,
         brock_lead_species=None,
