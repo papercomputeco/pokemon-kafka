@@ -224,5 +224,6 @@ complete after tests + lint; the relay report still shows `pewter_to_badge=None`
 its first two rubrics (one leaked the answer into the prompt so control already scored; one did not
 match its own reference), the repair loop fixed the third, and the gated result was **Laguna
 0.00 → 1.00 with the tip**, gpt-oss and Gemma 0 → 0.2. That tip is now the first line of
-`docs/prompts/tips.md` and rides along with every mission. The next operator run is the first whose
-prompt contains something that proved itself before it was written down.
+`docs/prompts/tips.md`. Both assists are **opt-in** (`ASSIST=tips|consult|both` on the launcher;
+default `none`) so unassisted rows keep measuring the model alone — an assisted run answers "how much
+does the accumulated knowledge help *this* model?", which is a different row, labelled as such.

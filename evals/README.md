@@ -118,4 +118,6 @@ uv run python scripts/advisor.py oracle "lanes stall on map 54 pressing up, stuc
   Only gated proposals can be promoted (`--force` to override, don't).
 * **Oracle** (read path) is a knowledge bearer over learnings, eval cases/results, benchmarks and past tapes
   sessions; it cites (`path:line`, session id) or says `NO PRECEDENT`. The operator can call it at run time
-  through the `consult` tool in `scripts/pi-ext/guardrails.ts`.
+  through the `consult` tool in `scripts/pi-ext/guardrails.ts` — **opt-in** (`PI_GUARD_CONSULT=1`, or
+  `ASSIST=consult|both` on the launcher). Tips are opt-in too (`ASSIST=tips|both`). Unassisted runs stay the
+  benchmark baseline; see `benchmarks/README.md` § Assisted vs unassisted rows.

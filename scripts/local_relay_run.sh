@@ -26,13 +26,24 @@ PROMPT="${PROMPT_FILE:-$REPO/docs/prompts/operator_prompt_v2.md}"
 PI_CLI="${PI_CLI:-$(ls "$HOME"/.local/share/fnm/node-versions/*/installation/lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js | tail -1)}"
 
 [ -f "$PROMPT" ] || { echo "missing mission prompt: $PROMPT" >&2; exit 2; }
-# Gated tips (scripts/advisor.py promote) ride along with the mission; only what cleared the gate is in there.
+# ASSIST is OPT-IN so baseline rows keep measuring the model alone:
+#   ASSIST=none     (default) no tips, no consult — the row is comparable to every earlier benchmark row
+#   ASSIST=tips     append docs/prompts/tips.md (gated tips from scripts/advisor.py promote) to the mission
+#   ASSIST=consult  register the `consult` (Oracle) tool in the guardrails
+#   ASSIST=both     both
+# The bench row label carries the assist mode; assisted rows are a separate comparison.
+ASSIST="${ASSIST:-none}"
 TIPS="$REPO/docs/prompts/tips.md"
 MISSION="$(cat "$PROMPT")"
-if [ -s "$TIPS" ]; then MISSION="$MISSION
+case "$ASSIST" in
+  tips|both)
+    if [ -s "$TIPS" ]; then MISSION="$MISSION
 
 ## Tips from past runs (each one proved lift on a fresh model before it was written here)
-$(grep '^- ' "$TIPS")"; fi
+$(grep '^- ' "$TIPS")"; fi ;;
+esac
+case "$ASSIST" in consult|both) export PI_GUARD_CONSULT=1 ;; *) unset PI_GUARD_CONSULT ;; esac
+echo "== assist: $ASSIST"
 curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }
 
@@ -77,5 +88,5 @@ echo "== done in $(( (END-START)/60 )) min; batons:"; ls "$WT"/data/relay/*/bato
 echo "== learnings:"; ls "$WT/docs/learnings/" 2>/dev/null || true
 SESSION=$(ls -t "$HOME/.pi/agent/sessions/"*"speedrun-pi-${TAG}--"/*.jsonl 2>/dev/null | head -1 || true)
 echo "== bench row (session $SESSION)"
-[ -n "$SESSION" ] && ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k)" \
+[ -n "$SESSION" ] && ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k, assist=${ASSIST})" \
     --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price 0.30 )

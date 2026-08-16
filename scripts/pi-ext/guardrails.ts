@@ -87,6 +87,9 @@ function persistedMessageCount(entries: Array<{ type: string; summary?: string }
 // we seen this before?" instead of re-reading agent.py after every compaction (SUMMARY §10, #79).
 const REPO_ROOT = process.env.PI_GUARD_REPO ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
 const CONSULT_TIMEOUT_MS = Number(process.env.PI_GUARD_CONSULT_TIMEOUT ?? 120_000);
+// OPT-IN. Baseline benchmark rows measure the model alone; a run with the Oracle is a different row
+// (assist=consult) and must never be compared to an unassisted one. Enable with PI_GUARD_CONSULT=1.
+const CONSULT_ENABLED = process.env.PI_GUARD_CONSULT === "1";
 
 function runOracle(question: string): Promise<string> {
   return new Promise((resolve) => {
@@ -103,7 +106,7 @@ function runOracle(question: string): Promise<string> {
 }
 
 export default async function (pi: ExtensionAPI) {
-  pi.registerTool({
+  if (CONSULT_ENABLED) pi.registerTool({
     name: "consult",
     label: "Consult the Oracle",
     description:
