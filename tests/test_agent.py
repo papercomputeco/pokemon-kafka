@@ -1894,8 +1894,18 @@ class TestRunBattleTurn:
     def test_run_action_selects_run_corner(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "run"})
         ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
         ag.run_battle_turn()
-        ag.controller.battle_menu_select.assert_called_once_with("run")
+        ag._select_battle_menu.assert_called_once_with("run")
+        ag.controller.wait.assert_any_call(60)  # let the escape roll / enemy move play out
+
+    def test_run_action_when_menu_never_comes_up_presses_nothing(self, tmp_path):
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "run"})
+        ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=False)
+        ag.run_battle_turn()
+        ag.controller.wait.assert_not_called()
+        assert ag.turn_count == 1
 
     def test_item_action(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion", "bag_index": 0})
@@ -1905,16 +1915,18 @@ class TestRunBattleTurn:
     def test_item_action_navigates_to_bag_index(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Super Potion", "bag_index": 3})
         ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
         ag.run_battle_turn()
         # ITEM is selected via the 2x2 battle menu, then the bag list is a vertical navigate_menu.
-        ag.controller.battle_menu_select.assert_called_once_with("item")
+        ag._select_battle_menu.assert_called_once_with("item")
         assert ag.controller.navigate_menu.call_args_list == [call(3)]
 
     def test_item_action_default_bag_index(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion"})
         ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
         ag.run_battle_turn()
-        ag.controller.battle_menu_select.assert_called_once_with("item")
+        ag._select_battle_menu.assert_called_once_with("item")
         assert ag.controller.navigate_menu.call_args_list == [call(0)]
 
     def test_switch_action(self, tmp_path):
@@ -1972,12 +1984,69 @@ class TestRunBattleTurn:
         ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=2, enemy_hp=30, player_hp=50))
         assert ag._await_turn_resolved(30, 50, frames=8) is False  # nothing changed -> retry
 
+    def test_await_turn_resolved_true_on_pp_spent(self, tmp_path):
+        """PP is deducted the moment a move executes — a miss or a 0-damage move still resolves."""
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        ag.memory._read = MagicMock(return_value=2)
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=2, enemy_hp=30, player_hp=50))
+        ag.memory.read_move_pp = MagicMock(return_value=[9, 40, 0, 0])
+        assert ag._await_turn_resolved(30, 50, [10, 40, 0, 0], frames=8) is True
+
+    def test_await_turn_resolved_pp_unchanged_is_not_resolution(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        ag.memory._read = MagicMock(return_value=2)
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=2, enemy_hp=30, player_hp=50))
+        ag.memory.read_move_pp = MagicMock(return_value=[10, 40, 0, 0])
+        assert ag._await_turn_resolved(30, 50, [10, 40, 0, 0], frames=8) is False
+
     def test_fight_retries_when_turn_not_resolved(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 0})
         ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
+        ag._select_move_slot = MagicMock(return_value=True)
+        ag._await_battle_menu = MagicMock(return_value=True)
         ag._await_turn_resolved = MagicMock(return_value=False)  # never resolves -> back out + retry
         ag.run_battle_turn()
         assert ag.controller.press.call_args_list.count(call("b")) == 4  # one back-out per attempt
+        assert ag._select_move_slot.call_args_list == [call(0)] * 4
+
+    def test_fight_stops_retrying_when_menu_never_returns(self, tmp_path):
+        """A fight whose battle menu never comes back (the battle ended mid-sync) selects nothing."""
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 0})
+        ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=False)
+        ag._select_move_slot = MagicMock()
+        ag._await_battle_menu = MagicMock(return_value=False)
+        ag.run_battle_turn()
+        ag._select_move_slot.assert_not_called()
+        assert ag.controller.press.call_args_list.count(call("b")) == 0
+
+    def test_fight_logs_ko_when_trainer_swaps_pokemon(self, tmp_path):
+        """A trainer's next Pokemon is already out by the time the turn settles: the enemy species
+        changed, so the hit is recorded as a KO even though the (new) enemy HP reads higher."""
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 0})
+        ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
+        ag._select_move_slot = MagicMock(return_value=True)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag._await_turn_resolved = MagicMock(return_value=True)
+        ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 2
+        ag.pyboy.memory[ag.memory.ADDR_ENEMY_HP_LO] = 22  # fresh Pokemon, more HP than before (30)
+        ag.pyboy.memory[ag.memory.ADDR_ENEMY_SPECIES] = 0x7B  # was 0 in the BattleState
+        ag.run_battle_turn()
+        assert any("MOVE |" in e and "KO" in e for e in ag.events)
+
+    def test_battle_turn_returns_early_when_battle_ended_during_sync(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        ag._await_battle_menu = MagicMock(return_value=False)
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
+        ag.battle_strategy.choose_action = MagicMock()
+        ag.run_battle_turn()
+        ag.battle_strategy.choose_action.assert_not_called()
+        assert ag.turn_count == 1
 
     def test_resolve_brock_badge_when_already_set(self, tmp_path):
         ag = _make_agent(tmp_path)
@@ -2000,6 +2069,137 @@ class TestRunBattleTurn:
         ag.memory._read = MagicMock(return_value=0)
         assert ag._resolve_brock_badge(False) is False  # a loss never advances the dialogue
         ag.controller.mash_a.assert_not_called()
+
+
+class TestBattleMenuSync:
+    """The battle-menu sync that replaced the blind fixed-timing sequence: B until "FIGHT" is drawn,
+    then verified cursor walks read from RAM (both battle cursors are remembered between turns)."""
+
+    def _agent(self, tmp_path):
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 1
+        return ag
+
+    def test_await_returns_false_without_pressing_when_battle_over(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 0
+        assert ag._await_battle_menu() is False
+        ag.controller.press.assert_not_called()
+
+    def test_await_returns_true_immediately_when_menu_up(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.battle_menu_visible = MagicMock(return_value=True)
+        assert ag._await_battle_menu() is True
+        ag.controller.press.assert_not_called()
+
+    def test_await_presses_b_until_menu_is_drawn(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.battle_menu_visible = MagicMock(side_effect=[False, False, True])
+        assert ag._await_battle_menu() is True
+        assert ag.controller.press.call_args_list == [call("b"), call("b")]  # B only — never A
+
+    def test_await_gives_up_at_the_cap(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.battle_menu_visible = MagicMock(return_value=False)
+        assert ag._await_battle_menu(max_presses=3) is False
+        assert ag.controller.press.call_args_list == [call("b")] * 3
+
+    def test_select_battle_menu_walks_from_remembered_cursor(self, tmp_path):
+        """Cursor remembered on PKMN (the wedge case): FIGHT is one verified 'left' away, then A."""
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag.memory.read_battle_menu_cursor = MagicMock(side_effect=[2, 0])
+        assert ag._select_battle_menu("fight") is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["left", "a"]
+
+    def test_select_battle_menu_run_from_fight(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        # right (column first) is dropped once — the walk re-reads and presses again — then down.
+        ag.memory.read_battle_menu_cursor = MagicMock(side_effect=[0, 0, 2, 3])
+        assert ag._select_battle_menu("run") is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["right", "right", "down", "a"]
+
+    def test_select_battle_menu_item_from_run(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag.memory.read_battle_menu_cursor = MagicMock(side_effect=[3, 1])
+        assert ag._select_battle_menu("item") is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["left", "a"]
+
+    def test_select_battle_menu_up_and_confirms_if_cursor_unreadable(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag.memory.read_battle_menu_cursor = MagicMock(side_effect=[1, None])
+        assert ag._select_battle_menu("fight") is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["up", "a"]
+
+    def test_select_battle_menu_gives_up_when_menu_never_up(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=False)
+        assert ag._select_battle_menu("run") is False
+        ag.controller.press.assert_not_called()
+
+    def test_select_battle_menu_walk_is_capped(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag.memory.read_battle_menu_cursor = MagicMock(return_value=0)  # never moves
+        assert ag._select_battle_menu("pkmn") is True
+        presses = [c.args[0] for c in ag.controller.press.call_args_list]
+        assert presses == ["right"] * agent.BATTLE_MENU_WALK_STEPS + ["a"]
+
+    def test_select_move_slot_walks_down_from_remembered_slot(self, tmp_path):
+        """The list reopens on last turn's slot (0 = Scratch); Ember is slot 2 -> down, down, A."""
+        ag = self._agent(tmp_path)
+        ag.memory.read_move_list_cursor = MagicMock(side_effect=[0, 0, 1, 2])
+        assert ag._select_move_slot(2) is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["down", "down", "a"]
+
+    def test_select_move_slot_walks_up(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.read_move_list_cursor = MagicMock(side_effect=[1, 1, 0])
+        assert ag._select_move_slot(0) is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["up", "a"]
+
+    def test_select_move_slot_waits_for_the_list_to_draw(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.read_move_list_cursor = MagicMock(side_effect=[None, None, 1, 1])
+        assert ag._select_move_slot(1) is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["a"]
+        assert ag.controller.wait.call_args_list[:2] == [call(10), call(10)]
+
+    def test_select_move_slot_false_when_no_list_appears(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.read_move_list_cursor = MagicMock(return_value=None)  # Struggle: no list opens
+        assert ag._select_move_slot(0) is False
+        ag.controller.press.assert_not_called()
+
+    def test_select_move_slot_stops_walk_if_list_closes(self, tmp_path):
+        ag = self._agent(tmp_path)
+        ag.memory.read_move_list_cursor = MagicMock(side_effect=[0, 0, None])
+        assert ag._select_move_slot(2) is True
+        assert [c.args[0] for c in ag.controller.press.call_args_list] == ["down", "a"]
+
+    def test_fight_turn_end_to_end_with_fake_screen(self, tmp_path):
+        """Whole fight branch against a scripted screen: turn opens on enemy text (B x2 to the menu),
+        cursor remembered on PKMN, move list reopens on Growl (1) and Scratch (0) is wanted."""
+        ag = _make_agent(tmp_path)
+        ag.controller = MagicMock()
+        ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 1
+        battle = BattleState(battle_type=1, player_hp=17, player_max_hp=23, enemy_hp=9, enemy_max_hp=15)
+        battle.moves = [0x0A, 0x2D, 0x00, 0x00]
+        battle.move_pp = [32, 33, 0, 0]
+        ag.memory.read_battle_state = MagicMock(return_value=battle)
+        ag.memory.find_healing_item = MagicMock(return_value=None)
+        ag.battle_strategy.choose_action = MagicMock(return_value={"action": "fight", "move_index": 0})
+        ag.memory.battle_menu_visible = MagicMock(side_effect=[False, False, True, True, True])
+        ag.memory.read_battle_menu_cursor = MagicMock(side_effect=[2, 0])
+        ag.memory.read_move_list_cursor = MagicMock(side_effect=[1, 1, 0])
+        ag.memory.read_move_pp = MagicMock(side_effect=[[32, 33, 0, 0], [31, 33, 0, 0]])
+        ag.run_battle_turn()
+        presses = [c.args[0] for c in ag.controller.press.call_args_list]
+        assert presses == ["b", "b", "left", "a", "up", "a"]
 
 
 class TestBattleWedgeWatchdog:

@@ -68,7 +68,8 @@ def test_red_blue_matches_legacy_constants():
     assert RED_BLUE.addr_bag_count == 0xD31D
     assert RED_BLUE.party_base == 0xD16B
     assert RED_BLUE.addr_player_facing == 0xC109
-    assert RED_BLUE.addr_pp_1 == 0xD02C  # NOTE: one below wBattleMonPP (d02d); preserved verbatim
+    assert RED_BLUE.addr_pp_1 == 0xD02D  # wBattleMonPP (was read one byte early, from d02c)
+    assert RED_BLUE.addr_pp_4 == 0xD030
     assert RED_BLUE.addr_text_progress == 0xC4F2
     assert RED_BLUE.addr_warp_flag == 0xD736
     assert RED_BLUE.addr_num_signs == 0xD4B0  # wNumSigns; coord pairs follow at +1
@@ -87,6 +88,13 @@ def test_yellow_is_red_minus_one_in_wram_block():
 def test_yellow_low_ram_blocks_not_shifted():
     assert YELLOW.addr_player_facing == RED_BLUE.addr_player_facing == 0xC109
     assert YELLOW.addr_text_progress == RED_BLUE.addr_text_progress == 0xC4F2
+    # Menu cursor state and the tile buffer sit below the shifted window too.
+    assert YELLOW.addr_top_menu_y == RED_BLUE.addr_top_menu_y == 0xCC24
+    assert YELLOW.addr_top_menu_x == RED_BLUE.addr_top_menu_x == 0xCC25
+    assert YELLOW.addr_current_menu_item == RED_BLUE.addr_current_menu_item == 0xCC26
+    assert YELLOW.addr_battle_saved_menu_item == RED_BLUE.addr_battle_saved_menu_item == 0xCC2D
+    assert YELLOW.addr_move_list_index == RED_BLUE.addr_move_list_index == 0xCC2E
+    assert YELLOW.addr_tilemap == RED_BLUE.addr_tilemap == 0xC3A0
 
 
 def test_yellow_story_hooks():

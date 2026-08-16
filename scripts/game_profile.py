@@ -53,8 +53,10 @@ class GameProfile:
     addr_move_2: int
     addr_move_3: int
     addr_move_4: int
-    # NOTE: pokered.sym puts wBattleMonPP at 0xD02D; the agent has always read PP
-    # starting at 0xD02C. Preserved verbatim here — flagged for a separate fix.
+    # pokered wBattleMonPP (d02d..d030). The agent historically read from 0xD02C, one byte
+    # early — move 1's "PP" was the low byte of the lead's Special stat and move 4's PP was never
+    # read. Fixed with the fight-branch rewrite, which uses the PP delta as the ground truth for
+    # "did our move land" (verified: Scratch decrements d02d, Growl d02e).
     addr_pp_1: int
     addr_pp_2: int
     addr_pp_3: int
@@ -99,6 +101,19 @@ class GameProfile:
     # Below the shifted window (NOT shifted in Yellow)
     addr_player_facing: int  # wSpritePlayerStateData1FacingDirection
     addr_text_progress: int  # tile-buffer text progress byte (diagnose.py)
+    # Menu cursor state (pokered wram, 0xCC24-0xCC2E — the same in Yellow). The game REMEMBERS
+    # both battle cursors between turns: wBattleAndStartSavedMenuItem is where the FIGHT/PKMN/
+    # ITEM/RUN cursor reopens (0 FIGHT, 1 ITEM, 2 PKMN, 3 RUN) and wPlayerMoveListIndex (0-based)
+    # is where the move list reopens. wCurrentMenuItem is the LIVE cursor of whatever menu is up
+    # (1-based in the move list) and wTopMenuItemY/X identify that menu (battle menu: y=14,
+    # x=9 left column / 15 right column; move list: y=12, x=5).
+    addr_top_menu_y: int
+    addr_top_menu_x: int
+    addr_current_menu_item: int
+    addr_battle_saved_menu_item: int
+    addr_move_list_index: int
+    # wTileMap: the 20x18 BG tile buffer the game draws menus/text into (unshifted in Yellow).
+    addr_tilemap: int
 
 
 RED_BLUE = GameProfile(
@@ -126,10 +141,10 @@ RED_BLUE = GameProfile(
     addr_move_2=0xD01D,
     addr_move_3=0xD01E,
     addr_move_4=0xD01F,
-    addr_pp_1=0xD02C,
-    addr_pp_2=0xD02D,
-    addr_pp_3=0xD02E,
-    addr_pp_4=0xD02F,
+    addr_pp_1=0xD02D,
+    addr_pp_2=0xD02E,
+    addr_pp_3=0xD02F,
+    addr_pp_4=0xD030,
     addr_party_count=0xD163,
     addr_party_species_list=0xD164,
     party_base=0xD16B,
@@ -154,6 +169,12 @@ RED_BLUE = GameProfile(
     addr_bag_items=0xD31E,
     addr_player_facing=0xC109,
     addr_text_progress=0xC4F2,
+    addr_top_menu_y=0xCC24,
+    addr_top_menu_x=0xCC25,
+    addr_current_menu_item=0xCC26,
+    addr_battle_saved_menu_item=0xCC2D,
+    addr_move_list_index=0xCC2E,
+    addr_tilemap=0xC3A0,
 )
 
 

@@ -217,6 +217,61 @@ class MemoryReader:
         self.ADDR_NUM_SIGNS = p.addr_num_signs
         self.ADDR_MAP_TILESET = p.addr_map_tileset
         self.ADDR_NUM_WARPS = p.addr_num_warps
+        self.ADDR_TOP_MENU_Y = p.addr_top_menu_y
+        self.ADDR_TOP_MENU_X = p.addr_top_menu_x
+        self.ADDR_CURRENT_MENU_ITEM = p.addr_current_menu_item
+        self.ADDR_BATTLE_SAVED_MENU_ITEM = p.addr_battle_saved_menu_item
+        self.ADDR_MOVE_LIST_INDEX = p.addr_move_list_index
+        self.ADDR_TILEMAP = p.addr_tilemap
+
+    # --- Battle menu screen state --------------------------------------------------------------
+    # The battle menu draws "FIGHT" at tile column 10, row 14 of wTileMap (verified: it is the only
+    # screen in a battle with those five letter tiles there — text boxes and the move list overwrite
+    # the region). Letter tiles use pokered's charmap: "A" = 0x80.
+    _FIGHT_TILES = (0x85, 0x88, 0x86, 0x87, 0x93)  # F I G H T
+    _FIGHT_COL, _FIGHT_ROW = 10, 14
+    # wTopMenuItemY/X values that identify the two battle menus while they are drawn.
+    _MOVE_LIST_TOP_Y, _MOVE_LIST_TOP_X = 12, 5
+
+    def battle_menu_visible(self) -> bool:
+        """True while the top battle menu (FIGHT / PKMN / ITEM / RUN) is drawn and waiting for input.
+        False during battle text, animations, the move list and every submenu — the states where a
+        blind d-pad/A press is eaten or lands on the wrong menu."""
+        base = self.ADDR_TILEMAP + self._FIGHT_ROW * 20 + self._FIGHT_COL
+        return all(self._read(base + i) == t for i, t in enumerate(self._FIGHT_TILES))
+
+    # Battle-menu cursor: wTopMenuItemX is 9 in the left column (FIGHT/ITEM) and 15 in the right
+    # (PKMN/RUN); wCurrentMenuItem is the row. Encoded like wBattleAndStartSavedMenuItem:
+    # 0 FIGHT, 1 ITEM, 2 PKMN, 3 RUN (bit 0 = row, bit 1 = right column).
+    _BATTLE_MENU_TOP_Y, _BATTLE_MENU_RIGHT_X = 14, 15
+    BATTLE_MENU_ITEMS = ("fight", "item", "pkmn", "run")
+
+    def read_battle_menu_cursor(self) -> int | None:
+        """Live position of the top battle-menu cursor (0 FIGHT, 1 ITEM, 2 PKMN, 3 RUN) while that
+        menu is drawn (``battle_menu_visible``); None otherwise."""
+        if not self.battle_menu_visible() or self._read(self.ADDR_TOP_MENU_Y) != self._BATTLE_MENU_TOP_Y:
+            return None
+        col = 2 if self._read(self.ADDR_TOP_MENU_X) == self._BATTLE_MENU_RIGHT_X else 0
+        return col + (self._read(self.ADDR_CURRENT_MENU_ITEM) & 1)
+
+    def read_move_list_cursor(self) -> int | None:
+        """0-based index of the move the cursor sits on, if the FIGHT move list is the menu that was
+        drawn last (wTopMenuItemY/X = 12/5; wCurrentMenuItem is 1-based there); None otherwise. The
+        game reopens the list at wPlayerMoveListIndex, i.e. wherever the LAST turn's move was —
+        never assume slot 0."""
+        if (
+            self._read(self.ADDR_TOP_MENU_Y) != self._MOVE_LIST_TOP_Y
+            or self._read(self.ADDR_TOP_MENU_X) != self._MOVE_LIST_TOP_X
+        ):
+            return None
+        cur = self._read(self.ADDR_CURRENT_MENU_ITEM)
+        if not 1 <= cur <= 4:
+            return None
+        return cur - 1
+
+    def read_move_pp(self) -> list[int]:
+        """Current PP of the lead's four move slots (lightweight, for before/after deltas)."""
+        return [self._read(a) for a in (self.ADDR_PP_1, self.ADDR_PP_2, self.ADDR_PP_3, self.ADDR_PP_4)]
 
     def read_signs(self) -> list[tuple[int, int]]:
         """Current map's sign positions as (x, y) tiles.
