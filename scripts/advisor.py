@@ -502,11 +502,14 @@ def gate(
         "passed": False,
         "reason": "",
     }
+    print(f"[gate] case {case['name']}: reference answer scores {ref_score:.2f} against its own rubric", flush=True)
     if ref_score < 0.9:
         result["reason"] = (
             f"rubric cannot recognise its own reference answer ({ref_score}); rejected before any model ran"
         )
+        print(f"[gate] REJECT before any model runs — {result['reason']}", flush=True)
         return _finish_gate(proposal_path, result, results_dir)
+    print(f"[gate] control vs treatment on {len(models)} fresh model(s); the tip is the only variable", flush=True)
     inject = (
         f"{rme.SYSTEM}\n\nRelevant knowledge from a prior session on this system: {p['tip']} {p.get('rationale', '')}"
     )
