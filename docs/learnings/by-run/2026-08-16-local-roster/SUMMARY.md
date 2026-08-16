@@ -164,6 +164,13 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
   2774, run continued to `stop`. (pi's own threshold compaction only runs at `agent_end`, i.e. after a
   headless run has already ended; `ctx.compact()` aborts the in-flight run, hence the `context`-hook path.)
 - If the dense 27B crashes the card again at 128k, that is a finding about the 5090, not the model.
+  **Update (r6, 480 W cap, still hung):** all five llama-server core dumps share one stack —
+  `common_speculative_impl_draft_mtp::process → llama_get_embeddings_nextn → CUDA error` — Ollama's
+  MTP speculative decoding for Qwen3.8. The roster now sets `draft_num_predict 0` for it; r7 tests it.
+  Meanwhile r6's eight minutes were the fastest local relay yet (batons through `pre_brock`).
+  **r7 (no MTP, 480 W): 84 min, no hang, first clean dense-27B row** — 2/4, wins both Gym trainers,
+  a `world_map.py` livelock fix with tests that fail on the parent commit, 3 commits, no fabrication;
+  52.7 tok/s, 24.8 s/turn, 590 Wh. See `benchmarks/2026-08-16-local-relay-qwen38-27b-r7.md`.
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.
 - Consider splitting the operator into investigator (cloud or the best local thinker) and fixer
@@ -251,7 +258,9 @@ always on the dense 27B (mean ~406 W, peaks 602–610 W, 235 s of accumulated po
 investigator we most want to benchmark is the one this box cannot run without a power cap
 (`nvidia-smi -pl 480`, root). Two rules follow: no local row is a model verdict until the kernel log
 is clean of `Xid` for the run window, and the roster should carry a `power` note per model the way
-it carries `fit`. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
+it carries `fit`. **Done:** `Spec.power_w` (480 for `qwen38-27b`), `local_models.py power` reads
+the enforced limit and the launcher refuses an uncapped run; `scripts/nvidia-power-cap.service`
+keeps the cap across reboots. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
 
 ### 13. Confirming the fixes on the harness axis surfaced the next bug — and a bare FAIL that hid it
 

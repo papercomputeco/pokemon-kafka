@@ -127,6 +127,22 @@ Blackwell `nvfp4` tags would be the obvious 5090 play, but Ollama's registry 412
 every model you compare (128k from now on; the 2026-08-15 rows were 64k); Ollama truncates the *front* of the
 prompt when it overflows, so `contextWindow` in `models.json` is set to the same value.
 
+**Power.** The card is an RTX 5090 on a Thunderbolt eGPU, and it hangs (kernel `Xid 8`, "GPU is
+probably locked") when a dense 27B pins it at the stock 600 W limit — four times on 2026-08-15/16, see
+`2026-08-16-qwen38-27b-egpu-hangs.md`. The roster carries this as data: a `Spec.power_w` is the cap
+that model needs, `list` shows it in the `power` column, and `local_models.py power [alias...]` reads
+`nvidia-smi`'s enforced limit and exits 1 for any model whose cap is not applied. `local_relay_run.sh`
+runs that preflight and **refuses to start** a refused model (`POWER_OVERRIDE=1` runs anyway; that row
+is not a verdict). `nvidia-smi -pl` resets on reboot, so it is checked at every launch rather than
+trusted from the last time; make it stick with the oneshot unit (needs sudo, once):
+
+```
+sudo cp scripts/nvidia-power-cap.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now nvidia-power-cap.service
+```
+
+or apply it for this boot only with `sudo nvidia-smi -pl 480`. Either way `local_models.py power
+qwen38-27b` must say `ok` before r6.
+
 128k of KV cache next to a ~20 GB model only fits on the 32 GB card with flash attention and a
 q8_0 KV cache; install `scripts/ollama-ctx.conf` as a systemd drop-in once (needs sudo):
 
