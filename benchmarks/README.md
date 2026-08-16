@@ -29,8 +29,11 @@ session from pi's transcript (`~/.pi/agent/sessions/<cwd-slug>/*.jsonl`). Game-s
 each run's `data/telemetry/game/*.jsonl` (the same lines the Kafka bridge publishes).
 
 Harness recipe (keep it constant across models so only the model varies): pi + `scripts/pi-ext/guardrails.ts`
-(default bash timeouts, 40 KB tool-result cap, web tools blocked; load with `-e scripts/pi-ext/guardrails.ts`), the `operator_prompt_v2` mission
-text, one worktree per run, capture via `tapesctl start --tapes-url http://localhost:8082 pi -- ...`.
+(default bash timeouts, 40 KB tool-result cap, web tools blocked, proactive context compaction at 75 % of the
+model's `contextWindow` via pi's own compaction pipeline so a headless run no longer dies with `stopReason: length`,
+plus a one-shot "commit your deliverables" nudge at 60 %; env knobs `PI_GUARD_COMPACT_AT=0.75`, `PI_GUARD_NUDGE_AT=0.6`,
+`PI_GUARD_MAX_RESULT`, `PI_GUARD_DEFAULT_TIMEOUT`, `PI_GUARD_RELAY_TIMEOUT`; load with `-e scripts/pi-ext/guardrails.ts`),
+the `operator_prompt_v2` mission text, one worktree per run, capture via `tapesctl start --tapes-url http://localhost:8082 pi -- ...`.
 Claude models can also be run on the Claude Code harness on the Max subscription (harness axis, no
 API cost); when comparing *models*, keep the harness fixed.
 

@@ -1,13 +1,98 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { buildSessionContext, SettingsManager } from "@mariozechner/pi-coding-agent";
 
 // Guardrails for headless pi operator runs (Mt. Moon speedrun):
 //  1. bash calls get a default timeout (pi ships with none -> a hung probe blocked the run 21 min)
 //  2. tool results are hard-capped at ~40KB so no extension can blow the 262k window again
+//  3. proactive context compaction at PI_GUARD_COMPACT_AT (default 75%) of the model's contextWindow.
+//     pi's own auto-compaction only runs at agent_end / before the next prompt (agent-session.js
+//     _checkCompaction), so in a headless `pi -p` run the window fills mid-loop and local Ollama
+//     models return stopReason `length` (2026-08-16 laguna-xs / qwen38 runs died at ~130.8k/131k).
+//     ctx.compact() exists but calls AgentSession.compact() -> abort(), which ends the run in print
+//     mode; so we run pi's own compaction pipeline (prepareCompaction + compact + appendCompaction)
+//     inside the `context` hook, which is awaited before every LLM call, and hand the LLM the
+//     compacted view. The session jsonl gets a genuine `compaction` entry, same as /compact.
+//  4. a one-shot deliverables nudge at PI_GUARD_NUDGE_AT (default 60%) via pi.sendMessage (steer).
 const RELAY_TIMEOUT_S = Number(process.env.PI_GUARD_RELAY_TIMEOUT ?? 1800);   // relay.py legs
 const DEFAULT_TIMEOUT_S = Number(process.env.PI_GUARD_DEFAULT_TIMEOUT ?? 300);  // everything else
 const MAX_RESULT_BYTES = Number(process.env.PI_GUARD_MAX_RESULT ?? 40_000);
+const COMPACT_AT = Number(process.env.PI_GUARD_COMPACT_AT ?? 0.75);   // fraction of contextWindow
+const NUDGE_AT = Number(process.env.PI_GUARD_NUDGE_AT ?? 0.6);        // fraction of contextWindow
+const NUDGE_TEXT =
+  "[guardrails] context is {pct}% used ({n}/{m} tokens). If this run has uncommitted work under docs/learnings " +
+  "or scripts, commit it now; older history will be summarised (compacted) at {cpct}%.";
 
-export default function (pi: ExtensionAPI) {
+type CompactionModule = {
+  prepareCompaction: (entries: unknown[], settings: unknown) => unknown | undefined;
+  compact: (
+    preparation: unknown,
+    model: unknown,
+    apiKey: string,
+    headers: Record<string, string> | undefined,
+    customInstructions: string | undefined,
+    signal: AbortSignal | undefined,
+    thinkingLevel?: unknown,
+  ) => Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number; details?: unknown }>;
+};
+
+// pi's package index does not re-export prepareCompaction, and pi's jiti alias maps the bare
+// package name to dist/index.js only, so load dist/core/compaction/compaction.js by absolute path.
+async function loadCompactionModule(): Promise<CompactionModule | null> {
+  const candidates: string[] = [];
+  if (process.env.PI_GUARD_PI_DIST) candidates.push(process.env.PI_GUARD_PI_DIST);
+  try {
+    candidates.push(path.dirname(fs.realpathSync(process.argv[1] ?? "")));
+  } catch {
+    /* no argv[1] */
+  }
+  for (const dist of candidates) {
+    const file = path.join(dist, "core", "compaction", "compaction.js");
+    if (fs.existsSync(file)) {
+      try {
+        return (await import(pathToFileURL(file).href)) as CompactionModule;
+      } catch (err) {
+        console.error(`[guardrails] failed to import ${file}: ${(err as Error).message}`);
+      }
+    }
+  }
+  return null;
+}
+
+function notify(ctx: ExtensionContext, text: string) {
+  console.error(text);
+  if (ctx.hasUI) ctx.ui.notify(text, "info");
+}
+
+// number of session entries that materialise as LLM messages (mirrors buildSessionContext's appendMessage)
+function persistedMessageCount(entries: Array<{ type: string; summary?: string }>): number {
+  let n = 0;
+  for (const e of entries) {
+    if (e.type === "message" || e.type === "custom_message" || (e.type === "branch_summary" && e.summary)) n++;
+  }
+  return n;
+}
+
+export default async function (pi: ExtensionAPI) {
+  const compaction = await loadCompactionModule();
+  if (!compaction) {
+    console.error("[guardrails] compaction module not found; compaction guard disabled (set PI_GUARD_PI_DIST=<pi>/dist)");
+  }
+  let nudged = false;
+  let compacting = false;
+  let guardCompacted = false; // we appended a compaction the agent's own state does not know about
+
+  pi.on("session_start", () => {
+    nudged = false;
+    guardCompacted = false;
+  });
+  // pi's own compaction (agent_end / manual) rebuilds agent state from the session, so drop our overlay
+  pi.on("session_compact", () => {
+    guardCompacted = false;
+  });
+
   pi.on("tool_call", async (event) => {
     if (event.toolName === "bash") {
       const input = event.input as { command: string; timeout?: number };
@@ -36,5 +121,67 @@ export default function (pi: ExtensionAPI) {
       }
     }
     return changed ? { content } : undefined;
+  });
+
+  // Deliverables nudge: once per session, delivered as a steering message before the next LLM call.
+  pi.on("turn_end", async (_event, ctx) => {
+    if (nudged) return;
+    const usage = ctx.getContextUsage();
+    if (!usage || usage.tokens === null || usage.contextWindow <= 0) return;
+    if (usage.tokens < NUDGE_AT * usage.contextWindow) return;
+    nudged = true;
+    const text = NUDGE_TEXT.replace("{pct}", Math.round((usage.tokens / usage.contextWindow) * 100).toString())
+      .replace("{n}", usage.tokens.toString())
+      .replace("{m}", usage.contextWindow.toString())
+      .replace("{cpct}", Math.round(COMPACT_AT * 100).toString());
+    console.error(text);
+    pi.sendMessage({ customType: "guardrails-nudge", content: text, display: true }, { deliverAs: "steer" });
+  });
+
+  // Compaction guard: runs before every LLM call.
+  pi.on("context", async (event, ctx) => {
+    if (!compaction) return undefined;
+    const sm = ctx.sessionManager as unknown as {
+      getBranch: () => Array<{ type: string; summary?: string }>;
+      appendCompaction?: (summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean) => string;
+    };
+    const model = ctx.model;
+    const usage = ctx.getContextUsage();
+    const contextWindow = usage?.contextWindow ?? model?.contextWindow ?? 0;
+    const tokens = usage?.tokens ?? null;
+    const shouldCompact =
+      !compacting && model && tokens !== null && contextWindow > 0 && tokens >= COMPACT_AT * contextWindow && typeof sm.appendCompaction === "function";
+
+    if (shouldCompact) {
+      compacting = true;
+      try {
+        const settings = SettingsManager.create(ctx.cwd).getCompactionSettings();
+        const branch = sm.getBranch();
+        const preparation = compaction.prepareCompaction(branch, settings);
+        if (!preparation) {
+          console.error(`[guardrails] at ${tokens}/${contextWindow} tokens but nothing to compact (session too small or already compacted)`);
+        } else {
+          notify(ctx, `[guardrails] compacting at ${tokens}/${contextWindow} tokens`);
+          const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+          if (!auth.ok) throw new Error(auth.error);
+          const result = await compaction.compact(preparation, model, auth.apiKey ?? "", auth.headers, undefined, ctx.signal);
+          sm.appendCompaction!(result.summary, result.firstKeptEntryId, result.tokensBefore, result.details, false);
+          guardCompacted = true;
+          notify(ctx, `[guardrails] compaction done: ${result.tokensBefore} tokens summarised, kept from ${result.firstKeptEntryId}`);
+        }
+      } catch (err) {
+        console.error(`[guardrails] compaction failed: ${(err as Error).message}`);
+      } finally {
+        compacting = false;
+      }
+    }
+
+    if (!guardCompacted) return undefined;
+    // The agent's own message list still holds the full history; hand the LLM the session view
+    // (summary + kept + later messages) plus any trailing messages not yet persisted.
+    const branch = sm.getBranch();
+    const view = buildSessionContext(branch as any).messages as typeof event.messages;
+    const tail = event.messages.slice(persistedMessageCount(branch));
+    return { messages: [...view, ...tail] };
   });
 }
