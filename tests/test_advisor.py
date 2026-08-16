@@ -378,9 +378,11 @@ def test_cli_investigate_gate_promote_oracle(tmp_path, monkeypatch, capsys):
     out_dir = tmp_path / "adv"
     assert adv.main(["investigate", str(sess), "--out-dir", str(out_dir), "--no-tapes"]) == 0
     prop = out_dir / f"{sess.stem}.proposal.json"
-    assert prop.exists() and "[advisor] tip:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert prop.exists() and "[investigator] tip:" in out and "[oracle]" in out and "ALREADY KNOWN" in out
     assert adv.main(["gate", str(prop), "--models", "a-128k", "--results-dir", str(tmp_path / "r")]) == 0
-    assert "PASS" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "PASS" in out and "the tip is the only variable" in out
     monkeypatch.setattr(adv, "WORKSPACE", ws)
     (ws / "evals/model-cases").mkdir(exist_ok=True)
     assert adv.main(["promote", str(prop)]) == 0
@@ -388,7 +390,8 @@ def test_cli_investigate_gate_promote_oracle(tmp_path, monkeypatch, capsys):
     assert adv.main(["oracle", "pewter counter", "--no-tapes", "--json"]) == 0
     assert '"precedent": true' in capsys.readouterr().out
     assert adv.main(["oracle", "zzqx", "--no-tapes"]) == 0
-    assert "NO PRECEDENT" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "NO PRECEDENT" in out and "[oracle] 0 excerpt(s)" in out
 
 
 def test_cli_investigate_reports_problems(tmp_path, monkeypatch, capsys):

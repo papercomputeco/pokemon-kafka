@@ -425,6 +425,17 @@ def investigate(
     digest = digest_session(session)
     facts = worktree_facts(worktree)
     text = render_digest(digest, facts)
+    print(
+        f"[investigator] session {session.name}: {digest['turns']} turns, {digest['tool_calls']} tool calls, "
+        f"model {digest['model']}, ended {digest['stop_reason']}"
+        + (
+            f"; ground truth from {worktree}: {len(facts.get('relay', []))} relay report(s), "
+            f"{len(facts.get('learnings', []))} learning file(s), diff {'yes' if facts.get('diff') else 'none'}"
+            if facts
+            else "; no worktree ground truth"
+        ),
+        flush=True,
+    )
     # Ask the Oracle what is already known about what this session was doing, so the dream is new.
     probe = " ".join(t["text"] for t in digest["turns_digest"][-8:] if t["text"])[:800] or digest["final_text"][:800]
     known = oracle(probe or "operator run", workspace=workspace, k=5, use_tapes=use_tapes)
@@ -432,6 +443,12 @@ def investigate(
         "\n".join(f"- ({c['path']}:{c['line']}) {c['text'].splitlines()[0][:200]}" for c in known["chunks"])
         or "- nothing"
     )
+    print(
+        f"[oracle] {len(known['chunks'])} precedent(s) from the repo, {len(known['tapes'])} past session(s) — "
+        "handed to the investigator as ALREADY KNOWN",
+        flush=True,
+    )
+    print(f"[investigator] dreaming with {model} ...", flush=True)
     prompt = f"ALREADY KNOWN (Oracle precedents — do not re-propose these):\n{known_txt}\n\n{text}"
     got = rme.ask_ollama(model, prompt, ctx=131072, num_predict=4000, seed=7, system=INVESTIGATOR_SYSTEM)
     proposal = _extract_json(got["answer"])
@@ -440,6 +457,8 @@ def investigate(
         proposal = repair_rubric(proposal, model=model)
         problems = validate_proposal(proposal)
     repairs = proposal.get("_meta", {}).get("rubric_repairs", 0)
+    if repairs:
+        print(f"[investigator] rubric repaired {repairs}x so it recognises its own reference answer", flush=True)
     proposal["_meta"] = {
         "session": str(session),
         "worktree": str(worktree) if worktree else None,
@@ -610,10 +629,11 @@ def main(argv=None) -> int:
             use_tapes=not args.no_tapes,
         )
         p = json.loads(path.read_text())
-        print(f"[advisor] proposal → {path}")
-        print(f"[advisor] tip: {p.get('tip')}")
+        print(f"[investigator] proposal → {path}")
+        print(f"[investigator] tip: {p.get('tip')}")
+        print(f"[investigator] eval case: {p.get('model_eval_case', {}).get('name')} (goes to the gate next)")
         if p["_meta"]["problems"]:
-            print(f"[advisor] problems: {p['_meta']['problems']}")
+            print(f"[investigator] problems: {p['_meta']['problems']}")
         return 0
     if args.cmd == "gate":
         models = args.models.split(",") if args.models else rme.local_variants(131072)
@@ -637,9 +657,14 @@ def main(argv=None) -> int:
     if args.cmd == "promote":
         for w in promote(Path(args.proposal), force=args.force):
             print(f"[promote] wrote {w}")
+        print("[promote] this proposal cleared the gate; the tip now rides along only when ASSIST=tips|both")
         return 0
     res = oracle(args.question, k=args.k, use_tapes=not args.no_tapes, model=args.model)
-    print(json.dumps(res, indent=2) if args.json else format_oracle(res))
+    if args.json:
+        print(json.dumps(res, indent=2))
+    else:
+        print(f"[oracle] {len(res['chunks'])} excerpt(s), {len(res['tapes'])} past session(s) — cited, not reasoned")
+        print(format_oracle(res))
     return 0
 
 
