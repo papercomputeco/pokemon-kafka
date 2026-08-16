@@ -87,7 +87,17 @@ ROSTER: tuple[Spec, ...] = (
         "NVIDIA 30B-A3B MoE for always-on agents, 25 GB",
     ),
     # --- dense-27b: full-weight decode every token ----------------------------------------------
-    Spec("qwen38-27b", "qwen3.8:27b", "dense-27b", "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic"),
+    Spec(
+        "qwen38-27b",
+        "qwen3.8:27b",
+        "dense-27b",
+        "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic",
+        # num_batch 256 (default 512): the dense 27B at 128k pins the 5090 at its 600 W limit during
+        # prompt processing and hung the card twice (kernel Xid 8, "GPU is probably locked", CUDA
+        # "launch timed out") — an eGPU over Thunderbolt at peak power. Halving the batch shortens
+        # the bursts; outputs are unchanged, prompt tok/s drops a little. Root fix: nvidia-smi -pl 480.
+        params={"num_batch": 256},
+    ),
     Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),
     Spec(
         "muse-glimmer",
