@@ -103,8 +103,13 @@ def scatter():
     ml, mr, mt, mb = 60, 40, 24, 44
     pw, ph = w - ml - mr, h - mt - mb
     xmax, ymax = 340, 1.0
-    sx = lambda v: ml + v / xmax * pw
-    sy = lambda v: mt + (1 - v / ymax) * ph
+
+    def sx(v):
+        return ml + v / xmax * pw
+
+    def sy(v):
+        return mt + (1 - v / ymax) * ph
+
     parts = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-labelledby="sc-title">']
     parts.append('<title id="sc-title">Decode speed against diagnostic eval score</title>')
     for v in range(0, xmax + 1, 50):
