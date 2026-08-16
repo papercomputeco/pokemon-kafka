@@ -175,9 +175,11 @@ fits only with flash attention + q8_0 KV), `scripts/pi-ext/guardrails.ts` now in
 ### 10. Compaction amnesia — where a model stops being a fit for the operator role
 
 With the compaction guard, the Pewter fix and the battle watchdog all on `main`, Laguna XS ran
-again (r2). It cleared Route 1 → Forest → Pewter, walked into the Gym and **engaged Brock**
-(`pre_brock.state` — the first run ever to do so), and wrote a learning that named the next real
-bug on its own (the Gym's "pilot north" fallback flagged in PR #75). Then it stalled in a new way:
+again (r2). It cleared Route 1 → Forest → Pewter, walked past the Pokécenter **into the Gym** — the
+first run ever inside map 54 — fought a Gym trainer (`pre_brock.state`; not Brock — every lane then
+wedged on the Gym's "pilot north" fallback flagged in PR #75), and wrote a learning that named that
+bug on its own. Final row: 2/4 + inside the Gym, 36.7 min, 398 turns, 3.3 s/turn, 12 compactions,
+204 Wh, ended by choice ("The fix is complete") — see `benchmarks/2026-08-16-local-relay-laguna-xs-r2.md`. Then it stalled in a new way:
 it read `agent.py` whole via pi's `read` tool (each read hits the 40 KB cap ≈ 10k tokens), the
 window filled, the guard compacted 100k → 15k every ~2 minutes, and each summary dropped what it
 had just read — so it read it again. In its last 30 tool calls: 17 reads (agent.py ×8), one relay
