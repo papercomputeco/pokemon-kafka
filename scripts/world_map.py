@@ -88,6 +88,30 @@ class WorldMap:
         expired tile starts a fresh expiry counter."""
         self.blocked.setdefault(map_id, {})[(x, y)] = 0
 
+    def drop_stale_blocks(self, map_id: int, min_seen: int = 1) -> int:
+        """Drop every hard-block that observation has since contradicted; returns how many.
+
+        A hard-block records "a real move into this tile failed twice" — but when the blocker was
+        a wandering NPC, the tile is open again and every later ``observe`` that sees it walkable
+        increments its counter. Normally the block expires at ``block_expiry_observations``
+        sightings, but expiry only ticks while the tile stays in view: block a choke tile, walk
+        away, and it never expires. When the choke is the map's only exit corridor, the whole goal
+        becomes unreachable — Viridian Forest's bug catcher got both (1,17) and (2,18) blocked,
+        sealing the single passage to the (2,0) north exit, and the agent two-cycled at (25,21)
+        for the rest of the run. Callers that have *exhausted* the map (goal unreachable even
+        optimistically AND no frontier left to explore) call this to retest every block the world
+        has since reported walkable at least ``min_seen`` times; a still-real blocker simply
+        re-blocks after two failed presses, so a wrong drop costs a couple of steps, never a wedge.
+        Blocks never seen walkable again (real ledges/trees, or an NPC still standing there) are
+        kept — dropping those would just replay the failed presses."""
+        blocked = self.blocked.get(map_id)
+        if not blocked:
+            return 0
+        stale = [t for t, seen in blocked.items() if seen >= min_seen]
+        for t in stale:
+            del blocked[t]
+        return len(stale)
+
     def mark_encounter(self, map_id: int, x: int, y: int) -> None:
         """Record that stepping onto ``(x, y)`` triggered a wild encounter (tall grass)."""
         self.encounters.setdefault(map_id, set()).add((x, y))
@@ -103,7 +127,7 @@ class WorldMap:
         return {
             "cells": {str(m): [[x, y, v] for (x, y), v in cells.items()] for m, cells in self.cells.items()},
             "blocked": {str(m): [[x, y, seen] for (x, y), seen in s.items()] for m, s in self.blocked.items()},
-            "encounters": {str(m): [[x, y] for (x, y) in s] for m, s in self.encounters.items()},
+            "encounters": {str(m): [[x, y] for (x, y) in sorted(s)] for m, s in self.encounters.items()},
             "bounds": {str(m): [w, h] for m, (w, h) in self.bounds.items()},
         }
 

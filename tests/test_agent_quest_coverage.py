@@ -104,6 +104,60 @@ class TestOverworldQuestBranches:
         assert ag.choose_overworld_action(state) == "down"
         ag.world.cross_step.assert_called_once()
 
+    def test_forest_deadlock_drops_stale_blocks_and_commits(self, tmp_path):
+        # The 2026-08-16 seal: plan (require_reach) and explore both come up empty — the maze is
+        # fully mapped and the exit is sealed. drop_stale_blocks reopens the NPC-tainted choke
+        # tiles, known_reachable flips true, and the agent commits to the exit instead of handing
+        # cross_step the turn (whose candidate sweep two-cycled at (25,21)-(25,22) forever).
+        ag = _make_agent(tmp_path)
+        ag.door_cooldown = 0
+        ag.world.known_reachable = MagicMock(side_effect=[False, True])
+        ag.world.plan_step = MagicMock(side_effect=[None, "up"])
+        ag.world.explore_step = MagicMock(return_value=None)
+        ag.world.drop_stale_blocks = MagicMock(return_value=2)
+        state = OverworldState(map_id=51, x=25, y=21, party_count=1)
+        assert ag.choose_overworld_action(state) == "up"
+        ag.world.drop_stale_blocks.assert_called_once_with(51)
+
+    def test_forest_deadlock_drop_replans_optimistically_then_explores(self, tmp_path):
+        # Dropping blocks may reopen frontier ground without making the exit known-reachable yet:
+        # the replan falls through require_reach to a fresh explore step.
+        ag = _make_agent(tmp_path)
+        ag.door_cooldown = 0
+        ag.world.known_reachable = MagicMock(return_value=False)
+        ag.world.plan_step = MagicMock(return_value=None)
+        ag.world.explore_step = MagicMock(side_effect=[None, "left"])
+        ag.world.drop_stale_blocks = MagicMock(return_value=1)
+        state = OverworldState(map_id=51, x=25, y=21, party_count=1)
+        assert ag.choose_overworld_action(state) == "left"
+
+    def test_forest_deadlock_without_stale_blocks_falls_to_cross_step(self, tmp_path):
+        # Nothing stale to drop (drop returns 0) — or dropping changed nothing — leaves the
+        # boundary-sweeping cross_step as the last resort, exactly as before the fix.
+        ag = _make_agent(tmp_path)
+        ag.door_cooldown = 0
+        ag.world.known_reachable = MagicMock(return_value=False)
+        ag.world.plan_step = MagicMock(return_value=None)
+        ag.world.explore_step = MagicMock(return_value=None)
+        ag.world.drop_stale_blocks = MagicMock(return_value=0)
+        ag.world.cross_step = MagicMock(return_value="down")
+        state = OverworldState(map_id=51, x=25, y=21, party_count=1)
+        assert ag.choose_overworld_action(state) == "down"
+        ag.world.cross_step.assert_called_once()
+
+    def test_forest_deadlock_drop_still_sealed_falls_to_cross_step(self, tmp_path):
+        # Blocks were dropped but the replan still finds nothing (a real wall seals the way):
+        # the turn ends at cross_step rather than looping the drop.
+        ag = _make_agent(tmp_path)
+        ag.door_cooldown = 0
+        ag.world.known_reachable = MagicMock(return_value=False)
+        ag.world.plan_step = MagicMock(return_value=None)
+        ag.world.explore_step = MagicMock(return_value=None)
+        ag.world.drop_stale_blocks = MagicMock(return_value=1)
+        ag.world.cross_step = MagicMock(return_value="right")
+        state = OverworldState(map_id=51, x=25, y=21, party_count=1)
+        assert ag.choose_overworld_action(state) == "right"
+
     def test_quest_pilot_uses_cross_step(self, tmp_path):
         ag = _make_agent(tmp_path)
         ag.door_cooldown = 0

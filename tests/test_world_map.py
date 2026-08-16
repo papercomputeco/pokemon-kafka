@@ -303,6 +303,45 @@ def test_explore_step_none_when_fully_mapped():
     assert wm.explore_step(1, 5, 5) is None
 
 
+# --- drop_stale_blocks: retest hard-blocks that observation has contradicted ----
+# The Viridian Forest seal (2026-08-16): the wandering bug catcher stood on (1,17) and (2,18) —
+# the two tiles of the single passage to the (2,0) north exit — when the agent pressed into them,
+# so both got hard-blocked. Blocks only expire while in view; once the planner had nothing left to
+# chase up there the agent never returned, the seal became permanent, and the run ended two-cycling
+# at (25,21)-(25,22). drop_stale_blocks retests every block `observe` has since seen walkable.
+
+
+def test_drop_stale_blocks_unseals_npc_choke():
+    wm = WorldMap()
+    m = wm.cells.setdefault(51, {})
+    for y in range(5):  # a single-file corridor (1,0)..(1,4); goal is the (1,0) end
+        m[(1, y)] = 1
+    wm.block(51, 1, 2)  # an NPC stood here: two presses failed -> hard-blocked
+    wm.blocked[51][(1, 2)] = 3  # ...but observe() has since seen it walkable 3 times
+    wm.block(51, 0, 4)  # a real ledge: never seen walkable again (counter stays 0)
+    assert wm.known_reachable(51, 1, 4, 1, 0) is False  # the choke seals the goal
+    assert wm.drop_stale_blocks(51) == 1  # only the contradicted block is dropped
+    assert wm.known_reachable(51, 1, 4, 1, 0) is True  # the corridor reopens
+    assert (0, 4) in wm.blocked[51]  # the never-contradicted block is kept
+
+
+def test_drop_stale_blocks_nothing_stale_or_no_blocks():
+    wm = WorldMap()
+    assert wm.drop_stale_blocks(51) == 0  # no blocks recorded for the map at all
+    wm.block(51, 3, 3)
+    assert wm.drop_stale_blocks(51) == 0  # a fresh block (seen == 0) is not stale
+    assert (3, 3) in wm.blocked[51]
+
+
+def test_to_dict_encounters_sorted():
+    # Encounter tiles live in a set; serialize them sorted so snapshots are byte-identical
+    # across PYTHONHASHSEED values (the eval lanes are meant to reproduce exactly).
+    wm = WorldMap()
+    for x, y in [(5, 5), (1, 2), (3, 1)]:
+        wm.mark_encounter(1, x, y)
+    assert wm.to_dict()["encounters"]["1"] == [[1, 2], [3, 1], [5, 5]]
+
+
 # --- warp/exit goal tiles read as walls by the collision grid ------------------
 # A warp tile (a forest/door exit) is reported impassable by game_area_collision, so `observe`
 # stamps it walkable=0. The planner must still be able to route a path that *ends* on its goal —
