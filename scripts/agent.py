@@ -1290,7 +1290,33 @@ class PokemonAgent:
             if d is not None:
                 return d
             explore = self.world.explore_step(state.map_id, state.x, state.y)
-            return explore if explore is not None else self._collision_pilot(state, "north")
+            if explore is not None:
+                return explore
+            # Fully mapped and the exit still unreachable: the seal must include a stale
+            # hard-block. The forest has exactly one passage to the north exit — the x=1-2
+            # corridor through (1,17)/(2,18) — and the bug catcher wandering that pocket got
+            # both tiles hard-blocked (a press into an NPC fails just like a wall). Blocks only
+            # expire while their tile stays in view, so once the planner had nothing left to
+            # chase in the northwest the agent never returned and the seal became permanent:
+            # measured 2026-08-16, the run ends two-cycling at (25,21)-(25,22) because from
+            # there cross_step's candidate sweep flips between a south and a north candidate.
+            # Drop every block observation has since contradicted (the NPC-signature: seen
+            # walkable again after blocking) and replan — a still-real blocker just re-blocks
+            # after two failed presses, so the retest can never wedge, only un-wedge.
+            if self.world.drop_stale_blocks(state.map_id):
+                self.log(
+                    f"UNSEAL | map={state.map_id} pos=({state.x},{state.y}) dropped stale blocks; "
+                    f"replanning toward ({ex},{ey})"
+                )
+                if self.world.known_reachable(state.map_id, state.x, state.y, ex, ey):
+                    d = self._pilot_to(state, ex, ey)
+                else:
+                    d = self._pilot_to(state, ex, ey, require_reach=True)
+                    if d is None:
+                        d = self.world.explore_step(state.map_id, state.x, state.y)
+                if d is not None:
+                    return d
+            return self._collision_pilot(state, "north")
 
         # Oak's Parcel quest: run the errand that unblocks Viridian's north exit (Mart pickup →
         # Oak delivery → Old-Man gate). Outdoor legs return a "pilot" directive (the agent
