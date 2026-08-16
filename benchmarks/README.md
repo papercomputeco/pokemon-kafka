@@ -41,6 +41,17 @@ Assumption going in: every capable model eventually plays Pokémon; the interest
 strengths — who reads code vs. tunes knobs, who writes causal learnings, who stays inside the
 context window, cost and speed per unit of progress.
 
+## Assisted vs unassisted rows
+
+Every row is **unassisted** unless it says otherwise: the model, the mission, the guardrails
+(timeouts, result cap, read cap, compaction) and nothing that carries knowledge from other runs.
+The advisors (`scripts/advisor.py`) can assist a run in two opt-in ways — gated tips appended to
+the mission (`ASSIST=tips`) and the `consult` Oracle tool (`ASSIST=consult`; `both`) — and
+`scripts/local_relay_run.sh` puts the mode in the row label (`assist=none|tips|consult|both`).
+Assisted rows answer a different question ("how much does the accumulated knowledge help this
+model?") and are compared only with each other or with the same model's unassisted row. Never
+average them into the model-vs-model tables.
+
 ## Run modes
 
 Every run is a point on two axes — harness (Claude Code / pi) × model source — and each dated

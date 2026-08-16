@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext, SettingsManager } from "@mariozechner/pi-coding-agent";
 
@@ -80,7 +82,51 @@ function persistedMessageCount(entries: Array<{ type: string; summary?: string }
   return n;
 }
 
+// The Oracle (scripts/advisor.py oracle): a knowledge bearer over docs/learnings, evals, benchmarks and
+// past sessions (tapes). Exposed to the operator as `consult` so a driver-class model can ask "have
+// we seen this before?" instead of re-reading agent.py after every compaction (SUMMARY §10, #79).
+const REPO_ROOT = process.env.PI_GUARD_REPO ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+const CONSULT_TIMEOUT_MS = Number(process.env.PI_GUARD_CONSULT_TIMEOUT ?? 120_000);
+// OPT-IN. Baseline benchmark rows measure the model alone; a run with the Oracle is a different row
+// (assist=consult) and must never be compared to an unassisted one. Enable with PI_GUARD_CONSULT=1.
+const CONSULT_ENABLED = process.env.PI_GUARD_CONSULT === "1";
+
+function runOracle(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      "uv",
+      ["run", "python", "scripts/advisor.py", "oracle", question, "-k", "6"],
+      { cwd: REPO_ROOT, timeout: CONSULT_TIMEOUT_MS, maxBuffer: 1 << 20 },
+      (err, stdout, stderr) => {
+        if (err && !stdout) resolve(`[consult] oracle unavailable: ${String(stderr || err.message).slice(0, 400)}`);
+        else resolve(String(stdout).trim() || "NO PRECEDENT");
+      },
+    );
+  });
+}
+
 export default async function (pi: ExtensionAPI) {
+  if (CONSULT_ENABLED) pi.registerTool({
+    name: "consult",
+    label: "Consult the Oracle",
+    description:
+      "Ask the project's Oracle whether this obstacle has been seen before. It answers ONLY from recorded " +
+      "learnings, eval cases/results, benchmark rows and past captured sessions, with citations (path:line or " +
+      "session id), or says NO PRECEDENT. Use it before re-reading code after a failed relay: describe the " +
+      "symptom concretely (map id, position, HP, the repeated action, stuck streak).",
+    promptSnippet: "consult(question): cited precedent from past runs, learnings and evals — or NO PRECEDENT",
+    promptGuidelines: [
+      "When a relay segment fails with identical lanes, call consult with the concrete symptom before reading whole files.",
+    ],
+    parameters: Type.Object({
+      question: Type.String({ description: "The concrete symptom or question, e.g. 'lanes stall on map 54 pressing up, stuck streak 2800'" }),
+    }),
+    async execute(_id, params) {
+      const text = await runOracle(params.question);
+      return { content: [{ type: "text", text }], details: {} } as any;
+    },
+  } as any);
+
   const compaction = await loadCompactionModule();
   if (!compaction) {
     console.error("[guardrails] compaction module not found; compaction guard disabled (set PI_GUARD_PI_DIST=<pi>/dist)");

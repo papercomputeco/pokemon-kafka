@@ -3,6 +3,14 @@ import json
 import pytest
 import run_model_evals as rme
 
+
+@pytest.fixture(autouse=True)
+def _no_real_gpu_lock(tmp_path, monkeypatch):
+    """Tests must not see a real relay run's data/local_runs/GPU_BUSY (or force past it)."""
+    monkeypatch.setattr(rme, "GPU_LOCK", tmp_path / "GPU_BUSY")
+    monkeypatch.delenv("ADVISOR_FORCE_GPU", raising=False)
+
+
 CASE = {
     "name": "demo",
     "prompt": "why is it looping?",
@@ -395,3 +403,24 @@ def test_main_records_error_row_and_show_flag(monkeypatch, tmp_path, capsys):
     assert "grep -n -m 5" in out  # --show printed the answer
     table = (tmp_path / "r" / f"models-{rme.datetime.now(rme.timezone.utc):%Y-%m-%d}.md").read_text()
     assert "| m-128k |" in table
+
+
+def test_gpu_lock_refuses_and_can_be_forced(tmp_path, monkeypatch):
+    lock = tmp_path / "GPU_BUSY"
+    monkeypatch.setattr(rme, "GPU_LOCK", lock)
+    rme.check_gpu_free()  # no lock: fine
+    lock.write_text("laguna-xs-r2 pid=1 started=now")
+    with pytest.raises(SystemExit, match="GPU busy"):
+        rme.check_gpu_free()
+    rme.check_gpu_free(force=True)
+    monkeypatch.setenv("ADVISOR_FORCE_GPU", "1")
+    rme.check_gpu_free()
+
+
+def test_main_refuses_when_gpu_locked(tmp_path, monkeypatch):
+    lock = tmp_path / "GPU_BUSY"
+    lock.write_text("x")
+    monkeypatch.setattr(rme, "GPU_LOCK", lock)
+    monkeypatch.delenv("ADVISOR_FORCE_GPU", raising=False)
+    with pytest.raises(SystemExit, match="GPU busy"):
+        rme.main(["--models", "m"])

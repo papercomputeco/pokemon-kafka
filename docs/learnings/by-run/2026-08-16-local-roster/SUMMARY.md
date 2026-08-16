@@ -175,9 +175,11 @@ fits only with flash attention + q8_0 KV), `scripts/pi-ext/guardrails.ts` now in
 ### 10. Compaction amnesia — where a model stops being a fit for the operator role
 
 With the compaction guard, the Pewter fix and the battle watchdog all on `main`, Laguna XS ran
-again (r2). It cleared Route 1 → Forest → Pewter, walked into the Gym and **engaged Brock**
-(`pre_brock.state` — the first run ever to do so), and wrote a learning that named the next real
-bug on its own (the Gym's "pilot north" fallback flagged in PR #75). Then it stalled in a new way:
+again (r2). It cleared Route 1 → Forest → Pewter, walked past the Pokécenter **into the Gym** — the
+first run ever inside map 54 — fought a Gym trainer (`pre_brock.state`; not Brock — every lane then
+wedged on the Gym's "pilot north" fallback flagged in PR #75), and wrote a learning that named that
+bug on its own. Final row: 2/4 + inside the Gym, 36.7 min, 398 turns, 3.3 s/turn, 12 compactions,
+204 Wh, ended by choice ("The fix is complete") — see `benchmarks/2026-08-16-local-relay-laguna-xs-r2.md`. Then it stalled in a new way:
 it read `agent.py` whole via pi's `read` tool (each read hits the 40 KB cap ≈ 10k tokens), the
 window filled, the guard compacted 100k → 15k every ~2 minutes, and each summary dropped what it
 had just read — so it read it again. In its last 30 tool calls: 17 reads (agent.py ×8), one relay
@@ -204,3 +206,44 @@ learning written per obstacle *before* the next relay call), not one to keep re-
 model is a **driver** — Haiku, Laguna — pair it with an investigator for the code fixes; where it is
 an **investigator** — Sonnet, Qwen 3.8 — give it the budget and the guard. `qwen38-27b` on the
 fixed `main` is the next run worth the electricity.
+
+### 11. Advisors and a gate — the operator no longer grades its own homework
+
+The operator wrote its own learnings; the fabricated Brock entries and Laguna's "✅ FIXED" were the
+cost. `scripts/advisor.py` adds the missing roles after `pcc-labs/inception`: an **Investigator**
+(write path — reads one session plus the worktree's ground truth, asks the Oracle first, dreams a
+tip + eval + learning, repairs its own rubric), a **gate** (control vs treatment on fresh models; the
+tip is the only variable; PASS needs mean lift and one model that can act on it), an **Oracle** (read
+path — cites learnings, evals, benchmarks and tapes sessions or says NO PRECEDENT; exposed to the
+operator as `consult`), and **promote** (only gated proposals reach `evals/`, `docs/learnings/`,
+`docs/prompts/tips.md`).
+
+Then the split that `pcc-labs/inception` #18 made at the source: the **Investigator** extracts the tip
+and never writes the exam; a separate **Architect** (a different model) designs the eval from the tip
+alone and hardens its rubric against probe answers it writes itself. Same session, four gate runs:
+single-mind design failed twice (leaked answer; rubric ≠ own tip), split design failed once (a literal
+rubric scored the exact command as 0), split + hardened design passed — Laguna 0 → 1.00, gpt-oss
+0 → 1.00, Gemma already knew. The gate is the point; the roles are how you get a yes worth acting on.
+
+First real pass over the Laguna r2 session with Qwen 3.8 as Investigator: it did *not* re-propose the
+Gym bug — the Oracle already had it — and instead named the process failure: "declared the fix
+complete after tests + lint; the relay report still shows `pewter_to_badge=None`". The gate rejected
+its first two rubrics (one leaked the answer into the prompt so control already scored; one did not
+match its own reference), the repair loop fixed the third, and the gated result was **Laguna
+0.00 → 1.00 with the tip**, gpt-oss and Gemma 0 → 0.2. That tip is now the first line of
+`docs/prompts/tips.md`. Both assists are **opt-in** (`ASSIST=tips|consult|both` on the launcher;
+default `none`) so unassisted rows keep measuring the model alone — an assisted run answers "how much
+does the accumulated knowledge help *this* model?", which is a different row, labelled as such.
+
+### 12. The eGPU hangs at its power limit under the dense 27B — a hardware limit, documented
+
+Three clean-room reruns of `qwen38-27b` on the fixed `main` died in 3–8 minutes; two of them with
+the kernel's `NVRM: Xid 8 — GPU stopped processing … GPU is probably locked` and the power log pinned
+at 600 W for the last ten samples before the hang (the third was mine — the advisor pipeline loaded
+a second model on the card, now prevented by a GPU lock). Never on the MoE models (mean 114–341 W);
+always on the dense 27B (mean ~406 W, peaks 602–610 W, 235 s of accumulated power capping). An RTX
+5090 on a Thunderbolt eGPU cannot sustain this model at its stock 600 W limit. So the local
+investigator we most want to benchmark is the one this box cannot run without a power cap
+(`nvidia-smi -pl 480`, root). Two rules follow: no local row is a model verdict until the kernel log
+is clean of `Xid` for the run window, and the roster should carry a `power` note per model the way
+it carries `fit`. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.

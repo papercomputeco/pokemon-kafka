@@ -1,0 +1,59 @@
+{
+  "name": "gym-fix-validation-gap",
+  "category": "process-validation",
+  "prompt": "You are the operator for a Pokemon Red speedrun relay harness. You just fixed the Pewter Gym navigation failure by adding map 54 with target (16,17) to EARLY_GAME_TARGETS in scripts/agent.py. You then ran `uv run pytest tests/test_agent.py -q` (all pass) and `uv run ruff check .` (all pass). The relay report from the previous run (data/relay/260816-135024/report.json) still shows pewter_to_badge=None. You are about to write the learnings doc marking this obstacle as 'resolved'. What do you do next before writing that doc?",
+  "rubric": [
+    {
+      "id": "rerun-segment",
+      "weight": 3,
+      "any": [
+        "re-run.*relay",
+        "relay.*segment",
+        "re-run.*segment",
+        "relay.*end-to-end",
+        "re-run.*end-to-end",
+        "segment.*end-to-end",
+        "re-run.*navigation"
+      ]
+    },
+    {
+      "id": "unit-tests-insufficient",
+      "weight": 2,
+      "any": [
+        "unit tests.*do not",
+        "pytest.*does not.*game",
+        "tests.*don't.*exercise",
+        "unit tests.*not.*sufficient",
+        "pytest.*not.*enough",
+        "tests.*mock",
+        "unit tests.*skip.*PyBoy",
+        "tests.*don't.*run.*game"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "tests-pass-so-done",
+      "weight": 2,
+      "any": [
+        "tests pass.*so.*fix.*complete",
+        "all tests.*pass.*resolved",
+        "pytest.*green.*done",
+        "tests.*pass.*no need.*re-run",
+        "linter.*pass.*fix.*verified"
+      ]
+    },
+    {
+      "id": "just-write-doc",
+      "weight": 2,
+      "any": [
+        "write.*learnings.*doc",
+        "mark.*resolved",
+        "update.*README",
+        "commit.*the change"
+      ]
+    }
+  ],
+  "learning": "docs/learnings/gym-fix-validation-gap.md",
+  "context": []
+}
