@@ -70,3 +70,8 @@ cases. The kernel log can, and now nothing gets a row without it.
 
 The conclusion is unchanged and now better supported: **the card cannot sustain the dense 27B at its
 stock 600 W limit.** Cap it (`sudo nvidia-smi -pl 480`) before r6.
+
+The cap is now enforced rather than remembered: `qwen38-27b` carries `power_w=480` in the roster,
+`local_models.py power qwen38-27b` checks the card's enforced limit against it, and the launcher
+refuses to start until it says `ok` (`POWER_OVERRIDE=1` to run anyway — not a verdict row).
+`scripts/nvidia-power-cap.service` makes the cap survive a reboot; see `benchmarks/README.md` § Power.

@@ -1,0 +1,22 @@
+# Persist the eGPU power cap across reboots. `nvidia-smi -pl` is not sticky, and the RTX 5090 on the
+# Thunderbolt eGPU hangs (kernel Xid 8) when a dense 27B pins it at the stock 600 W — see
+# benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. 480 W is the cap the roster requires
+# (`power_w` in scripts/local_models.py; the min the card accepts is 400 W).
+#
+# Install once (needs sudo), then verify with `nvidia-smi -q -d POWER | grep 'Current Power Limit'`:
+#   sudo cp scripts/nvidia-power-cap.service /etc/systemd/system/ && sudo systemctl daemon-reload \
+#     && sudo systemctl enable --now nvidia-power-cap.service
+# To apply immediately without the unit: `sudo nvidia-smi -pl 480`.
+[Unit]
+Description=Cap the RTX 5090 eGPU power limit (Xid 8 hangs at stock 600 W under dense-27B load)
+After=nvidia-persistenced.service ollama.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nvidia-smi -pm 1
+ExecStart=/usr/bin/nvidia-smi -pl 480
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

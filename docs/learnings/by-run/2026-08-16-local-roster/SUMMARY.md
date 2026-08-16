@@ -251,7 +251,9 @@ always on the dense 27B (mean ~406 W, peaks 602–610 W, 235 s of accumulated po
 investigator we most want to benchmark is the one this box cannot run without a power cap
 (`nvidia-smi -pl 480`, root). Two rules follow: no local row is a model verdict until the kernel log
 is clean of `Xid` for the run window, and the roster should carry a `power` note per model the way
-it carries `fit`. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
+it carries `fit`. **Done:** `Spec.power_w` (480 for `qwen38-27b`), `local_models.py power` reads
+the enforced limit and the launcher refuses an uncapped run; `scripts/nvidia-power-cap.service`
+keeps the cap across reboots. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
 
 ### 13. Confirming the fixes on the harness axis surfaced the next bug — and a bare FAIL that hid it
 
