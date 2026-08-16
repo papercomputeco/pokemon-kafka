@@ -92,10 +92,10 @@ ROSTER: tuple[Spec, ...] = (
         "qwen3.8:27b",
         "dense-27b",
         "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic",
-        # num_batch 256 (default 512): the dense 27B at 128k pins the 5090 at its 600 W limit during
-        # prompt processing and hung the card twice (kernel Xid 8, "GPU is probably locked", CUDA
-        # "launch timed out") — an eGPU over Thunderbolt at peak power. Halving the batch shortens
-        # the bursts; outputs are unchanged, prompt tok/s drops a little. Root fix: nvidia-smi -pl 480.
+        # POWER: the dense 27B at 128k pins the 5090 (a Thunderbolt eGPU) at its 600 W limit and hung
+        # it three times (kernel Xid 8 "GPU is probably locked", CUDA "launch timed out") — see
+        # benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. num_batch 256 alone did NOT prevent it; the
+        # card must be capped first: `sudo nvidia-smi -pl 480`. Kept at 256 anyway (shorter bursts).
         params={"num_batch": 256},
     ),
     Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),

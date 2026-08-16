@@ -234,3 +234,16 @@ match its own reference), the repair loop fixed the third, and the gated result 
 `docs/prompts/tips.md`. Both assists are **opt-in** (`ASSIST=tips|consult|both` on the launcher;
 default `none`) so unassisted rows keep measuring the model alone — an assisted run answers "how much
 does the accumulated knowledge help *this* model?", which is a different row, labelled as such.
+
+### 12. The eGPU hangs at its power limit under the dense 27B — a hardware limit, documented
+
+Three clean-room reruns of `qwen38-27b` on the fixed `main` died in 3–8 minutes; two of them with
+the kernel's `NVRM: Xid 8 — GPU stopped processing … GPU is probably locked` and the power log pinned
+at 600 W for the last ten samples before the hang (the third was mine — the advisor pipeline loaded
+a second model on the card, now prevented by a GPU lock). Never on the MoE models (mean 114–341 W);
+always on the dense 27B (mean ~406 W, peaks 602–610 W, 235 s of accumulated power capping). An RTX
+5090 on a Thunderbolt eGPU cannot sustain this model at its stock 600 W limit. So the local
+investigator we most want to benchmark is the one this box cannot run without a power cap
+(`nvidia-smi -pl 480`, root). Two rules follow: no local row is a model verdict until the kernel log
+is clean of `Xid` for the run window, and the roster should carry a `power` note per model the way
+it carries `fit`. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
