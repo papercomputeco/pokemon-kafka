@@ -8,7 +8,7 @@ turn budget, and pass criteria on the lane's `fitness.json`. They run the real h
 
 ```
 uv run python scripts/run_evals.py                 # all cases in evals/cases/
-uv run python scripts/run_evals.py --case route1-flee-loop
+uv run python scripts/run_evals.py --case route1-to-forest
 uv run python scripts/run_evals.py --dry-run       # print the agent commands only
 ```
 
@@ -21,16 +21,20 @@ learnings were written to catch.
 
 ```json
 {
-  "name": "route1-flee-loop",
+  "name": "route1-to-forest",
   "learning": "docs/learnings/route1-navigation-flee-loop.md",
-  "category": "battle",
+  "category": "battle · navigation",
   "seed_state": "demo-runs/states/route1.state",
   "stop_on_map": 51,
   "max_turns": 2000,
   "genome": {},                       // EVOLVE_PARAMS overrides; {} = notes.md/default
-  "pass": {"final_map_id": 51, "min_lead_hp": 5}
+  "pass": {"final_map_id": 51}        // + optional "min_lead_hp"; "expected_fail": true → XFAIL
 }
 ```
+
+Keep the criteria to what the case is actually a detector for. Every extra criterion is another
+way for the row to go red for a reason the case was not written to catch — see the `route1-to-forest`
+note below.
 
 Savestates referenced here live in `demo-runs/states/` (gitignored — copy them from a run's
 `batons/` as documented in `docs/learnings/README.md`). `route2-weedle-flee-loop.state` is a `--save-state-every 1` checkpoint at turn 1200 of the relay `base` lane
@@ -44,7 +48,7 @@ any `forest_to_pewter` baton with
 
 | case | category | from | asserts |
 |---|---|---|---|
-| route1-flee-loop | battle | route1-navigation-flee-loop | reaches Viridian Forest (51) from `route1.state` in ≤2000 turns with lead HP ≥5. In a clean worktree the lane never enters the flee loop (916 turns, 9/9 battles, both before and after the 08-16 wedge watchdog + stall-run cap) but arrives at 2 HP, so it still FAILs on the health half. With the 08-16 battle-menu sync every fight turn lands (25/25, was 19/36) and it still arrives at 1-5 HP (FAIL 934 / hp 1; timing-sensitive): what is left is the fight-first run policy at hp_run_threshold=0.2, not menu timing |
+| route1-to-forest | battle · navigation | route1-navigation-flee-loop | reaches Viridian Forest (51) from `route1.state` in ≤2000 turns — the flee-loop detector. Was `route1-flee-loop` with an extra `min_lead_hp: 5`; renamed and re-scoped on 08-16 once the loop was gone. PASS 934 / 51 / hp 1 / 9-9 battles, byte-identical under `PYTHONHASHSEED` 0/1/7. The dropped HP floor: it never described this case (which is about *arriving*), it guarded a downstream entry condition that no longer binds (`forest-crossing-1hp` XPASSes — a 1-HP forest entry now reaches Pewter at 22 HP), and at ±4 frames of battle-sync timing it flips 1 ↔ 5 HP, so as a gate it was noise. Arrival HP is still reported in the `lead hp` column; the run/heal policy gap it stood for is in the learning, not in a criterion |
 | forest-crossing-healthy | navigation · battle | viridian-forest-turn-385-blackout | from the 17-HP forest entrance, `very_cautious` reaches Pewter (2) in ≤3000 turns with lead HP ≥5. Before 08-16 this row was a `PYTHONHASHSEED` coin flip (PASS 2270 / hp 13 or FAIL 3000 stuck in the Forest): `_pick_move` broke physical/special damage ties by set order. Ties now fall back to the best-scored move, and the lane is reproducible — FAIL 1251 turns / Pewter / hp 2 (reaches the city, misses min_lead_hp) before the 08-16 battle-menu sync; with it the battles are won cleanly (60/60, L16, full HP) but the lane thrashes at the (25,21) forest pocket — FAIL 3000 / 51 / hp 42, the navigation half |
 | forest-crossing-1hp | navigation · battle | viridian-forest-1hp-entry-unresolved | documents the known failure: from the 1-HP entrance the default genome does **not** reach Pewter in 3000 turns (expected_fail) |
 | pewter-to-gym | navigation | brock-approach-deadend / pewter-corrupted-transition-save | from the forest→Pewter baton, reach Pewter Gym (54) in ≤4000 turns. Passes since the Pewter routes.json fix (the old first waypoint (13,25) was the Pokémon Center door and the old "gym" waypoint (16,11) open ground; the door is (16,17), reached from the west via x=19 → y=13 → x=10 → y=18) plus the WorldMap planner for route waypoints — 44 turns |

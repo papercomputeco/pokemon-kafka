@@ -41,7 +41,8 @@ root causes, found independently:
   stalled turn. Lanes reach the forest in 750 turns at 4 HP.
 - **Why every variant failed identically**: the save state fixes the RNG and the parcel-quest pilot
   overrides navigation, so genome spreads cannot change the outcome. *Six identical failures means
-  code, not config.* This is now `evals/cases/route1-flee-loop.json` (FAIL on main until a fix lands).
+  code, not config.* This is now `evals/cases/route1-to-forest.json` — PASS on main since the
+  08-16 battle fixes (934 turns, 9/9 battles; renamed from `route1-flee-loop` once the loop was gone).
 
 ### Viridian Forest
 - **Survival trumps leveling** (Kimi): `very_cautious` (flee/heal at 50 %) crosses in 2270 turns
