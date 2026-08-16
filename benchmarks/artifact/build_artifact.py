@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-OUT = Path(__file__).with_name("local-vs-haiku.html")  # publish this file as the "Local vs Haiku" artifact
+OUT = Path(__file__).with_name("local-vs-haiku.html")
 RELAY_JSON = Path(__file__).with_name("relay_result.json")  # qwen3-coder run
 RELAY_RUNS_JSON = Path(__file__).with_name("relay_runs.json")  # list of later runs (laguna, qwen38...)
 
@@ -86,8 +86,7 @@ def bar_chart():
             f'peak {pk} W · mean {mean} W">'
             f'<rect x="{lab_w - 4}" y="{y - 4}" width="{w - lab_w - right + 8}" height="{row_h - 2}" class="hit"/>'
             f'<text x="{lab_w - 10}" y="{y + bar_h / 2 + 4}" class="lbl" text-anchor="end">{e(alias)}</text>'
-            f'<path d="M{lab_w},{y} h{bw - 4:.1f} a4,4 0 0 1 4,4 v{bar_h - 8} a4,4 0 0 1 -4,4 '
-            f'h{-(bw - 4):.1f} z" class="s-{g}"/>'
+            f'<path d="M{lab_w},{y} h{bw - 4:.1f} a4,4 0 0 1 4,4 v{bar_h - 8} a4,4 0 0 1 -4,4 h{-(bw - 4):.1f} z" class="s-{g}"/>'
             f'<text x="{lab_w + bw + 8:.1f}" y="{y + bar_h / 2 + 4}" class="val">{tok:g}</text>'
             f"</g>"
         )
@@ -104,13 +103,8 @@ def scatter():
     ml, mr, mt, mb = 60, 40, 24, 44
     pw, ph = w - ml - mr, h - mt - mb
     xmax, ymax = 340, 1.0
-
-    def sx(v):
-        return ml + v / xmax * pw
-
-    def sy(v):
-        return mt + (1 - v / ymax) * ph
-
+    sx = lambda v: ml + v / xmax * pw
+    sy = lambda v: mt + (1 - v / ymax) * ph
     parts = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-labelledby="sc-title">']
     parts.append('<title id="sc-title">Decode speed against diagnostic eval score</title>')
     for v in range(0, xmax + 1, 50):
@@ -255,8 +249,8 @@ def relay_section():
 <div class="col">
 <h3>Next</h3>
 <ul>
-<li>Rerun <code>qwen38-27b</code> — its first attempt was killed by a GPU crash (<code>CUDA error: the launch timed out</code>) while it was diagnosing correctly; the harness reported it as the model stopping. No local row is a verdict until the Ollama journal is clean for the run window.</li>
-<li>Rerun <code>laguna-xs</code> with a compaction guard — the 128k window filled while it was on the right thread; pi only compacts on a 400 and local models return <code>length</code> instead.</li>
+<li>Ship a compaction guard (~75 % of the window) in the guardrails extension — Laguna and Qwen 3.8 both died at 130.8k tokens mid-task with ~1.5 h of budget left. Then rerun both.</li><li>Review Qwen 3.8's battle-wedge watchdog for <code>main</code>; it is a real fix with passing tests. No local row is a verdict until the Ollama journal is clean for the run window (attempt 1 was a <code>CUDA error: the launch timed out</code>).</li>
+
 <li>The two skills measured here — investigate vs. fix — do not live in the same 30B model today. Consider splitting the operator.</li>
 </ul>
 </div>"""
@@ -379,7 +373,7 @@ def page():
 
 <div class="tiles">
   <div class="tile"><span class="l">Fastest local decode</span><span class="v">316<small>tok/s</small></span><span class="c"><i class="sw s-moe"></i>laguna-xs · 3.4× Haiku</span></div>
-  <div class="tile"><span class="l">Best diagnosis score</span><span class="v">0.79<small>/ 1</small></span><span class="c"><i class="sw s-dense"></i>qwen38-27b · 141 tok/s</span></div>
+  <div class="tile"><span class="l">Only local code fix</span><span class="v">1<small>/ 4 segs</small></span><span class="c"><i class="sw s-dense"></i>qwen38-27b · wedge watchdog · 156 Wh</span></div>
   <div class="tile"><span class="l">Best local relay run</span><span class="v">2<small>/ 4 segs</small></span><span class="c"><i class="sw s-moe"></i>laguna-xs · 91 tok/s · 4.0 s/turn · 78 Wh</span></div>
   <div class="tile"><span class="l">The bar to clear</span><span class="v">91.9<small>tok/s</small></span><span class="c"><i class="sw ref"></i>Haiku 4.5 · 2/4 segs · $0.87</span></div>
 </div>

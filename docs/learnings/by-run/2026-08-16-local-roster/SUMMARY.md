@@ -99,13 +99,30 @@ while it was grepping the right file — a harness limit, not a judgement failur
 mis-ranked it in the other direction: its truncations measured a thinking budget, not a behaviour.
 Runs are the instrument; the quiz is the screen. See `benchmarks/2026-08-16-local-relay-laguna-xs.md`.
 
-### 6. Blackwell FP4 is not available on Linux (yet)
+### 6. Qwen 3.8 fixed the bug — the first local model to change code — and then ran out of context
+
+Attempt 2 (clean, no GPU errors): it reproduced the stall with a single 60-turn lane, diagnosed it
+as an input-locked battle screen, wrote a 40-line battle-wedge watchdog in `agent.py`, ran the
+relay tests and lint *before* trusting it, and re-ran the segment: **all six lanes cleared in 740
+turns** (from 2000 stuck). Sonnet and Kimi were the only 08-15 models that changed code; Qwen 3.8
+is the only local one, and it validated its change. Then the 128k window filled at turn 91 —
+130,851 tokens, `stopReason: length`, exactly where Laguna died an hour earlier — with no learning
+written and nothing committed. **1/4, 22 min, 156 Wh (406 W mean; a dense 27B at 128k runs the
+card hot).** It is the local Sonnet, not the local Haiku: slow, expensive, and the one that does
+the hard thing.
+
+Two productive runs in a row ended on the same harness limit. pi compacts only after a 400; local
+Ollama models return `length` instead; one compaction was not enough for either. A compaction
+guard at ~75 % of the window is now the highest-value fix in this repo — both models had ~1.5 h of
+budget left. See `benchmarks/2026-08-16-local-relay-qwen38-27b.md`.
+
+### 7. Blackwell FP4 is not available on Linux (yet)
 
 Every `nvfp4` tag Ollama publishes 412s with "this model requires macOS". The obvious 5090
 experiment — FP4 vs Q4 on the same weights — cannot be run here today. `check_runnable()` now
 rejects `mlx`/`nvfp4` tags at the roster.
 
-### 7. Uncached local prompts are the hidden cost
+### 8. Uncached local prompts are the hidden cost
 
 12 minutes of Qwen3-Coder consumed 3.88 M input tokens with zero cache reads. Priced as cloud
 tokens that is $0.57; the same run on a cached API would be ~90 % cache hits. Electricity was 1.2
@@ -115,7 +132,8 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
 
 - Add a harness-death flag to `bench_report.py`; never publish a local row without checking the
   Ollama journal for the run window.
-- Rerun `qwen38-27b` (in progress). Rerun `laguna-xs` with a compaction guard — it has more run in it.
+- Ship the compaction guard, then rerun Laguna and Qwen 3.8 — both have most of their budget left.
+- Review Qwen 3.8's battle-wedge watchdog for `main`; it is a real fix with passing tests.
 - Harness: trigger compaction at ~75 % of the window from the guardrails extension (pi only compacts on a
   400, and local models return `length` instead); remind the operator to commit deliverables early.
 - If the dense 27B crashes the card again at 128k, that is a finding about the 5090, not the model.
