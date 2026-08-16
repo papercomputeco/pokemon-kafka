@@ -1,0 +1,48 @@
+[
+ {
+  "model": "laguna-xs (local, 128k)",
+  "segs": "2/4",
+  "wall_m": "40.0",
+  "model_m": "6.6",
+  "turns": "98",
+  "tok_s": "91.1",
+  "s_turn": "4.0",
+  "cloud_usd": "0.85 eq.",
+  "code_fix": "no (genome + seed state)",
+  "headline": "2/4 in 40 minutes \u2014 Haiku's cadence, exactly",
+  "steps": [
+   "Same six-lane flee-loop wall as Qwen3-Coder. It did not blame the harness: it ran <code>agent.py</code> directly with short budgets, tried HP-threshold genomes, then <strong>built a healed seed state</strong> and re-ran the segment from it \u2014 every lane cleared to Viridian Forest.",
+   "<code>forest_to_pewter</code> from that baton: stuck at 6000 turns, cleared at 12000 (<code>aggressive</code>, 1 HP). <strong>2/4</strong> \u2014 level with Sonnet, Kimi, and Haiku.",
+   "<code>pewter_to_badge</code>: every lane reaches the Gym and stalls on the known interior wedge. It was grepping <code>relay.py</code> for the Gym waypoints \u2014 the right thread \u2014 when the 128k window filled (<code>stopReason: length</code> at 130,820 tokens). One honest, well-formed learning; no fabrication; no commit."
+  ],
+  "callout": "<strong>91.1 out tok/s in-run against Haiku's 91.9; 4.0 s/turn against 4.8; the same two segments.</strong> The first local row that is comparable to Haiku on the game axis, not just faster on decode. And the quiz had ranked it fifth for going silent on two cases \u2014 the truncations measured a thinking budget, not a behaviour. Runs are the instrument; the quiz is the screen. It ended on a harness limit (context), not a judgement failure.",
+  "wh": "77.5",
+  "mean_w": "114",
+  "peak_w": "602",
+  "energy_usd": "0.023",
+  "energy_note": "Cloud-equivalent $0.85 is 8.4 M uncached input tokens."
+ },
+ {
+  "model": "qwen38-27b (local, 128k, attempt 2)",
+  "segs": "1/4",
+  "wall_m": "22.2",
+  "model_m": "15.0",
+  "turns": "91",
+  "tok_s": "70.4",
+  "s_turn": "9.9",
+  "cloud_usd": "0.97 eq.",
+  "code_fix": "YES \u2014 wedge watchdog, tests pass",
+  "headline": "1/4 in 22 minutes \u2014 the first local model to fix the code",
+  "steps": [
+   "Same six-lane wall. It reproduced the stall with a single 60-turn <code>agent.py</code> lane from a checkpoint and diagnosed an <strong>input-locked battle screen</strong> \u2014 state identical turn after turn, and no B-press ever sent in wild battles.",
+   "It wrote a 40-line battle-wedge watchdog in <code>agent.py</code>, ran <code>pytest tests/test_relay.py</code> (24 passed) and <code>ruff</code> <em>before</em> trusting it, and re-ran the segment: <strong>all six lanes cleared to Viridian Forest in 740 turns</strong> (from 2000 stuck). Baton written.",
+   "The 128k window filled at turn 91 (<code>stopReason: length</code>, 130,851 tokens) while it was setting up <code>forest_to_pewter</code>. No learning, no commit \u2014 the same harness wall Laguna hit an hour earlier."
+  ],
+  "callout": "<strong>Sonnet and Kimi were the only 08-15 models that changed code; Qwen 3.8 is the only local one \u2014 and it validated the change first.</strong> Slow (9.9 s/turn) and hot (406 W mean, 156 Wh) \u2014 the local Sonnet, not the local Haiku. Its first attempt was killed by a GPU crash while doing exactly the same opening; without the Ollama journal that looked like a model that quit. Two productive runs in a row now ended on the 128k window with ~1.5 h of budget left: a compaction guard is the highest-value fix in the repo.",
+  "wh": "156.3",
+  "mean_w": "406",
+  "peak_w": "609",
+  "energy_usd": "0.047",
+  "energy_note": "A dense 27B at 128k runs the card hot the whole time; Laguna's MoE averaged 114 W."
+ }
+]

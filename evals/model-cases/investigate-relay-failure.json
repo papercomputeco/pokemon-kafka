@@ -1,0 +1,23 @@
+{
+  "name": "investigate-relay-failure",
+  "learning": "benchmarks/2026-08-16-local-relay-qwen3-coder.md",
+  "category": "investigation",
+  "prompt": "You are the operator running scripts/relay.py in this repo. Your first real invocation — `uv run python scripts/relay.py rom/pokemon_red.gb --segments route1_to_forest --max-turns-scale 0.5 --timeout 900` — has just finished with no winner. Below is the report.json it wrote and a quick look at one lane directory. relay.py's variants are genome overrides for scripts/agent.py; every lane runs the same headless agent code (scripts/agent.py: BattleStrategy.choose_action decides fight/run/item in battles, the navigator drives movement).\n\nWhat is your next action? Name (1) the single most likely cause given this evidence, (2) the exact file and function you would open first and why, and (3) the exact command you would run next. Be concrete; do not describe a general debugging philosophy.",
+  "context": [
+    {"path": "evals/model-cases/fixtures/relay-report-route1.json", "label": "data/relay/260816-034101/report.json (route1_to_forest, all lanes)"},
+    {"path": "evals/model-cases/fixtures/relay-lane-route1.txt", "label": "lane directory and log tail"}
+  ],
+  "num_predict": 3000,
+  "rubric": [
+    {"id": "sees-identical-lanes", "weight": 2, "any": ["identical", "all (six|6|the) (lanes|variants) .{0,40}same", "same (fitness|result|outcome)", "genome .{0,30}(does not|doesn.t|didn.t) matter", "independent of .{0,20}(genome|variant)"]},
+    {"id": "names-flee-loop", "weight": 3, "any": ["run loop", "flee.?loop", "stuck .{0,20}running", "keeps? (trying to )?run", "repeatedly runs", "run.{0,20}(every|each) turn", "loop(ing|ed)? .{0,30}run", "1314", "burn(s|ing|ed)? .{0,20}turns .{0,20}run"]},
+    {"id": "opens-battle-code", "weight": 3, "any": ["choose_action", "BattleStrategy", "agent\\.py"]},
+    {"id": "concrete-next-command", "weight": 2, "any": ["grep -n", "sed -n", "grep -c", "rg ", "uv run python scripts/relay.py rom/pokemon_red.gb .{0,40}--seed-state", "python -c", "awk"]}
+  ],
+  "anti": [
+    {"id": "shortens-timeout", "weight": 3, "any": ["--timeout (30|45|60|90|120)\\b", "shorter timeout", "reduce the timeout", "lower the timeout"]},
+    {"id": "blames-environment", "weight": 3, "any": ["misconfigur", "environment (issue|problem)", "emulator (is )?(broken|misbehaving|not working)", "system (is )?(slow|underperforming)", "relay (system|script) (is|appears) (broken|not working)"]},
+    {"id": "just-rerun", "weight": 2, "any": ["run (it|the same command) again", "re-?run .{0,20}(same|identical) command", "try again with the same"]},
+    {"id": "tune-genome-first", "weight": 1, "any": ["(increase|decrease|tune|adjust) (the )?(hp_run_threshold|stuck_threshold|door_cooldown) (first|and re-?run)"]}
+  ]
+}

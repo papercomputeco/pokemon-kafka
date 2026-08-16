@@ -1,0 +1,11 @@
+{
+  "name": "pewter-pokecenter-exit",
+  "learning": "benchmarks/2026-08-16-local-relay-laguna-xs.md",
+  "category": "navigation",
+  "seed_state": "demo-runs/states/pewter-pokecenter.state",
+  "stop_on_map": 54,
+  "max_turns": 3000,
+  "genome": {},
+  "pass": {"final_map_id": 54},
+  "expected_fail": true
+}

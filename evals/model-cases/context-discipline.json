@@ -1,0 +1,84 @@
+{
+  "name": "context-discipline",
+  "learning": "benchmarks/2026-08-15-mt-moon-relay.md",
+  "category": "context-discipline",
+  "prompt": "You are debugging a finished run. The evidence is data/relay/260815-190913/route1_to_forest/base/agent.log, which is 1.4 GB and roughly 9 million lines, one JSON object per turn. You need to find the turn where the agent first entered a battle it never left, and the 20 turns around it. Your tool results are truncated at 40 KB and your context window is 128k tokens.\n\nGive the exact shell commands you would run, in order.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "no-whole-file-read",
+      "weight": 3,
+      "any": [
+        "grep -n",
+        "grep -c",
+        "rg ",
+        "awk",
+        "jq -c",
+        "sed -n"
+      ]
+    },
+    {
+      "id": "narrow-then-widen",
+      "weight": 3,
+      "any": [
+        "sed -n .{0,20}p",
+        "-A ?[0-9]",
+        "-B ?[0-9]",
+        "-C ?[0-9]",
+        "head -n",
+        "tail -n \\+",
+        "awk .{0,20}NR",
+        "line numbers?",
+        "around (that|the) (line|turn)"
+      ]
+    },
+    {
+      "id": "counts-first",
+      "weight": 2,
+      "any": [
+        "grep -c",
+        "wc -l",
+        "count",
+        "how many matches"
+      ]
+    },
+    {
+      "id": "bounded-output",
+      "weight": 2,
+      "any": [
+        "\\| head",
+        "-m ?[0-9]",
+        "--max-count",
+        "limit the output",
+        "first N",
+        "head -",
+        "tail -",
+        "\\| less",
+        "first (few|20|N)"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "cats-the-log",
+      "weight": 3,
+      "any": [
+        "^cat .{0,60}agent\\.log",
+        "\\bcat agent\\.log",
+        "cat .{0,40}\\.log \\|",
+        "open the (whole|entire) (file|log)",
+        "read the (whole|entire) (file|log)"
+      ]
+    },
+    {
+      "id": "loads-into-context",
+      "weight": 2,
+      "any": [
+        "paste the log",
+        "read the log into",
+        "json\\.load\\(open"
+      ]
+    }
+  ],
+  "num_predict": 4000
+}

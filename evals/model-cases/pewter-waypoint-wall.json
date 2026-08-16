@@ -1,0 +1,84 @@
+{
+  "name": "pewter-waypoint-wall",
+  "learning": "docs/learnings/by-run/2026-08-15-haiku-4.5/pewter-gym-navigation.md",
+  "category": "data-vs-code",
+  "prompt": "Five different models each spent hours on the same leg: the agent enters Pewter City and must reach the Gym. The route data lists a waypoint at tile (16,11). Every genome variant behaves identically \u2014 the agent walks toward (16,11), stops one tile short, and bounces between two or three positions for thousands of turns. Varying stuck_threshold (4-16), door_cooldown (2-12), waypoint_skip_distance (1-16) and axis preference changes nothing.\n\nWhat is the most likely cause, and what would you check first? Name the concrete artifact you would inspect and the check you would run.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "bad-map-data",
+      "weight": 3,
+      "any": [
+        "waypoint .{0,30}(is|on|inside) .{0,10}(a )?wall",
+        "unreachable",
+        "not walkable",
+        "impassable",
+        "bad (map|route) data",
+        "wrong (tile|coordinate)",
+        "invalid waypoint",
+        "un-?walkable",
+        "non-?walkable",
+        "blocked",
+        "solid tile",
+        "occupied by",
+        "cannot (be )?reach",
+        "can.t be reached",
+        "no path"
+      ]
+    },
+    {
+      "id": "identical-across-variants",
+      "weight": 2,
+      "any": [
+        "identical .{0,30}variant",
+        "all variants",
+        "parameter(s)? (do not|don.t) matter",
+        "not a (tuning|parameter) problem",
+        "data.? not .{0,15}(the )?(genome|parameters)"
+      ]
+    },
+    {
+      "id": "names-artifact",
+      "weight": 2,
+      "any": [
+        "routes\\.json",
+        "route data file",
+        "waypoint list",
+        "collision (map|data)",
+        "tileset",
+        "route .{0,25}(file|json|config|definition)",
+        "waypoint .{0,15}(file|list|data)",
+        "pewter_to_gym",
+        "map data file"
+      ]
+    },
+    {
+      "id": "concrete-check",
+      "weight": 2,
+      "any": [
+        "check .{0,40}walkab",
+        "verify .{0,40}(tile|collision)",
+        "dump .{0,30}(tile|map)",
+        "read .{0,30}memory",
+        "compare .{0,30}with the map",
+        "dump the tile",
+        "tilemap",
+        "sprite positions",
+        "inspect .{0,30}(tile|waypoint|route)",
+        "print .{0,25}(tile|collision)"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "keep-tuning",
+      "weight": 2,
+      "any": [
+        "try (a )?(higher|lower) stuck_threshold",
+        "tune the genome further",
+        "increase max_turns",
+        "run more variants"
+      ]
+    }
+  ]
+}
