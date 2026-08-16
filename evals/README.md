@@ -91,6 +91,19 @@ Adding a case: write the JSON, then add a reference answer to
 `tests/test_run_model_evals.py::test_reference_answers_score_high` — if the learning's own wording
 cannot clear the rubric, the rubric is wrong.
 
+## Reading a result: FAIL vs XFAIL (eval discipline)
+
+`run_evals.py` returns exit 1 if any case is a bare **FAIL** and 0 otherwise; `expected_fail: true`
+turns a failing case into **XFAIL** (green, tracked) and a passing one into **XPASS** (a heads-up
+that it's fixed — drop the flag). The discipline that this repo missed once and paid for
+(`forest-crossing-healthy`, 2026-08-16): **never leave a known-broken case as a bare FAIL "documented"
+in the results file.** Either fix it, or mark it `expected_fail` so it reads as XFAIL and the next
+bare FAIL is unambiguously a *new* regression. A bare FAIL that everyone has learned to expect is a
+regression detector that has been silently switched off — the forest navigation half stayed broken
+across two PRs because its FAIL looked normal. Also: run flaky-looking cases under a few
+`PYTHONHASHSEED` values before trusting a PASS; `forest-crossing-healthy`'s original "pass" was a
+seed-7 coin flip.
+
 ## Advisors (`scripts/advisor.py`) — how new cases get in
 
 Model-eval cases can also be *dreamed* from captured operator sessions instead of written by hand,

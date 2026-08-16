@@ -247,3 +247,19 @@ investigator we most want to benchmark is the one this box cannot run without a 
 (`nvidia-smi -pl 480`, root). Two rules follow: no local row is a model verdict until the kernel log
 is clean of `Xid` for the run window, and the roster should carry a `power` note per model the way
 it carries `fit`. See `benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md`.
+
+### 13. Confirming the fixes on the harness axis surfaced the next bug — and a bare FAIL that hid it
+
+Haiku 4.5 on the Claude Code harness against the fixed `main` (a cloud driver, different harness, no
+plugin): `route1_to_forest` cleared first try — the flee-loop fix holds independent of the local GPU
+— then all three `forest_to_pewter` attempts stalled in map 51 at (6,7)-(7,8) and (25,21)-(26,22),
+healthy, never reaching Pewter. 1/4, 11 min, $0.95, 2 honest commits, no code read (a driver, per
+§10). The stall is not new: `forest-crossing-healthy` was a PYTHONHASHSEED coin flip before the
+battle fixes and a deterministic FAIL after them — the fixes removed the luck and the too-weak
+masking that hid the navigation half. **We had the eval and it fired every step; the miss was
+leaving it as a bare FAIL "documented" in the results file instead of `expected_fail` (tracked) or
+fixed** — a regression detector switched off by familiarity. Fixing both: the forest navigation
+(`fix/viridian-forest-navigation`, gated on the eval passing under three hash seeds) and the
+discipline (evals/README.md § FAIL vs XFAIL). Also this run: Haiku's self-reported "~65-80 min" for
+an 11-min run — models infer wall-clock from turn count and inflate it 5-7× (Qwen3-Coder: 45 for 8);
+trust the harness clock, not the SPEEDRUN_SUMMARY. See `benchmarks/2026-08-16-haiku-claude-code-r2.md`.
