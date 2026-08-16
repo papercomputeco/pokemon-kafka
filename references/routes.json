@@ -52,10 +52,14 @@
 
   "2": {
     "name": "Pewter City",
+    "_comment": "Doors are the map's warp table (read back from wWarpEntries): Gym (16,17)->54, Pokemon Center (13,25)->58, Mart (23,17)->56, Museum (14,7)/(19,5)->52. The old first waypoint (13,25) 'Enter from forest' WAS the Pokemon Center door — every lane walked in and wedged at the counter (evals/cases/pewter-pokecenter-exit.json) — and the old 'Pewter Gym' waypoint (16,11) is open ground north of the building. Layout (emulator BFS from the Route 2 entry): a fence spans y=21 for x<=18 with the gap at x>=19; the Gym block (x 12-17, y 14-17) is fenced on its east side (x=18, y 18-21), so its door is reached from the west: north up x=19, west along y=13, south down x=10, east along y=18.",
     "waypoints": [
-      {"x": 13, "y": 25, "note": "Enter from forest"},
-      {"x": 19, "y": 17, "note": "Pokemon Center"},
-      {"x": 16, "y": 11, "note": "Pewter Gym"}
+      {"x": 19, "y": 22, "note": "North from the Route 2 entry (18,35) to just below the y=21 fence gap"},
+      {"x": 19, "y": 13, "note": "Through the gap and up the street east of the Gym block"},
+      {"x": 10, "y": 13, "note": "West along the street north of the Gym"},
+      {"x": 10, "y": 18, "note": "South down the west side (x=11 is a wall at y=17)"},
+      {"x": 16, "y": 18, "note": "East along y=18 to the tile below the Gym door"},
+      {"x": 16, "y": 17, "note": "Pewter Gym door — warp (16,17)->map 54, step up onto it"}
     ]
   }
 }

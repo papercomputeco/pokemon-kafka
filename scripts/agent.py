@@ -503,8 +503,14 @@ class Navigator:
         turn: int = 0,
         stuck_turns: int = 0,
         collision_grid: list | None = None,
+        planner=None,
     ) -> str | None:
-        """Get the next direction to move based on current position and route plan."""
+        """Get the next direction to move based on current position and route plan.
+
+        ``planner(state, tx, ty) -> direction | None`` is an optional whole-map planner (the
+        agent passes its WorldMap pilot) tried for route waypoints before the on-screen A*: the
+        9x10 window can't see around a city block, so on Pewter's fenced streets the local
+        planner walked into the same fence for thousands of turns."""
         map_key = str(state.map_id)
 
         # Reset waypoint index on map change
@@ -561,7 +567,9 @@ class Navigator:
 
         if state.x == tx and state.y == ty:
             self.current_waypoint += 1
-            return self.next_direction(state, turn=turn, stuck_turns=stuck_turns, collision_grid=collision_grid)
+            return self.next_direction(
+                state, turn=turn, stuck_turns=stuck_turns, collision_grid=collision_grid, planner=planner
+            )
 
         # Skip waypoint if close enough but stuck too long
         dist = abs(state.x - tx) + abs(state.y - ty)
@@ -571,7 +579,12 @@ class Navigator:
             and self.current_waypoint < len(waypoints) - 1
         ):
             self.current_waypoint += 1
-            return self.next_direction(state, turn=turn, stuck_turns=0, collision_grid=collision_grid)
+            return self.next_direction(state, turn=turn, stuck_turns=0, collision_grid=collision_grid, planner=planner)
+
+        if planner is not None:
+            planned = planner(state, tx, ty)
+            if planned is not None:
+                return planned
 
         if collision_grid is not None:
             astar_dir = self._try_astar(state, tx, ty, collision_grid)
@@ -1240,12 +1253,24 @@ class PokemonAgent:
             self._at_target_toggle = not getattr(self, "_at_target_toggle", False)
             return quest.get("at_target", "a") if self._at_target_toggle else "a"
 
+        # A building the plan has no use for — a Pokémon Center, Mart or house we walked into
+        # because a waypoint sat on its door — has no route and no target, so the waypoint
+        # navigator could only cycle directions inside it (and the old GO_NORTH default pushed
+        # "up" into the Pewter Center's counter for ~3000 turns: the (11,3) wedge every 08-15/16
+        # lane hit). Walk back out instead; the map's own warp table says where the door is.
+        if quest is None:
+            exit_dir = self._building_exit(state)
+            if exit_dir is not None:
+                self._quest_nav_active = True  # a deterministic pilot: no backtrack restores
+                return exit_dir
+
         self.navigator.quest_target = quest
         direction = self.navigator.next_direction(
             state,
             turn=self.turn_count,
             stuck_turns=self.stuck_turns,
             collision_grid=self.collision_map.grid,
+            planner=self._pilot_to,
         )
         return direction or "a"
 
@@ -1255,6 +1280,39 @@ class PokemonAgent:
         when it can and otherwise sweeps along the boundary to the real exit column, learning the
         map-edge non-exits as it goes (via the failed-move hard-blocks)."""
         return self.world.cross_step(state.map_id, state.x, state.y, goal)
+
+    def _building_exit(self, state: OverworldState) -> str | None:
+        """Direction toward the nearest exit warp when standing inside a building nothing has a
+        plan for; ``None`` outdoors, on maps with route data or a scripted target, and in naive mode.
+
+        Indoors is the map's tileset (anything but the overworld one), and the exits are the map's
+        own warp entries — no per-building table. The nearest warp is the door we came in by for a
+        single-door building (Center, Mart, house) and the way back for a gate. Standing on the
+        warp, step off the map edge it sits on: mats warp on entry, edge exits when you walk off."""
+        if self.navigator.naive or str(state.map_id) in self.navigator.routes or state.map_id in EARLY_GAME_TARGETS:
+            return None
+        if not self.memory.is_indoors():
+            return None
+        warps = self.memory.read_warps()
+        if not warps:
+            return None
+        wx, wy, _dest = min(warps, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))
+        if getattr(self, "_building_exit_logged", None) != (state.map_id, wx, wy):
+            self._building_exit_logged = (state.map_id, wx, wy)
+            self.log(f"EXIT | map={state.map_id} pos=({state.x},{state.y}) no plan indoors -> warp ({wx},{wy})")
+        d = self._pilot_to(state, wx, wy)
+        if d is not None:
+            return d
+        width, height = self.memory.read_map_bounds() or (wx + 1, wy + 1)
+        if wy <= 0:
+            return "up"
+        if wy >= height - 1:
+            return "down"
+        if wx <= 0:
+            return "left"
+        if wx >= width - 1:
+            return "right"
+        return "down"  # a doorway inside the map body: building doors face south
 
     def _pilot_to(self, state: OverworldState, tx: int, ty: int, require_reach: bool = False) -> str | None:
         """Navigate toward tile ``(tx, ty)`` by pathfinding over the accumulated WorldMap. Returns

@@ -25,6 +25,9 @@ PEWTER_CITY = 2
 ROUTE_1 = 12
 ROUTE_2 = 13
 VIRIDIAN_FOREST = 51
+VIRIDIAN_FOREST_NORTH_GATE = 47  # the Route 2 <-> Forest gate buildings (map-transition telemetry:
+VIRIDIAN_FOREST_SOUTH_GATE = 50  # 13 -> 50 -> 51 -> 47 -> 13 -> 2)
+PEWTER_GYM = 54
 OAKS_LAB = 40
 VIRIDIAN_MART = 42
 REDS_HOUSE_1F = 37  # the blackout respawn point (fainting with no Center visited: 51 -> 0 -> 37)
@@ -33,6 +36,17 @@ REDS_HOUSE_1F = 37  # the blackout respawn point (fainting with no Center visite
 # including) Pewter, because the old waypoint navigator can't reliably make the Route 2 / Forest
 # climb either — the WorldMap pilot does. On Pewter and anywhere else it hands back to normal nav.
 QUEST_MAPS = frozenset({PALLET_TOWN, VIRIDIAN_CITY, ROUTE_1, ROUTE_2, VIRIDIAN_FOREST, OAKS_LAB, VIRIDIAN_MART})
+
+# The maps the GO_NORTH pilot crosses by walking north: the outdoor corridor to Pewter and the two
+# forest gate buildings on it (both have a north exit). Pewter Gym is listed because the badge
+# segment enters it from Pewter and Brock stands at its north end, so "north" is still the way
+# forward there. Anywhere else with the Pokédex in hand — a Pokémon Center, a Mart, a house —
+# piloting north just presses into a counter forever (the Pewter Center wedge at (11,3) that every
+# 08-15/16 lane hit; evals/cases/pewter-pokecenter-exit.json), so the quest declines to steer and
+# the agent's generic building-exit rule walks back out the door.
+GO_NORTH_PILOT_MAPS = frozenset(
+    {PALLET_TOWN, ROUTE_1, ROUTE_2, VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST, VIRIDIAN_FOREST_NORTH_GATE, PEWTER_GYM}
+)
 
 # --- Phases ---
 TO_MART = "TO_MART"  # no parcel yet → go to the Viridian Mart and pick it up
@@ -105,7 +119,7 @@ class ParcelQuest:
 
         if phase == GO_NORTH:
             # Pokédex in hand. Walk out of any building, steer Viridian to its now-clear north exit,
-            # and pilot north on everything else — routes, gate buildings, and the forest — until
+            # and pilot north along the corridor — routes, gate buildings, and the forest — until
             # Pewter. (Handled before the QUEST_MAPS guard so the gate maps aren't excluded.)
             if sig.map_id == OAKS_LAB:
                 return _to(OAKS_LAB_EXIT, "Oak's Lab exit", at_target="down")  # walk out the door
@@ -118,7 +132,9 @@ class ParcelQuest:
                 return _to(REDS_HOUSE_EXIT, "Red's house exit", at_target="down")
             if sig.map_id == VIRIDIAN_CITY:
                 return _to(VIRIDIAN_NORTH, "Viridian north exit", at_target="up")
-            return _pilot("north")
+            if sig.map_id in GO_NORTH_PILOT_MAPS:
+                return _pilot("north")
+            return None  # off the corridor (a building we wandered into): normal nav + the exit rule
 
         # TO_MART / TO_OAK only steer on the early-game loop maps; elsewhere defer to normal nav.
         if sig.map_id not in QUEST_MAPS:

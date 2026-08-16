@@ -6,6 +6,7 @@ from parcel_quest import (
     OAKS_LAB,
     PALLET_TOWN,
     PEWTER_CITY,
+    PEWTER_GYM,
     REDS_HOUSE_1F,
     REDS_HOUSE_EXIT,
     ROUTE_1,
@@ -13,6 +14,8 @@ from parcel_quest import (
     TO_MART,
     TO_OAK,
     VIRIDIAN_CITY,
+    VIRIDIAN_FOREST_NORTH_GATE,
+    VIRIDIAN_FOREST_SOUTH_GATE,
     VIRIDIAN_MART,
     VIRIDIAN_NORTH,
     ParcelQuest,
@@ -144,3 +147,23 @@ def test_describe_is_a_oneliner():
 def test_to_oak_on_an_unlisted_corridor_map_pilots_south():
     q = ParcelQuest()
     assert q.next_target(sig(ROUTE_2, parcel=True))["pilot"] == "south"
+
+
+def test_go_north_pilots_the_forest_gates_and_the_gym():
+    # The two Route 2 <-> Forest gate buildings sit on the corridor and have a north exit; the Gym
+    # is where the badge segment is going and Brock stands at its north end.
+    q = ParcelQuest()
+    for m in (VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST_NORTH_GATE, PEWTER_GYM):
+        assert q.next_target(sig(m, pokedex=True))["pilot"] == "north", m
+
+
+def test_go_north_declines_off_corridor_buildings():
+    # Regression for the Pewter Pokémon Center wedge (evals/cases/pewter-pokecenter-exit.json):
+    # the old fall-through piloted north inside map 58 and pressed into the nurse's counter for
+    # ~3000 turns. Off the corridor the quest has no opinion, so the agent's building-exit rule
+    # can walk back out the door.
+    q = ParcelQuest()
+    assert q.next_target(sig(58, pokedex=True)) is None  # Pewter Pokémon Center
+    assert q.next_target(sig(56, pokedex=True)) is None  # Pewter Mart
+    assert q.next_target(sig(41, pokedex=True)) is None  # Viridian Pokémon Center
+    assert quest_phase(sig(58, pokedex=True)) == GO_NORTH  # still the same phase — just no steer

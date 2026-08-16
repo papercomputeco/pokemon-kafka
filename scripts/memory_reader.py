@@ -215,6 +215,8 @@ class MemoryReader:
         self.ADDR_WD74B = p.addr_wd74b
         self.ADDR_PLAYER_FACING = p.addr_player_facing
         self.ADDR_NUM_SIGNS = p.addr_num_signs
+        self.ADDR_MAP_TILESET = p.addr_map_tileset
+        self.ADDR_NUM_WARPS = p.addr_num_warps
 
     def read_signs(self) -> list[tuple[int, int]]:
         """Current map's sign positions as (x, y) tiles.
@@ -229,6 +231,25 @@ class MemoryReader:
             x = self._read(self.ADDR_NUM_SIGNS + 2 + i * 2)
             signs.append((x, y))
         return signs
+
+    def read_warps(self) -> list[tuple[int, int, int]]:
+        """Current map's warp tiles as (x, y, dest_map) — its doors and exits.
+
+        The game loads wNumberOfWarps and up to 32 (y, x, dest warp id, dest map) records for
+        each map (dest map 0xFF = LAST_MAP, i.e. back where we came from). Reading them tells the
+        agent where the way out of a building is without a per-map table.
+        """
+        count = min(self._read(self.ADDR_NUM_WARPS), 32)
+        warps = []
+        for i in range(count):
+            base = self.ADDR_NUM_WARPS + 1 + i * 4
+            y, x, dest = self._read(base), self._read(base + 1), self._read(base + 3)
+            warps.append((x, y, dest))
+        return warps
+
+    def is_indoors(self) -> bool:
+        """True when the loaded map uses a non-overworld tileset (a building, gate or cave)."""
+        return self._read(self.ADDR_MAP_TILESET) != 0
 
     def read_map_bounds(self) -> tuple[int, int] | None:
         """Current map's real size in walk-tiles (width, height), or None mid-transition.

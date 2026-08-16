@@ -40,6 +40,8 @@ SHIFTED_FIELDS = (
     "addr_map_id",
     "addr_player_x",
     "addr_player_y",
+    "addr_map_tileset",
+    "addr_num_warps",
     "addr_badges",
     "addr_money_1",
     "addr_money_2",
@@ -70,6 +72,8 @@ def test_red_blue_matches_legacy_constants():
     assert RED_BLUE.addr_text_progress == 0xC4F2
     assert RED_BLUE.addr_warp_flag == 0xD736
     assert RED_BLUE.addr_num_signs == 0xD4B0  # wNumSigns; coord pairs follow at +1
+    assert RED_BLUE.addr_map_tileset == 0xD367  # wCurMapTileset; 0 = OVERWORLD
+    assert RED_BLUE.addr_num_warps == 0xD3AE  # wNumberOfWarps; 4-byte wWarpEntries follow at +1
     assert YELLOW.addr_num_signs == 0xD4AF  # WRAM shift applies
     assert RED_BLUE.routes_file == "routes.json"
     assert RED_BLUE.lab_ball_x == 6  # Charmander ball column

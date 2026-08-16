@@ -73,6 +73,12 @@ class GameProfile:
     # walk-tile dimensions are twice these. Zero while no map header is loaded.
     addr_map_height: int
     addr_map_width: int
+    # pokered wCurMapTileset: 0 = OVERWORLD; every building/gate/dungeon has its own tileset,
+    # which is how the agent tells "indoors" from an outdoor route.
+    addr_map_tileset: int
+    # pokered wNumberOfWarps: the current map's warp count; wWarpEntries follow at +1 as
+    # 4-byte (y, x, dest warp id, dest map) records — the doors/exits of the loaded map.
+    addr_num_warps: int
     addr_badges: int
     addr_money_1: int
     addr_money_2: int
@@ -132,6 +138,8 @@ RED_BLUE = GameProfile(
     addr_player_y=0xD361,
     addr_map_height=0xD368,
     addr_map_width=0xD369,
+    addr_map_tileset=0xD367,
+    addr_num_warps=0xD3AE,
     addr_badges=0xD356,
     addr_money_1=0xD347,
     addr_money_2=0xD348,

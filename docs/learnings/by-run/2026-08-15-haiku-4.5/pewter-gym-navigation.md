@@ -1,5 +1,7 @@
 # Pewter Gym Navigation Blockade
 
+note: map 58 is the Pewter **Pokémon Center**, not the Gym (the Gym is map 54; the Center door is (13,25), the routes.json waypoint the lanes walked into) — the "interior wedge" below is the agent pressing into the nurse's counter. Fixed by the building-exit rule; see `evals/cases/pewter-pokecenter-exit.json`.
+
 **obstacle:** pewter-gym-navigation-blockade
 
 **category:** navigation
