@@ -124,6 +124,15 @@ model shipped a tested `world_map.py` fix and two honest learnings; see
 `2026-08-16-local-relay-qwen38-27b-r7.md`. Cost: 52.7 out tok/s (MTP was worth ~1.7×). r8 at the
 stock 600 W settles whether the cap ever mattered.
 
+## r8: stock 600 W, no MTP — 17 min, clean. Case closed.
+
+`POWER_OVERRIDE=1` at the stock limit: mean 509 W, max 608 W, **77 % of samples at ≥ 590 W** — the
+band that killed attempts 1/r3/r4/r5 in 2.7-8.3 minutes — for 17 minutes, kernel log clean, row
+emitted. The cap was a correlate; the MTP draft was the cause. `power_w` is removed from the roster
+(the preflight mechanism stays, tested, for the next model that needs one). Caveat on the record:
+r8 is 17 minutes, not 84 — if an `Xid` returns under a long uncapped run the guard will refuse the
+row and this reopens. See `2026-08-16-local-relay-qwen38-27b-r8.md`.
+
 ## Next (revised)
 
 r7 = r6 with exactly one change: no MTP draft. Cap stays at 480 W so attribution is clean.

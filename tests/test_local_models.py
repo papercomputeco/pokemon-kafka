@@ -293,8 +293,9 @@ def test_enforced_power_limit_parses_nvidia_smi_or_returns_none(monkeypatch):
 
 
 def test_power_check_refuses_capped_models_at_stock_and_when_unreadable():
-    dense = lm.BY_ALIAS["qwen38-27b"]
-    assert dense.power_w == 480  # the roster carries the eGPU-hang note as data, not prose
+    # No rostered model needs a cap today (qwen38-27b's hangs were Ollama's MTP draft, not watts —
+    # see benchmarks/2026-08-16-local-relay-qwen38-27b-r8.md), so the gate is exercised on a Spec.
+    dense = lm.Spec("capped", "capped:27b", "dense-27b", "needs a cap", power_w=480)
     assert lm.power_check(dense, 600.0) == (False, "needs <= 480 W, card is at 600 W — run: sudo nvidia-smi -pl 480")
     assert lm.power_check(dense, 480.0)[0] is True
     assert lm.power_check(dense, 450.0)[0] is True
@@ -304,26 +305,29 @@ def test_power_check_refuses_capped_models_at_stock_and_when_unreadable():
     assert lm.power_check(lm.BY_ALIAS["gpt-oss-20b"], None) == (True, "stock limit ok")
 
 
-def test_cmd_power_exit_code_tracks_refusals_and_tolerates_off_roster(monkeypatch, capsys):
+def test_cmd_power_passes_a_roster_with_no_caps_and_tolerates_off_roster(monkeypatch, capsys):
     monkeypatch.setattr(lm.subprocess, "run", lambda *a, **k: _R("600.00\n"))
-    assert lm.main(["power", "qwen38-27b", "laguna-xs"]) == 1
+    assert lm.main(["power", "qwen38-27b", "laguna-xs"]) == 0
     out = capsys.readouterr().out
     assert "enforced power limit: 600 W" in out
-    assert "REFUSED qwen38-27b" in out and "sudo nvidia-smi -pl 480" in out
+    assert "ok      qwen38-27b: stock limit ok" in out
     assert "ok      laguna-xs: not on the roster" in out
-    # off-roster alone is fine; capped card is fine; whole roster with a capped card is fine
-    assert lm.main(["power", "laguna-xs"]) == 0
-    monkeypatch.setattr(lm.subprocess, "run", lambda *a, **k: _R("480.00\n"))
-    assert lm.main(["power", "qwen38-27b"]) == 0
-    assert "capped at 480 W" in capsys.readouterr().out
     assert lm.main(["power"]) == 0
+    # an unreadable limit is fine while nothing needs a cap, and refused the moment something does
     monkeypatch.setattr(lm.subprocess, "run", lambda *a, **k: _R(""))
-    assert lm.main(["power", "dense-27b"]) == 1
+    assert lm.main(["power", "dense-27b"]) == 0
     assert "unreadable" in capsys.readouterr().out
+    monkeypatch.setattr(lm, "ROSTER", (lm.Spec("capped", "capped:27b", "dense-27b", "needs a cap", power_w=480),))
+    monkeypatch.setattr(lm, "BY_ALIAS", {"capped": lm.ROSTER[0]})
+    assert lm.main(["power", "capped"]) == 1
+    assert "REFUSED capped" in capsys.readouterr().out
 
 
 def test_cmd_list_shows_the_power_column(monkeypatch, capsys):
     _fake_ollama(monkeypatch, tags=[])
     assert lm.main(["list", "dense-27b"]) == 0
     out = capsys.readouterr().out
-    assert "| power |" in out and "| cap 480 W |" in out and "| stock |" in out
+    assert "| power |" in out and "| stock |" in out
+    monkeypatch.setattr(lm, "ROSTER", (lm.Spec("capped", "capped:27b", "dense-27b", "needs a cap", power_w=480),))
+    assert lm.main(["list", "dense-27b"]) == 0
+    assert "| cap 480 W |" in capsys.readouterr().out
