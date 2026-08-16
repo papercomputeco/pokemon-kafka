@@ -171,3 +171,36 @@ GPU-split and watts), `scripts/run_model_evals.py` + `evals/model-cases/` (the q
 `scripts/local_relay_run.sh` (one command per run: worktree off the 08-15 base commit, ROM/state
 seed, Kafka bridge, power sampler, pi + guardrails, bench row), `scripts/ollama-ctx.conf` (128k
 fits only with flash attention + q8_0 KV), `scripts/pi-ext/guardrails.ts` now in-repo.
+
+### 10. Compaction amnesia — where a model stops being a fit for the operator role
+
+With the compaction guard, the Pewter fix and the battle watchdog all on `main`, Laguna XS ran
+again (r2). It cleared Route 1 → Forest → Pewter, walked into the Gym and **engaged Brock**
+(`pre_brock.state` — the first run ever to do so), and wrote a learning that named the next real
+bug on its own (the Gym's "pilot north" fallback flagged in PR #75). Then it stalled in a new way:
+it read `agent.py` whole via pi's `read` tool (each read hits the 40 KB cap ≈ 10k tokens), the
+window filled, the guard compacted 100k → 15k every ~2 minutes, and each summary dropped what it
+had just read — so it read it again. In its last 30 tool calls: 17 reads (agent.py ×8), one relay
+call, zero edits. Alive, but not progressing.
+
+Two halves, as before. **The harness half is cheap and now fixed:** guardrails caps un-ranged
+`read` calls at `PI_GUARD_READ_LIMIT` (200 lines; the model pages with offset/limit), the same way
+it already blocks `cat agent.log`. **The model half is a fit verdict**, and it should be written
+down, not argued with:
+
+| model | fit as the operator | why |
+|---|---|---|
+| Sonnet 5 / Kimi K2.6 (cloud) | investigator | read code, fixed code, honest unresolved entries |
+| Haiku 4.5 (cloud) | driver, not investigator | fast, honest, tunes knobs; never opened the code |
+| **qwen38-27b** (local) | investigator, needs the guard | the only local code fix, validated first; slow (9.9 s/turn), runs the card at 400 W |
+| **laguna-xs** (local) | driver | Haiku's cadence and segments; honest; reached Brock; poor context discipline — whole-file reads, so it needs the read cap and forgets across compactions |
+| qwen3-coder-30b (local) | not a fit — retired | fabricated run history, no investigation |
+| glm/nemotron/qwen35b/qwen36 (local) | not a fit | went silent (thinking budget) on the quiz; not run |
+
+The honest generalisation: below ~30B active, "reads the whole file" is a habit the harness has to
+cap for the model, and "remembers across compactions" is something no local model here does. That
+is a limitation to document and design around (smaller reads, deliverables committed early, a
+learning written per obstacle *before* the next relay call), not one to keep re-testing. Where a
+model is a **driver** — Haiku, Laguna — pair it with an investigator for the code fixes; where it is
+an **investigator** — Sonnet, Qwen 3.8 — give it the budget and the guard. `qwen38-27b` on the
+fixed `main` is the next run worth the electricity.
