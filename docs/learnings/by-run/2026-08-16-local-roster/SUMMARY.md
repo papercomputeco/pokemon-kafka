@@ -207,7 +207,7 @@ model is a **driver** — Haiku, Laguna — pair it with an investigator for the
 an **investigator** — Sonnet, Qwen 3.8 — give it the budget and the guard. `qwen38-27b` on the
 fixed `main` is the next run worth the electricity.
 
-### 11. Two advisors and a gate — the operator no longer grades its own homework
+### 11. Advisors and a gate — the operator no longer grades its own homework
 
 The operator wrote its own learnings; the fabricated Brock entries and Laguna's "✅ FIXED" were the
 cost. `scripts/advisor.py` adds the missing roles after `pcc-labs/inception`: an **Investigator**
@@ -217,6 +217,13 @@ tip is the only variable; PASS needs mean lift and one model that can act on it)
 path — cites learnings, evals, benchmarks and tapes sessions or says NO PRECEDENT; exposed to the
 operator as `consult`), and **promote** (only gated proposals reach `evals/`, `docs/learnings/`,
 `docs/prompts/tips.md`).
+
+Then the split that `pcc-labs/inception` #18 made at the source: the **Investigator** extracts the tip
+and never writes the exam; a separate **Architect** (a different model) designs the eval from the tip
+alone and hardens its rubric against probe answers it writes itself. Same session, four gate runs:
+single-mind design failed twice (leaked answer; rubric ≠ own tip), split design failed once (a literal
+rubric scored the exact command as 0), split + hardened design passed — Laguna 0 → 1.00, gpt-oss
+0 → 1.00, Gemma already knew. The gate is the point; the roles are how you get a yes worth acting on.
 
 First real pass over the Laguna r2 session with Qwen 3.8 as Investigator: it did *not* re-propose the
 Gym bug — the Oracle already had it — and instead named the process failure: "declared the fix

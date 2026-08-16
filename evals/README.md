@@ -94,30 +94,44 @@ cannot clear the rubric, the rubric is wrong.
 ## Advisors (`scripts/advisor.py`) — how new cases get in
 
 Model-eval cases can also be *dreamed* from captured operator sessions instead of written by hand,
-after the shape of `pcc-labs/inception` (session → dream → gate → heal):
+after the shape of `pcc-labs/inception` (session → extract → design → gate → promote). Roles only —
+each stage says what it saw in its log line.
 
 ```
 uv run python scripts/advisor.py investigate ~/.pi/agent/sessions/<slug>/<id>.jsonl --worktree <run worktree>
+uv run python scripts/advisor.py design data/advisor/<date>/<id>.proposal.json      # (investigate chains it)
 uv run python scripts/advisor.py gate data/advisor/<date>/<id>.proposal.json --models laguna-xs-128k,gpt-oss-20b-128k
 uv run python scripts/advisor.py promote data/advisor/<date>/<id>.proposal.json
 uv run python scripts/advisor.py oracle "lanes stall on map 54 pressing up, stuck streak 2800"
 ```
 
 * **Investigator** (write path; an investigator-class model, default `qwen38-27b-128k`) reads ONE session plus
-  the run worktree's ground truth (relay reports, learnings written, code diff) and asks the Oracle what is
-  already known, then dreams a proposal: tip, learning draft, a model-eval case (prompt + rubric), optional
-  agent-eval hint. It repairs its own rubric until the rubric recognises the proposal's reference answer.
+  the run worktree's ground truth (relay reports, learnings written, code diff), asks the Oracle what is
+  already known, and dreams a proposal: tip, rationale, learning draft, heal, and a one-line `domain`. It does
+  **not** write the eval.
+* **Architect** (default `gpt-oss-20b-128k` — a *different* model on purpose) sees only the tip, rationale and
+  domain — never the session — and designs the model-eval case (prompt + rubric + anti) and an optional
+  agent-eval hint. It then repairs its rubric until the rubric recognises the tip, and **hardens** it: it writes
+  4 varied good answers and 3 plausible wrong ones and rewrites the rubric until all good score ≥ 0.9 and all
+  wrong < 0.5. Why the split and the hardening (both observed 2026-08-16): a shared author telegraphs the answer
+  (control scored without the tip) or writes a check only its own phrasing passes; and even a separate Architect's
+  first rubric only knew four literal phrases — treatment answers containing the exact command scored 0 and a
+  control answer scored 1 on a phrase match. Logged as `[architect] hardened against 4 good / 3 wrong probe
+  answers in N round(s): ok|weak`.
 * **Gate**: the case is run control (no tip) vs treatment (tip in the system prompt) on fresh models; the tip is
   the only variable. PASS = mean lift ≥ 0.2 **and** at least one model reaches ≥ 0.6 with the tip. Results
   append to `evals/results/advisor-<date>.md`, FAIL rows included — a gate that can say no is what makes its
-  yes worth acting on. First real run (2026-08-16, Laguna r2 session): the Investigator skipped the Gym bug
-  the Oracle already knew and caught the *process* failure ("declared fixed after tests+lint; relay still
-  None"); the gate rejected two self-inconsistent rubrics before passing the repaired one — Laguna 0.00 → 1.00.
+  yes worth acting on. History for the Laguna r2 session: single-mind design failed twice (leaked answer; rubric
+  ≠ own tip), split design failed once (literal rubric), split + hardened design **PASS** — laguna-xs 0.00 → 1.00,
+  gpt-oss-20b 0.00 → 1.00, gemma4-31b 1.00 → 1.00 (already knew), mean lift 0.67.
 * **Promote** writes `evals/model-cases/<name>.json`, `docs/learnings/<name>.md` (marked `source: advisor`)
-  and appends the tip to `docs/prompts/tips.md`, which `scripts/local_relay_run.sh` appends to the mission.
-  Only gated proposals can be promoted (`--force` to override, don't).
+  and appends the tip to `docs/prompts/tips.md`. Only gated proposals can be promoted (`--force` to override,
+  don't). Tips and the Oracle are **opt-in** on runs (`ASSIST=tips|consult|both`; default `none`) so unassisted
+  rows keep measuring the model alone — see `benchmarks/README.md` § Assisted vs unassisted rows.
 * **Oracle** (read path) is a knowledge bearer over learnings, eval cases/results, benchmarks and past tapes
   sessions; it cites (`path:line`, session id) or says `NO PRECEDENT`. The operator can call it at run time
-  through the `consult` tool in `scripts/pi-ext/guardrails.ts` — **opt-in** (`PI_GUARD_CONSULT=1`, or
-  `ASSIST=consult|both` on the launcher). Tips are opt-in too (`ASSIST=tips|both`). Unassisted runs stay the
-  benchmark baseline; see `benchmarks/README.md` § Assisted vs unassisted rows.
+  through the `consult` tool in `scripts/pi-ext/guardrails.ts` (`PI_GUARD_CONSULT=1`).
+* **GPU lock**: `scripts/local_relay_run.sh` writes `data/local_runs/GPU_BUSY` for the run's lifetime and
+  `advisor.py` / `run_model_evals.py` refuse to load models while it exists (`--force-gpu` to override, don't).
+  Loading a second model on the 32 GB card evicts the relay's model mid-stream and kills the run — an invalid
+  row that looks like the model quitting (qwen38-27b r3, 2026-08-16, self-inflicted).

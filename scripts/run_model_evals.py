@@ -40,6 +40,19 @@ DEFAULT_CASES = WORKSPACE / "evals" / "model-cases"
 DEFAULT_RESULTS = WORKSPACE / "evals" / "results"
 DEFAULT_OUT = WORKSPACE / "data" / "evals" / "model"
 OLLAMA_URL = os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")
+GPU_LOCK = WORKSPACE / "data" / "local_runs" / "GPU_BUSY"
+
+
+def check_gpu_free(force: bool = False) -> None:
+    """Refuse to load models while scripts/local_relay_run.sh owns the card (see the lock's contents).
+    Loading a second model evicts the relay's model mid-stream and kills the run — an invalid row that
+    looks like the model quitting. Override with --force-gpu / ADVISOR_FORCE_GPU=1 only if you know."""
+    if force or os.environ.get("ADVISOR_FORCE_GPU") == "1" or not GPU_LOCK.exists():
+        return
+    raise SystemExit(
+        f"GPU busy — a relay run owns the card ({GPU_LOCK.read_text().strip()}); wait for it or --force-gpu"
+    )
+
 
 SYSTEM = (
     "You are the operator agent for a Pokemon Red speedrun harness: a Python codebase that drives "
@@ -191,7 +204,9 @@ def main(argv=None) -> int:
     p.add_argument("--out-dir", default=str(DEFAULT_OUT), help="where full answers are saved")
     p.add_argument("--results-dir", default=str(DEFAULT_RESULTS))
     p.add_argument("--show", action="store_true", help="print each answer as it arrives")
+    p.add_argument("--force-gpu", action="store_true", help="run even if a relay run owns the GPU")
     args = p.parse_args(argv)
+    check_gpu_free(args.force_gpu)
 
     cases = load_cases(Path(args.cases), only=args.case)
     if not cases:

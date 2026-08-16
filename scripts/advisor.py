@@ -6,9 +6,14 @@ and unverified, which is how fabricated Brock entries and "FIXED" claims without
 got written down (see ``docs/learnings/by-run/2026-08-16-local-roster/SUMMARY.md``). This module adds
 the missing roles, after the shape of ``pcc-labs/inception`` (session → dream → gate → heal):
 
-* **Investigator** (write path) — reads ONE captured pi session and dreams a *proposal*: a decisive
-  tip, a learning draft, a model-eval case (prompt + rubric, i.e. inception's benchmark_task + check),
-  optionally an agent-eval case. It asks the Oracle first so it does not re-derive what is known.
+* **Investigator** (write path, the Extractor) — reads ONE captured pi session plus its worktree's
+  ground truth and dreams a *proposal*: a decisive tip, a learning draft, a heal, a one-line domain.
+  It asks the Oracle first so it does not re-derive what is known. It does NOT write the eval.
+* **Architect** — given only the tip, rationale and domain (never the session), designs the eval that
+  would prove it: a model-eval case (prompt + rubric = inception's benchmark_task + check) and an
+  optional agent-eval hint. A different model by default: the mind that already knows the answer
+  never writes the exam (a shared author telegraphs the answer or writes a check only its own
+  phrasing passes — both happened on the first pass, see evals/README.md).
 * **Gate** — the proposal's eval is run on fresh models control (no tip) vs treatment (tip injected
   into the system prompt); the tip is the only variable. It clears the gate only if it lifts the
   score. A rubric that cannot recognise its own reference answer is rejected first.
@@ -19,6 +24,7 @@ the missing roles, after the shape of ``pcc-labs/inception`` (session → dream 
 * **Promote** — only gated proposals are written into the repo (eval case, learning, tip).
 
     uv run python scripts/advisor.py investigate ~/.pi/agent/sessions/<slug>/<id>.jsonl [--worktree DIR]
+    uv run python scripts/advisor.py design data/advisor/<date>/<id>.proposal.json   # (investigate chains it)
     uv run python scripts/advisor.py gate data/advisor/<date>/<id>.proposal.json --models a-128k,b-128k
     uv run python scripts/advisor.py promote data/advisor/<date>/<id>.proposal.json
     uv run python scripts/advisor.py oracle "why do lanes stall in Pewter?" [--json] [--no-tapes]
@@ -47,6 +53,8 @@ WORKSPACE = SCRIPT_DIR.parent
 DEFAULT_OUT = WORKSPACE / "data" / "advisor"
 TIPS_FILE = WORKSPACE / "docs" / "prompts" / "tips.md"
 DEFAULT_MODEL = os.environ.get("ADVISOR_MODEL", "qwen38-27b-128k")
+# The Architect defaults to a DIFFERENT model than the Investigator on purpose.
+DEFAULT_ARCHITECT_MODEL = os.environ.get("ADVISOR_ARCHITECT_MODEL", "gpt-oss-20b-128k")
 
 # --------------------------------------------------------------------------- session digest
 
@@ -310,13 +318,14 @@ def format_oracle(res: dict) -> str:
 # --------------------------------------------------------------------------- investigator (write path)
 
 INVESTIGATOR_SYSTEM = (
-    "You are the Investigator for a Pokemon Red speedrun harness (a Python repo driving PyBoy via scripts/agent.py "
-    "and scripts/relay.py; the operator is an LLM that runs relay segments, reads results, changes code or genomes, "
-    "and writes docs/learnings/). You are given the digest of ONE operator session plus ground truth from its "
-    "worktree, and what the Oracle already knows. Reflect like an engineer reviewing someone else's run. Produce "
-    "exactly ONE proposal: the single most decisive thing a future operator should know that is NOT already in the "
-    "Oracle's precedents, plus the eval that would prove it. Be concrete and honest: if the session claims success "
-    "the ground truth does not show, say so in the learning. Return ONLY a JSON object with this exact shape:\n"
+    "You are the Investigator (the Extractor) for a Pokemon Red speedrun harness (a Python repo driving PyBoy via "
+    "scripts/agent.py and scripts/relay.py; the operator is an LLM that runs relay segments, reads results, changes "
+    "code or genomes, and writes docs/learnings/). You are given the digest of ONE operator session plus ground "
+    "truth from its worktree, and what the Oracle already knows. Reflect like an engineer reviewing someone else's "
+    "run. Produce exactly ONE proposal: the single most decisive thing a future operator should know that is NOT "
+    "already in the Oracle's precedents. Be concrete and honest: if the session claims success the ground truth "
+    "does not show, say so in the learning. You do NOT design the eval that will judge the tip — a separate "
+    "Architect does that from your tip alone. Return ONLY a JSON object with this exact shape:\n"
     "{\n"
     '  "tip": "<one imperative sentence for a future operator>",\n'
     '  "rationale": "<why, 1-2 sentences>",\n'
@@ -324,18 +333,31 @@ INVESTIGATOR_SYSTEM = (
     '  "learning": "<obstacle-format text: obstacle/category/symptom/failed/winner/'
     'why it worked/generalizes/artifacts>",\n'
     '  "heal": "<the concrete code/data/harness change, or null>",\n'
-    '  "model_eval_case": {"name": "<kebab-case>", "category": "<...>", "prompt": "<standalone question for a fresh '
-    'model that REQUIRES the tip; do not reveal the tip>", "rubric": [{"id": "...", "weight": 3, "any": '
+    '  "domain": "<one neutral sentence: what the operator was doing/working on — what it is, not what went wrong; '
+    'this is all the Architect will be told besides the tip and rationale>"\n'
+    "}"
+)
+
+ARCHITECT_SYSTEM = (
+    "You are the Architect for a Pokemon Red speedrun harness (a Python repo driving PyBoy via scripts/agent.py and "
+    "scripts/relay.py; the operator is an LLM that runs relay segments, reads results, changes code or genomes, and "
+    "writes docs/learnings/). The Investigator has read a session and produced ONE tip. You have NOT seen that "
+    "session and must not ask for it. Design the eval that tests whether the tip changes behaviour: a fresh model "
+    "will face it twice — without the tip (control) and with it (treatment) — and the tip is the only variable. "
+    "Return ONLY a JSON object with this exact shape:\n"
+    "{\n"
+    '  "model_eval_case": {"name": "<kebab-case>", "category": "<...>", "prompt": "<standalone situation for a fresh '
+    'operator model; must not reveal or hint at the tip>", "rubric": [{"id": "...", "weight": 3, "any": '
     '["<regex>", ...]}], "anti": [{"id": "...", "weight": 2, "any": ["<regex>", ...]}]},\n'
     '  "agent_eval_case": null | {"seed_state_hint": "<which savestate>", "stop_on_map": <int>, "max_turns": <int>, '
     '"pass": {"final_map_id": <int>}}\n'
     "}\n"
-    "Rules for the eval, because a gate will run it control-vs-treatment: (1) the prompt must NOT telegraph the "
-    "answer — describe the situation neutrally as the operator would see it (files, results, what was run) and ask "
-    "'what do you do next?' or 'what is wrong?'; a capable model WITHOUT the tip should plausibly answer wrongly or "
-    "generically. (2) Rubric items are short paraphrase-tolerant regexes: single keywords or 2-4 word phrases, 4-8 "
-    "alternatives per item, NEVER chained '.*' wildcards; anti items are the wrong answers the session itself made. "
-    "(3) Prefer one strong rubric item for the decisive fact over three weak phrasing items."
+    "Rules: (1) the prompt must NOT telegraph the answer — describe the situation neutrally as the operator would "
+    "see it (files, results, what was run) and ask 'what do you do next?' or 'what is wrong?'; a capable model "
+    "WITHOUT the tip should plausibly answer wrongly or generically. (2) Rubric items are short paraphrase-tolerant "
+    "regexes: single keywords or 2-4 word phrases, 4-8 alternatives per item, NEVER chained '.*' wildcards; anti "
+    "items are the plausible wrong answers. (3) Prefer one strong rubric item for the decisive fact over three weak "
+    "phrasing items. (4) Every rubric item must be satisfied by the tip/rationale text you were given."
 )
 
 
@@ -388,6 +410,72 @@ def repair_rubric(proposal: dict, *, model: str, max_rounds: int = 2) -> dict:
     return proposal
 
 
+HARDEN_SYSTEM = (
+    "You are the Architect QA-ing your own eval. Given a tip and an eval case (prompt + rubric + anti), write "
+    "answers a fresh operator model might give to the prompt: 4 GOOD answers that clearly act on the tip, each in "
+    "a genuinely different phrasing (one terse command line, one prose paragraph, one numbered plan, one that "
+    "mentions the concrete tool/file names), and 3 WRONG answers that are plausible but do not act on the tip. "
+    'Return ONLY JSON: {"good": ["...", "...", "...", "..."], "wrong": ["...", "...", "..."]}'
+)
+
+
+def harden_rubric(proposal: dict, *, model: str, max_rounds: int = 2) -> dict:
+    """The rubric must recognise the tip in any reasonable phrasing and reject plausible wrong answers —
+    otherwise the gate measures phrasing luck (2026-08-16: treatment answers with the exact command
+    scored 0 because the rubric only knew four literal phrases; a control answer scored 1 on a phrase
+    match). The Architect knows the tip, so it may write the probe answers; the check is deterministic."""
+    case = proposal["model_eval_case"]
+    brief = (
+        f"TIP: {proposal.get('tip', '')}\nRATIONALE: {proposal.get('rationale', '')}\n\nEVAL CASE:\n{json.dumps(case)}"
+    )
+    got = rme.ask_ollama(model, brief, ctx=32768, num_predict=6000, seed=5, system=HARDEN_SYSTEM)
+    if not got["answer"].strip():
+        got = rme.ask_ollama(model, brief + "\n\nJSON only.", ctx=32768, num_predict=8000, seed=9, system=HARDEN_SYSTEM)
+    try:
+        probes = _extract_json(got["answer"])
+    except (ValueError, json.JSONDecodeError):
+        proposal.setdefault("_meta", {})["harden"] = {"status": "no probes"}
+        return proposal
+    good = [g for g in probes.get("good", []) if isinstance(g, str) and g.strip()]
+    wrong = [w for w in probes.get("wrong", []) if isinstance(w, str) and w.strip()]
+    rounds = 0
+    while rounds < max_rounds:
+        gs = [rme.score_answer(case, g)["score"] for g in good]
+        ws = [rme.score_answer(case, w)["score"] for w in wrong]
+        missed = [g for g, sc in zip(good, gs) if sc < 0.9]
+        leaked = [w for w, sc in zip(wrong, ws) if sc >= 0.5]
+        if not missed and not leaked:
+            break
+        rounds += 1
+        prompt = (
+            f"REFERENCE ANSWER:\n{reference_text(proposal)}\n\nCURRENT RUBRIC:\n{json.dumps(case.get('rubric', []))}\n"
+            f"CURRENT ANTI:\n{json.dumps(case.get('anti', []))}\n\n"
+            f"GOOD ANSWERS THE RUBRIC MUST ACCEPT (score >= 0.9) BUT CURRENTLY MISSES:\n{json.dumps(missed)}\n"
+            f"WRONG ANSWERS THE RUBRIC MUST REJECT (score < 0.5) BUT CURRENTLY ACCEPTS:\n{json.dumps(leaked)}\n"
+            "Rewrite the rubric with keyword-level regexes (tool names, flags, file names, 1-3 word phrases; "
+            "many alternatives) so all good answers score and the wrong ones do not."
+        )
+        fix_got = rme.ask_ollama(model, prompt, ctx=32768, num_predict=6000, seed=7 + rounds, system=REPAIR_SYSTEM)
+        try:
+            fix = _extract_json(fix_got["answer"])
+        except (ValueError, json.JSONDecodeError):
+            break
+        if isinstance(fix.get("rubric"), list) and fix["rubric"]:
+            case["rubric"] = fix["rubric"]
+        if isinstance(fix.get("anti"), list):
+            case["anti"] = fix["anti"]
+    gs = [rme.score_answer(case, g)["score"] for g in good]
+    ws = [rme.score_answer(case, w)["score"] for w in wrong]
+    proposal.setdefault("_meta", {})["harden"] = {
+        "status": "ok" if all(x >= 0.9 for x in gs) and all(x < 0.5 for x in ws) else "weak",
+        "rounds": rounds,
+        "good_scores": gs,
+        "wrong_scores": ws,
+        "probes": {"good": good, "wrong": wrong},
+    }
+    return proposal
+
+
 def _extract_json(text: str) -> dict:
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
@@ -395,12 +483,18 @@ def _extract_json(text: str) -> dict:
     return json.loads(m.group(0))
 
 
-REQUIRED = ("tip", "rationale", "learning", "model_eval_case")
+REQUIRED = ("tip", "rationale", "learning", "domain")
 
 
 def validate_proposal(p: dict) -> list[str]:
-    problems = [f"missing {k}" for k in REQUIRED if not p.get(k)]
-    case = p.get("model_eval_case") or {}
+    """Extractor output: tip, rationale, learning, domain. The eval is validated by validate_case()."""
+    return [f"missing {k}" for k in REQUIRED if not p.get(k)]
+
+
+def validate_case(case: dict | None) -> list[str]:
+    """Architect output: a model-eval case whose regexes compile."""
+    case = case or {}
+    problems = []
     if not case.get("name") or not case.get("prompt") or not case.get("rubric"):
         problems.append("model_eval_case needs name, prompt, rubric")
     for item in case.get("rubric", []) + case.get("anti", []):
@@ -452,13 +546,8 @@ def investigate(
     prompt = f"ALREADY KNOWN (Oracle precedents — do not re-propose these):\n{known_txt}\n\n{text}"
     got = rme.ask_ollama(model, prompt, ctx=131072, num_predict=4000, seed=7, system=INVESTIGATOR_SYSTEM)
     proposal = _extract_json(got["answer"])
+    proposal.pop("model_eval_case", None)  # not the Investigator's job, even if the model volunteers one
     problems = validate_proposal(proposal)
-    if not problems:
-        proposal = repair_rubric(proposal, model=model)
-        problems = validate_proposal(proposal)
-    repairs = proposal.get("_meta", {}).get("rubric_repairs", 0)
-    if repairs:
-        print(f"[investigator] rubric repaired {repairs}x so it recognises its own reference answer", flush=True)
     proposal["_meta"] = {
         "session": str(session),
         "worktree": str(worktree) if worktree else None,
@@ -466,16 +555,69 @@ def investigate(
         "digest": {k: digest[k] for k in ("model", "turns", "tool_calls", "stop_reason")},
         "precedents": [c["path"] for c in known["chunks"]],
         "problems": problems,
-        "rubric_repairs": repairs,
-        "reference_score": rme.score_answer(proposal["model_eval_case"], reference_text(proposal))["score"]
-        if not problems
-        else None,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{session.stem}.proposal.json"
     path.write_text(json.dumps(proposal, indent=2) + "\n")
     return path
+
+
+def design(proposal_path: Path, *, model: str) -> dict:
+    """The Architect: design the eval from the tip, rationale and domain — never the session — then
+    repair its rubric until it recognises the proposal's reference answer. Writes back in place."""
+    p = json.loads(proposal_path.read_text())
+    brief = f"TIP: {p.get('tip', '')}\nRATIONALE: {p.get('rationale', '')}\nDOMAIN: {p.get('domain', '')}"
+    print(
+        f"[architect] designing the eval with {model} — sees the tip, rationale and domain; not the session", flush=True
+    )
+    got = rme.ask_ollama(model, brief, ctx=32768, num_predict=6000, seed=7, system=ARCHITECT_SYSTEM)
+    if not got["answer"].strip():
+        got = rme.ask_ollama(
+            model,
+            brief + "\n\nAnswer with the JSON only.",
+            ctx=32768,
+            num_predict=8000,
+            seed=11,
+            system=ARCHITECT_SYSTEM,
+        )
+    designed = _extract_json(got["answer"])
+    p["model_eval_case"] = designed.get("model_eval_case")
+    p["agent_eval_case"] = designed.get("agent_eval_case")
+    problems = validate_case(p["model_eval_case"])
+    if not problems:
+        p = repair_rubric(p, model=model)
+        p = harden_rubric(p, model=model)
+        h = p["_meta"].get("harden", {})
+        print(
+            f"[architect] hardened against {len(h.get('probes', {}).get('good', []))} good / "
+            f"{len(h.get('probes', {}).get('wrong', []))} wrong probe answers in {h.get('rounds', 0)} round(s): "
+            f"{h.get('status')}",
+            flush=True,
+        )
+    repairs = p.get("_meta", {}).get("rubric_repairs", 0)
+    if repairs:
+        print(f"[architect] rubric repaired {repairs}x so it recognises the tip", flush=True)
+    ref = rme.score_answer(p["model_eval_case"], reference_text(p))["score"] if not problems else None
+    p.setdefault("_meta", {})["architect"] = {
+        "model": model,
+        "saw_session": False,
+        "designed_from": "tip+rationale+domain",
+        "problems": problems,
+        "rubric_repairs": repairs,
+        "reference_score": ref,
+        "harden": p["_meta"].get("harden"),
+    }
+    proposal_path.write_text(json.dumps(p, indent=2) + "\n")
+    if problems:
+        print(f"[architect] problems: {problems}", flush=True)
+    else:
+        print(
+            f"[architect] eval case {p['model_eval_case'].get('name')} — reference scores {ref:.2f} "
+            "(goes to the gate next)",
+            flush=True,
+        )
+    return p
 
 
 # --------------------------------------------------------------------------- gate
@@ -491,7 +633,9 @@ def gate(
     results_dir: Path | None = None,
 ) -> dict:
     p = json.loads(proposal_path.read_text())
-    case = p["model_eval_case"]
+    case = p.get("model_eval_case")
+    if not case:
+        raise SystemExit("no model_eval_case: run `design` first (investigate chains it unless --no-design)")
     ref = reference_text(p)
     ref_score = rme.score_answer(case, ref)["score"]
     result = {
@@ -599,13 +743,19 @@ def promote(proposal_path: Path, *, workspace: Path | None = None, force: bool =
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--force-gpu", action="store_true", help="run even if a relay run owns the GPU (do not)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("investigate")
     s.add_argument("session")
     s.add_argument("--worktree", default=None)
-    s.add_argument("--model", default=DEFAULT_MODEL)
+    s.add_argument("--model", default=DEFAULT_MODEL, help="the Investigator (extracts the tip)")
+    s.add_argument("--architect-model", default=DEFAULT_ARCHITECT_MODEL, help="the Architect (designs the eval)")
+    s.add_argument("--no-design", action="store_true", help="stop after the tip; run `design` separately")
     s.add_argument("--out-dir", default=str(DEFAULT_OUT / datetime.now(timezone.utc).strftime("%Y-%m-%d")))
     s.add_argument("--no-tapes", action="store_true")
+    s = sub.add_parser("design")
+    s.add_argument("proposal")
+    s.add_argument("--model", default=DEFAULT_ARCHITECT_MODEL)
     s = sub.add_parser("gate")
     s.add_argument("proposal")
     s.add_argument("--models", default=None, help="comma-separated; default: every local -128k variant")
@@ -622,6 +772,8 @@ def main(argv=None) -> int:
     s.add_argument("--model", default=None, help="optional model to synthesise a cited answer")
     s.add_argument("-k", type=int, default=6)
     args = ap.parse_args(argv)
+    if args.cmd in ("investigate", "design", "gate") or (args.cmd == "oracle" and args.model):
+        rme.check_gpu_free(getattr(args, "force_gpu", False))
 
     if args.cmd == "investigate":
         path = investigate(
@@ -634,10 +786,15 @@ def main(argv=None) -> int:
         p = json.loads(path.read_text())
         print(f"[investigator] proposal → {path}")
         print(f"[investigator] tip: {p.get('tip')}")
-        print(f"[investigator] eval case: {p.get('model_eval_case', {}).get('name')} (goes to the gate next)")
         if p["_meta"]["problems"]:
             print(f"[investigator] problems: {p['_meta']['problems']}")
+            return 1
+        if not args.no_design:
+            design(path, model=args.architect_model)
         return 0
+    if args.cmd == "design":
+        p = design(Path(args.proposal), model=args.model)
+        return 1 if p["_meta"]["architect"]["problems"] else 0
     if args.cmd == "gate":
         models = args.models.split(",") if args.models else rme.local_variants(131072)
         if not models:

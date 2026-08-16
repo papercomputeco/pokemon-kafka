@@ -5,6 +5,13 @@ import advisor as adv
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_real_gpu_lock(tmp_path, monkeypatch):
+    """Tests must not see a real relay run's data/local_runs/GPU_BUSY (or force past it)."""
+    monkeypatch.setattr(adv.rme, "GPU_LOCK", tmp_path / "GPU_BUSY")
+    monkeypatch.delenv("ADVISOR_FORCE_GPU", raising=False)
+
+
 def _session(tmp_path, n_turns=3, tool_calls=True, stop="stop", model="laguna-xs-128k"):
     lines = [json.dumps({"type": "model_change", "modelId": model})]
     for i in range(n_turns):
@@ -188,6 +195,10 @@ def test_tapes_precedents_timeout(monkeypatch):
     assert adv.tapes_precedents("q") == []
 
 
+def _r(answer):
+    return {"answer": answer, "thinking": "", "wall_s": 1, "out_tok": 1, "out_tok_s": 1.0}
+
+
 # ---------------------------------------------------------------- investigator
 
 
@@ -200,6 +211,7 @@ GOOD_PROPOSAL = {
         "winner: remove PEWTER_GYM from GO_NORTH_PILOT_MAPS and route to Brock at the north end"
     ),
     "heal": "remove PEWTER_GYM from GO_NORTH_PILOT_MAPS",
+    "domain": "an operator running relay segments of a Pokemon Red speedrun harness",
     "model_eval_case": {
         "name": "gym-pilot-north",
         "category": "navigation",
@@ -214,17 +226,14 @@ GOOD_PROPOSAL = {
 }
 
 
-def test_validate_proposal_flags_problems():
+def test_validate_proposal_and_case_flag_problems():
     assert adv.validate_proposal(GOOD_PROPOSAL) == []
-    bad = dict(
-        GOOD_PROPOSAL, tip="", model_eval_case={"name": "x", "prompt": "", "rubric": [{"id": "r", "any": ["("]}]}
-    )
-    probs = adv.validate_proposal(bad)
-    assert (
-        any("missing tip" in p for p in probs)
-        and any("needs name" in p for p in probs)
-        and any("bad regex" in p for p in probs)
-    )
+    assert adv.validate_case(GOOD_PROPOSAL["model_eval_case"]) == []
+    assert any("missing tip" in p for p in adv.validate_proposal(dict(GOOD_PROPOSAL, tip="")))
+    assert any("missing domain" in p for p in adv.validate_proposal(dict(GOOD_PROPOSAL, domain="")))
+    probs = adv.validate_case({"name": "x", "prompt": "", "rubric": [{"id": "r", "any": ["("]}]})
+    assert any("needs name" in p for p in probs) and any("bad regex" in p for p in probs)
+    assert adv.validate_case(None)
 
 
 def test_extract_json_handles_prose_and_rejects_none():
@@ -363,8 +372,30 @@ def test_cli_investigate_gate_promote_oracle(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(adv.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": ""})())
 
     def fake(model, prompt, **kw):
+        if "You are the Architect" in kw.get("system", ""):
+            return {
+                "answer": json.dumps({"model_eval_case": GOOD_PROPOSAL["model_eval_case"], "agent_eval_case": None}),
+                "thinking": "",
+                "wall_s": 1,
+                "out_tok": 1,
+                "out_tok_s": 1.0,
+            }
         if "Investigator" in kw.get("system", ""):
-            return {"answer": json.dumps(GOOD_PROPOSAL), "thinking": "", "wall_s": 1, "out_tok": 1, "out_tok_s": 1.0}
+            return {
+                "answer": json.dumps({k: v for k, v in GOOD_PROPOSAL.items() if k != "model_eval_case"}),
+                "thinking": "",
+                "wall_s": 1,
+                "out_tok": 1,
+                "out_tok_s": 1.0,
+            }
+        if "Architect" in kw.get("system", ""):
+            return {
+                "answer": json.dumps({"model_eval_case": GOOD_PROPOSAL["model_eval_case"], "agent_eval_case": None}),
+                "thinking": "",
+                "wall_s": 1,
+                "out_tok": 1,
+                "out_tok_s": 1.0,
+            }
         treated = "prior session" in kw.get("system", "")
         return {
             "answer": "GO_NORTH_PILOT_MAPS, remove PEWTER_GYM" if treated else "no idea",
@@ -380,6 +411,8 @@ def test_cli_investigate_gate_promote_oracle(tmp_path, monkeypatch, capsys):
     prop = out_dir / f"{sess.stem}.proposal.json"
     out = capsys.readouterr().out
     assert prop.exists() and "[investigator] tip:" in out and "[oracle]" in out and "ALREADY KNOWN" in out
+    assert "[architect] designing the eval" in out and "goes to the gate next" in out
+    assert json.loads(prop.read_text())["_meta"]["architect"]["saw_session"] is False
     assert adv.main(["gate", str(prop), "--models", "a-128k", "--results-dir", str(tmp_path / "r")]) == 0
     out = capsys.readouterr().out
     assert "PASS" in out and "the tip is the only variable" in out
@@ -403,7 +436,7 @@ def test_cli_investigate_reports_problems(tmp_path, monkeypatch, capsys):
         "ask_ollama",
         lambda *a, **k: {"answer": json.dumps(bad), "thinking": "", "wall_s": 1, "out_tok": 1, "out_tok_s": 1.0},
     )
-    assert adv.main(["investigate", str(sess), "--out-dir", str(tmp_path / "o"), "--no-tapes"]) == 0
+    assert adv.main(["investigate", str(sess), "--out-dir", str(tmp_path / "o"), "--no-tapes"]) == 1
     assert "problems" in capsys.readouterr().out
 
 
@@ -488,28 +521,61 @@ def test_repair_rubric_noop_when_consistent_and_stops_on_bad_reply(monkeypatch):
     assert calls == [1] and "rubric_repairs" not in bad.get("_meta", {})
 
 
-def test_investigate_records_reference_score_and_repairs(tmp_path, monkeypatch):
-    ws = _corpus(tmp_path)
-    sess = _session(tmp_path, n_turns=2)
-    monkeypatch.setattr(adv.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": ""})())
-    bad = json.loads(json.dumps(GOOD_PROPOSAL))
-    bad["model_eval_case"]["rubric"] = [{"id": "pilot", "weight": 3, "any": ["zzqx never"]}]
+def test_design_writes_case_from_tip_only_and_repairs(tmp_path, monkeypatch):
+    p = _write_proposal(tmp_path, {k: v for k, v in GOOD_PROPOSAL.items() if k != "model_eval_case"})
+    seen = {}
+    bad_case = json.loads(json.dumps(GOOD_PROPOSAL["model_eval_case"]))
+    bad_case["rubric"] = [{"id": "pilot", "weight": 3, "any": ["zzqx never"]}]
 
     def fake(model, prompt, **kw):
         if "REFERENCE ANSWER" in prompt:
-            return {
-                "answer": json.dumps({"rubric": GOOD_PROPOSAL["model_eval_case"]["rubric"], "anti": []}),
-                "thinking": "",
-                "wall_s": 1,
-                "out_tok": 1,
-                "out_tok_s": 1.0,
-            }
-        return {"answer": json.dumps(bad), "thinking": "", "wall_s": 1, "out_tok": 1, "out_tok_s": 1.0}
+            return _r(json.dumps({"rubric": GOOD_PROPOSAL["model_eval_case"]["rubric"], "anti": []}))
+        if "QA-ing" in kw.get("system", ""):
+            return _r(
+                json.dumps(
+                    {"good": ["remove PEWTER_GYM from GO_NORTH_PILOT_MAPS, it pilots north"], "wrong": ["reboot"]}
+                )
+            )
+        seen["prompt"] = prompt
+        seen["system"] = kw["system"]
+        return _r(json.dumps({"model_eval_case": bad_case, "agent_eval_case": None}))
 
     monkeypatch.setattr(adv.rme, "ask_ollama", fake)
-    out = adv.investigate(sess, worktree=None, model="m", out_dir=tmp_path / "o", workspace=ws, use_tapes=False)
-    meta = json.loads(out.read_text())["_meta"]
-    assert meta["rubric_repairs"] == 1 and meta["reference_score"] >= 0.9
+    out = adv.design(p, model="gpt-oss-20b-128k")
+    assert "TIP:" in seen["prompt"] and "DOMAIN:" in seen["prompt"] and "Architect" in seen["system"]
+    assert "obstacle: gym-pilot-north" not in seen["prompt"]  # the learning/session narrative is not shown
+    a = out["_meta"]["architect"]
+    assert (
+        a["saw_session"] is False and a["rubric_repairs"] == 1 and a["reference_score"] >= 0.9 and a["problems"] == []
+    )
+    assert json.loads(p.read_text())["model_eval_case"]["name"] == "gym-pilot-north"
+
+
+def test_design_retries_thinking_only_and_reports_problems(tmp_path, monkeypatch):
+    p = _write_proposal(tmp_path, {k: v for k, v in GOOD_PROPOSAL.items() if k != "model_eval_case"})
+    calls = []
+
+    def fake(model, prompt, **kw):
+        calls.append(kw["num_predict"])
+        if len(calls) == 1:
+            return {"answer": "", "thinking": "...", "wall_s": 1, "out_tok": 1, "out_tok_s": 1.0}
+        return {
+            "answer": json.dumps({"model_eval_case": {"name": "x", "prompt": "", "rubric": []}}),
+            "thinking": "",
+            "wall_s": 1,
+            "out_tok": 1,
+            "out_tok_s": 1.0,
+        }
+
+    monkeypatch.setattr(adv.rme, "ask_ollama", fake)
+    out = adv.design(p, model="m")
+    assert calls[:2] == [6000, 8000] and out["_meta"]["architect"]["problems"]
+
+
+def test_gate_requires_a_designed_case(tmp_path):
+    p = _write_proposal(tmp_path, {k: v for k, v in GOOD_PROPOSAL.items() if k != "model_eval_case"})
+    with pytest.raises(SystemExit, match="run `design` first"):
+        adv.gate(p, models=["a"])
 
 
 def test_repair_rubric_retries_when_reply_is_thinking_only(monkeypatch):
@@ -532,3 +598,102 @@ def test_repair_rubric_retries_when_reply_is_thinking_only(monkeypatch):
     monkeypatch.setattr(adv.rme, "ask_ollama", fake)
     fixed = adv.repair_rubric(bad, model="m")
     assert calls == [6000, 8000] and fixed["_meta"]["rubric_repairs"] == 1
+
+
+def test_cli_design_and_no_design(tmp_path, monkeypatch, capsys):
+    ws = _corpus(tmp_path)
+    monkeypatch.setattr(adv, "WORKSPACE", ws)
+    sess = _session(tmp_path, n_turns=1)
+    monkeypatch.setattr(adv.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": ""})())
+
+    def fake(model, prompt, **kw):
+        if "You are the Architect" in kw.get("system", ""):
+            return {
+                "answer": json.dumps({"model_eval_case": GOOD_PROPOSAL["model_eval_case"], "agent_eval_case": None}),
+                "thinking": "",
+                "wall_s": 1,
+                "out_tok": 1,
+                "out_tok_s": 1.0,
+            }
+        return {
+            "answer": json.dumps({k: v for k, v in GOOD_PROPOSAL.items() if k != "model_eval_case"}),
+            "thinking": "",
+            "wall_s": 1,
+            "out_tok": 1,
+            "out_tok_s": 1.0,
+        }
+
+    monkeypatch.setattr(adv.rme, "ask_ollama", fake)
+    out_dir = tmp_path / "adv"
+    assert adv.main(["investigate", str(sess), "--out-dir", str(out_dir), "--no-tapes", "--no-design"]) == 0
+    prop = out_dir / f"{sess.stem}.proposal.json"
+    assert "model_eval_case" not in json.loads(prop.read_text()) and "[architect]" not in capsys.readouterr().out
+    assert adv.main(["design", str(prop), "--model", "gpt-oss-20b-128k"]) == 0
+    assert json.loads(prop.read_text())["_meta"]["architect"]["model"] == "gpt-oss-20b-128k"
+    assert "[architect]" in capsys.readouterr().out
+
+
+def test_cli_model_commands_respect_gpu_lock(tmp_path, monkeypatch):
+    lock = tmp_path / "GPU_BUSY"
+    lock.write_text("qwen38-27b-r3")
+    monkeypatch.setattr(adv.rme, "GPU_LOCK", lock)
+    monkeypatch.delenv("ADVISOR_FORCE_GPU", raising=False)
+    p = _write_proposal(tmp_path)
+    with pytest.raises(SystemExit, match="GPU busy"):
+        adv.main(["gate", str(p), "--models", "a"])
+    # the oracle without a model does not touch the GPU
+    assert adv.main(["oracle", "zzqx", "--no-tapes"]) == 0
+
+
+def test_harden_rubric_rewrites_until_probes_pass(monkeypatch):
+    prop = json.loads(json.dumps(GOOD_PROPOSAL))
+    prop["model_eval_case"]["rubric"] = [{"id": "pilot", "weight": 3, "any": ["pilot north"]}]
+    calls = []
+
+    def fake(model, prompt, **kw):
+        calls.append(kw["system"][:20])
+        if "QA-ing" in kw["system"]:
+            return _r(
+                json.dumps(
+                    {
+                        "good": [
+                            "It pilots north — remove PEWTER_GYM from GO_NORTH_PILOT_MAPS",
+                            "run cross_step fix: GO_NORTH_PILOT_MAPS",
+                        ],
+                        "wrong": ["increase stuck_threshold", "reboot the emulator"],
+                    }
+                )
+            )
+        # repair reply: keyword-level rubric that accepts both good answers
+        return _r(
+            json.dumps(
+                {
+                    "rubric": [
+                        {"id": "pilot", "weight": 3, "any": ["pilot.?north", "GO_NORTH_PILOT_MAPS", "cross_step"]}
+                    ],
+                    "anti": [{"id": "knob", "weight": 2, "any": ["stuck_threshold"]}],
+                }
+            )
+        )
+
+    monkeypatch.setattr(adv.rme, "ask_ollama", fake)
+    out = adv.harden_rubric(prop, model="m")
+    h = out["_meta"]["harden"]
+    assert (
+        h["status"] == "ok"
+        and h["rounds"] == 1
+        and all(x >= 0.9 for x in h["good_scores"])
+        and all(x < 0.5 for x in h["wrong_scores"])
+    )
+
+
+def test_harden_rubric_handles_no_probes_and_bad_repair(monkeypatch):
+    prop = json.loads(json.dumps(GOOD_PROPOSAL))
+    monkeypatch.setattr(adv.rme, "ask_ollama", lambda *a, **k: _r("not json"))
+    assert adv.harden_rubric(prop, model="m")["_meta"]["harden"] == {"status": "no probes"}
+    prop = json.loads(json.dumps(GOOD_PROPOSAL))
+    prop["model_eval_case"]["rubric"] = [{"id": "pilot", "weight": 3, "any": ["zzqx"]}]
+    seq = iter([_r(""), _r(json.dumps({"good": ["pilot north bug"], "wrong": ["reboot"]})), _r("garbage")])
+    monkeypatch.setattr(adv.rme, "ask_ollama", lambda *a, **k: next(seq))
+    h = adv.harden_rubric(prop, model="m")["_meta"]["harden"]
+    assert h["status"] == "weak" and h["rounds"] == 1

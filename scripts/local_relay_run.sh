@@ -68,6 +68,11 @@ services:
 EOF
 ( cd "$REPO" && docker compose -f docker-compose.yml -f "$COMPOSE" up -d "$SVC" >/dev/null 2>&1 ) || echo "   (bridge not started — Kafka down? continuing without it)"
 
+# GPU lock: advisor.py / run_model_evals.py refuse to load models while a relay run owns the card.
+# (2026-08-16: running the Investigator during qwen38-27b r3 evicted the relay's model — dead stream,
+# invalid row. Same failure class as the CUDA crash; this time self-inflicted.)
+GPU_LOCK="$OUT/GPU_BUSY"; echo "$TAG pid=$$ started=$(date -Is)" > "$GPU_LOCK"
+trap 'rm -f "$GPU_LOCK"' EXIT
 echo "== power sampler"
 POWER_CSV="$WT/data/power/${TAG}.csv"
 # exec the venv python directly so the pid we record is the sampler itself, not a uv wrapper
