@@ -46,6 +46,16 @@ case "$ASSIST" in consult|both) export PI_GUARD_CONSULT=1 ;; *) unset PI_GUARD_C
 echo "== assist: $ASSIST"
 curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }
+# Power preflight: a model whose Spec carries `power_w` has hung the eGPU at the stock 600 W limit
+# (qwen38-27b, four Xid 8s on 2026-08-15/16) and may only run once `nvidia-smi` reports the card
+# capped at or below it. The cap resets on reboot, so it is checked here every time rather than
+# trusted from the last time it was set (scripts/nvidia-power-cap.service makes it persistent).
+# POWER_OVERRIDE=1 skips the check — the row it produces is then not a model verdict.
+echo "== power preflight"
+if ! ( cd "$REPO" && uv run python scripts/local_models.py power "$ALIAS" ); then
+  if [ "${POWER_OVERRIDE:-0}" = "1" ]; then echo "   POWER_OVERRIDE=1 — running uncapped; do not publish this row as a verdict"
+  else echo "   refusing to start: cap the card first (see above), or POWER_OVERRIDE=1" >&2; exit 2; fi
+fi
 
 echo "== worktree $WT @ $BASE"
 if [ ! -d "$WT" ]; then

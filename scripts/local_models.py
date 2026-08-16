@@ -18,6 +18,7 @@ box — pushing the GPU's power budget — gets comparable to Haiku 4.5 (91.9 ou
     uv run python scripts/local_models.py create [alias...]    # build the -128k variants (Modelfiles)
     uv run python scripts/local_models.py register             # add variants to ~/.pi/agent/models.json
     uv run python scripts/local_models.py bench [alias...]     # tok/s, VRAM, GPU split, peak W
+    uv run python scripts/local_models.py power [alias...]     # is the eGPU capped low enough? (exit 1 = no)
 
 ``--ctx`` (default 131072 = 128k) is the harness constant; keep it identical across models you compare.
 """
@@ -50,6 +51,7 @@ class Spec:
     reasoning: bool = True
     vision: bool = False
     params: dict = field(default_factory=dict)  # extra Modelfile PARAMETERs (sampling defaults)
+    power_w: int | None = None  # GPU power cap (W) this model needs on the eGPU before it may run; None = stock is fine
 
 
 # Comparison classes. Decode speed tracks *active* parameters and residency, not total size, so a
@@ -93,10 +95,12 @@ ROSTER: tuple[Spec, ...] = (
         "dense-27b",
         "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic",
         # POWER: the dense 27B at 128k pins the 5090 (a Thunderbolt eGPU) at its 600 W limit and hung
-        # it three times (kernel Xid 8 "GPU is probably locked", CUDA "launch timed out") — see
+        # it four times (kernel Xid 8 "GPU is probably locked", CUDA "launch timed out") — see
         # benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. num_batch 256 alone did NOT prevent it; the
-        # card must be capped first: `sudo nvidia-smi -pl 480`. Kept at 256 anyway (shorter bursts).
+        # card must be capped first (`power_w`, enforced by `local_models.py power` and the launcher's
+        # preflight). Kept at 256 anyway (shorter bursts).
         params={"num_batch": 256},
+        power_w=480,
     ),
     Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),
     Spec(
@@ -128,6 +132,37 @@ def check_runnable(tag: str) -> str | None:
         if marker in tag.rsplit(":", 1)[-1].split("-"):
             return f"{marker} builds are macOS-only in Ollama's registry (412) — not runnable on Blackwell/Linux"
     return None
+
+
+def enforced_power_limit() -> float | None:
+    """The card's enforced power limit in W from nvidia-smi, or None if it cannot be read."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=enforced.power.limit", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout
+        return float(out.strip().splitlines()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def power_check(spec: Spec, limit: float | None) -> tuple[bool, str]:
+    """(ok, why) — may this model run at the card's current enforced power limit?
+
+    A model with ``power_w`` set has hung the eGPU at stock; it is only allowed when the enforced
+    limit is at or below that cap. An unreadable limit is NOT ok for such a model — the whole point
+    is to refuse until someone has looked. Models without ``power_w`` are fine at any limit.
+    """
+    if spec.power_w is None:
+        return True, "stock limit ok"
+    if limit is None:
+        return False, f"needs a {spec.power_w} W cap and nvidia-smi could not report the limit"
+    if limit <= spec.power_w:
+        return True, f"capped at {limit:.0f} W (needs <= {spec.power_w} W)"
+    return False, f"needs <= {spec.power_w} W, card is at {limit:.0f} W — run: sudo nvidia-smi -pl {spec.power_w}"
 
 
 # What a local row has to beat to be "comparable to Haiku" (2026-08-15 Mt. Moon relay).
@@ -353,14 +388,37 @@ def cmd_list(args) -> int:
             print(f"- `{a}` — {why}")
     for group, members in _by_group(_pick(args.aliases)):
         print(f"\n### {group} — {GROUPS[group]}\n")
-        print(f"| alias | ollama tag | base pulled | {args.ctx // 1024}k variant | note |")
-        print("|---|---|---|---|---|")
+        print(f"| alias | ollama tag | base pulled | {args.ctx // 1024}k variant | power | note |")
+        print("|---|---|---|---|---|---|")
         for s in members:
             print(
                 f"| {s.alias} | `{s.tag}` | {'yes' if _has(s.tag, inst) else 'no'} "
-                f"| {'yes' if _has(variant_name(s, args.ctx), inst) else 'no'} | {s.note} |"
+                f"| {'yes' if _has(variant_name(s, args.ctx), inst) else 'no'} "
+                f"| {f'cap {s.power_w} W' if s.power_w else 'stock'} | {s.note} |"
             )
     return 0
+
+
+def cmd_power(args) -> int:
+    """Preflight: is the card's power limit low enough for these models? Exit 1 if any is refused.
+
+    The launcher runs this before a local relay run. The cap resets on reboot (``nvidia-smi -pl`` is
+    not persistent), which is why it is checked at run time rather than assumed after being set once;
+    ``scripts/nvidia-power-cap.service`` makes it stick.
+    """
+    limit = enforced_power_limit()
+    print(f"enforced power limit: {'unreadable' if limit is None else f'{limit:.0f} W'}")
+    refused = 0
+    # Aliases off the roster (e.g. laguna-xs, created by hand) carry no power note: allowed, and said so.
+    known = [a for a in args.aliases if a in BY_ALIAS or a in GROUPS]
+    for a in args.aliases:
+        if a not in known:
+            print(f"  ok      {a}: not on the roster — no power note (add one to Spec if it ever hangs the card)")
+    for s in _pick(known) if (known or not args.aliases) else []:
+        ok, why = power_check(s, limit)
+        print(f"  {'ok     ' if ok else 'REFUSED'} {s.alias}: {why}")
+        refused += not ok
+    return 1 if refused else 0
 
 
 def cmd_pull(args) -> int:
@@ -432,7 +490,13 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ctx", type=int, default=DEFAULT_CTX, help="num_ctx for the variants (harness constant)")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("list", cmd_list), ("pull", cmd_pull), ("create", cmd_create), ("register", cmd_register)):
+    for name, fn in (
+        ("list", cmd_list),
+        ("pull", cmd_pull),
+        ("create", cmd_create),
+        ("register", cmd_register),
+        ("power", cmd_power),
+    ):
         sp = sub.add_parser(name)
         sp.add_argument("aliases", nargs="*")
         sp.set_defaults(fn=fn)
