@@ -5044,3 +5044,52 @@ class TestBuildingExit:
         ag.navigator.next_direction = MagicMock(return_value="right")
         assert ag.choose_overworld_action(OverworldState(map_id=99, x=1, y=1, party_count=1)) == "right"
         assert ag._quest_nav_active is False
+
+
+def test_tick_in_run_heal_races_from_the_configured_genome_file(tmp_path, monkeypatch):
+    """The heal must race from the genome file it was pointed at, not the repo's notes.md.
+
+    A parallel harness (scripts/relay.py) gives every lane its own file so lanes cannot heal from
+    — or append their winner over — a sibling's genome. Default stays None, i.e. the repo notes.
+    """
+    ag = _make_agent(tmp_path)
+    lane_notes = tmp_path / "lane" / "genome.md"
+    seen = {}
+
+    def fake_start(pyboy, fitness, rom, turn, notes_path=None, **kwargs):
+        seen["notes_path"] = notes_path
+        return agent.InRunHeal(proc=FakeProc(), log_path="x.log", genome_before={}, started_turn=turn)
+
+    monkeypatch.setattr(agent, "start_in_run_heal", fake_start)
+    assert ag.in_run_heal_notes is None  # a plain run heals against the repo genome
+    ag.in_run_heal_notes = str(lane_notes)
+    ag.stuck_turns = 50
+    ag._tick_in_run_heal()
+    assert seen["notes_path"] == str(lane_notes)
+
+
+def test_tick_in_run_heal_reads_the_verdict_from_the_same_file_it_raced(tmp_path, monkeypatch):
+    """`finish` must diff the lane's genome file, not the repo's.
+
+    `finish_in_run_heal` decides "the healer accepted a genome" by diffing a notes file against
+    the snapshot `start` took. Point the two at different files and the lane's before-genome gets
+    compared to the repo's notes.md, so any repo genome at all looks like an accepted winner and
+    is hot-applied into the lane — precisely the cross-lane contamination the per-lane file exists
+    to prevent.
+    """
+    ag = _make_agent(tmp_path)
+    lane_notes = tmp_path / "lane-genome.md"
+    lane_notes.write_text('# lane\n<!-- autotune:genome\n{"door_cooldown": 7}\n-->\n')
+    ag.in_run_heal_notes = str(lane_notes)
+    finished = FakeProc()
+    finished.polled = 0  # the race has exited, so the tick reads its verdict
+    ag._in_run_heal = agent.InRunHeal(proc=finished, log_path=str(tmp_path / "h.log"), genome_before={}, started_turn=1)
+    seen = {}
+
+    def fake_finish(heal, notes_path=None):
+        seen["notes_path"] = notes_path
+        return "[healer] accepted", None
+
+    monkeypatch.setattr(agent, "finish_in_run_heal", fake_finish)
+    ag._tick_in_run_heal()
+    assert seen["notes_path"] == str(lane_notes)

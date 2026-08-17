@@ -123,7 +123,18 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir):
         "--label",
         f"{seg.name}:{variant['label']}",
         "--no-self-heal",
-        "--no-in-run-heal",
+        # In-run heal ON, isolated per lane. When a lane's stuck streak crosses the terminal-wedge
+        # threshold it races variants from its own wedged savestate and hot-applies the winner —
+        # the mechanism the repo has always shipped in agent.py, which the relay disabled outright
+        # from its first commit. It cannot be enabled naively: `healer.py` appends the winning
+        # genome to a notes file and `agent.py` loads its baseline from one, so six parallel lanes
+        # pointed at the repo's notes.md would race each other for the shared genome and each lane
+        # would heal from another lane's baseline. Each lane therefore gets `genome.md` in its own
+        # variant dir, seeded with that lane's genome (see race_variants) — a heal stays inside the
+        # lane that wedged. `--no-self-heal` stays: the end-of-run healer writes the *shared*
+        # notes.md, and a relay must not mutate the repo genome once per lane.
+        "--in-run-heal-notes",
+        str(vdir / "genome.md"),
     ]
     if seg.stop_on_map is not None:
         cmd += ["--stop-on-map", str(seg.stop_on_map)]
@@ -258,6 +269,12 @@ def run_segment(
         vdir = prepare_variant_dir(seg_dir, variant, baton)
         cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir)
         genome = json.loads(extra_env["EVOLVE_PARAMS"])
+        # Seed the lane's private genome file so an in-run heal races from *this* lane's knobs.
+        # healer.py's base is DEFAULT_PARAMS + whatever the notes file holds; without this the
+        # heal would race from the defaults and hot-apply a winner tuned against the wrong lane.
+        (vdir / "genome.md").write_text(
+            f"# {seg.name}:{variant['label']} lane genome\n<!-- autotune:genome\n{json.dumps(genome)}\n-->\n"
+        )
         log = open(vdir / "agent.log", "wb")
         proc = popen(
             cmd,

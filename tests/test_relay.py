@@ -43,7 +43,10 @@ def test_build_agent_cmd_emits_stop_flags_and_isolated_paths(tmp_path):
     assert f"--output-json {vdir / 'fitness.json'}" in joined
     assert f"--worldmap-file {vdir / 'world.map'}" in joined
     assert f"--stop-state {vdir / 'stop.state'}" in joined
-    assert "--no-self-heal" in cmd and "--no-in-run-heal" in cmd
+    # The end-of-run healer writes the *shared* notes.md, so it stays off; the in-run heal is on
+    # but pointed at the lane's own genome file, so parallel lanes cannot overwrite each other.
+    assert "--no-self-heal" in cmd and "--no-in-run-heal" not in cmd
+    assert f"--in-run-heal-notes {vdir / 'genome.md'}" in joined
     assert "paper" not in cmd[0]
 
 
@@ -615,3 +618,34 @@ def test_record_win_never_raises_on_unwritable_notes(tmp_path, monkeypatch, caps
         seg, _winner(dict(relay.BASE_GENOME)), memory_dir=tmp_path / "m", notes_path=tmp_path / "n.md", run_dir=tmp_path
     )
     assert "notes promotion skipped" in capsys.readouterr().out
+
+
+def test_run_segment_seeds_each_lane_its_own_genome_file(tmp_path):
+    """Each lane's in-run heal must race from *that lane's* knobs, not the repo's or a sibling's.
+
+    `healer.py`'s baseline is DEFAULT_PARAMS + the notes file it is pointed at, and it appends its
+    winner back to the same file. Six lanes sharing the repo's notes.md would therefore heal from
+    each other's genome; each lane gets `genome.md` in its own variant dir instead, pre-seeded with
+    its own merged genome (BASE_GENOME < baton < variant).
+    """
+    seg = _tiny_seg(({"label": "a", "hp_run_threshold": 0.2}, {"label": "b", "hp_run_threshold": 0.45}))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={"door_cooldown": 9})
+    seg_dir = tmp_path / "seg"
+    va, vb = seg_dir / "a", seg_dir / "b"
+    va.mkdir(parents=True), vb.mkdir(parents=True)
+    (va / "stop.state").write_bytes(b"x")
+    clock = FakeClock()
+    procs = [
+        FakeProc(va, fitness={"final_map_id": 51, "lead_hp": 20, "turns": 100}, polls_until_done=1),
+        FakeProc(vb, fitness={"final_map_id": 13, "lead_hp": 4, "turns": 100}, polls_until_done=1),
+    ]
+    run_segment(
+        "rom.gb", seg, baton, seg_dir, tmp_path, popen=_fake_popen_factory(procs), sleep=clock.sleep, clock=clock
+    )
+    from autotune_bridge import load_genome_from_notes
+
+    a_genome = load_genome_from_notes(va / "genome.md")
+    b_genome = load_genome_from_notes(vb / "genome.md")
+    assert a_genome["hp_run_threshold"] == 0.2  # the lane's own variant value, not the sibling's
+    assert b_genome["hp_run_threshold"] == 0.45
+    assert a_genome["door_cooldown"] == 9  # inherited from the baton
