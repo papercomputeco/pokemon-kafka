@@ -159,6 +159,91 @@ def test_cross_step_fully_boxed_nudges_forward():
     assert wm.cross_step(0, 5, 5, "north") == "up"  # nothing better known -> nudge forward
 
 
+def test_cross_step_does_not_rebump_a_retired_forward_tile():
+    # Issue #70: in the Pewter gym the agent sat at (7,11) pressing the retired wall (7,10)
+    # for ~24,000 turns — every tier was exhausted and the old `or fwd` tail re-bumped the same
+    # dead tile forever (a "move" every turn, so stuck-recovery never engaged). With the forward
+    # tile hard-blocked but a lateral known-walkable step available, cross_step must sidestep
+    # instead of pressing the dead tile.
+    wm = WorldMap()
+    wm.cells[54] = {
+        (7, 11): 1,  # agent's position
+        (8, 11): 1,  # lateral is walkable
+        (7, 10): 0,  # forward reads as wall
+    }
+    wm.block(54, 7, 10)
+    d = wm.cross_step(54, 7, 11, "north")
+    assert d != "up"  # never the retired forward nudge when a sidestep exists
+
+
+def test_cross_step_rebumps_forward_only_when_every_else_is_retired():
+    # The outdoor "boxed in" contract still holds when the lateral and back tiles are likewise
+    # blocked: then the forward nudge is the only remaining option (it will re-block and retire).
+    wm = WorldMap()
+    wm.cells[0] = {(5, 5): 1, (5, 4): 0}
+    for d in ((5, 4), (4, 5), (6, 5), (5, 6)):
+        wm.block(0, *d)
+    assert wm.cross_step(0, 5, 5, "north") == "up"
+
+
+def test_cross_step_retreats_sideways_when_forward_is_a_retired_dead_end():
+    # Issue #70, Pewter gym: the agent sat at (7,11) pressing the retired wall (7,10) for ~24,000
+    # turns. That is a *retired* forward tile (hard-blocked), so the pressable/sweep/explore/door tiers
+    # all come up empty and the old `sweep(...) or fwd` tail re-bumped the dead tile forever. With a
+    # live lateral step available (8,11 — whose own forward (8,10) is likewise retired, so it is NOT a
+    # pressable candidate the sweep would grab), cross_step must retreat sideways instead of re-bumping.
+    wm = WorldMap()
+    wm.cells[54] = {
+        (7, 11): 1,  # agent
+        (8, 11): 1,  # live lateral retreat step
+        (7, 10): 0,  # forward reads as a wall ...
+        (8, 12): 0,  # ... and the right pocket is sealed so no tier leaks a frontier past it
+        (9, 11): 0,
+    }
+    wm.block(54, 7, 10)  # forward is the retired dead end (the livelock tile)
+    wm.block(54, 8, 10)  # (8,11)'s own forward is retired -> (8,11) is not a pressable candidate
+    wm.block(54, 6, 11)  # left retired
+    wm.block(54, 7, 12)  # back retired
+    assert wm.cross_step(54, 7, 11, "north") == "right"
+
+
+def test_cross_step_retreats_sideways_when_forward_is_a_retired_dead_end_south():
+    # Same livelock-break, driving south: the retreat order is left, right, back — and the forward
+    # dead end sits below the agent (7,12). Live lateral (8,11), its south forward (8,12) retired.
+    wm = WorldMap()
+    wm.cells[54] = {
+        (7, 11): 1,  # agent
+        (8, 11): 1,  # live lateral retreat step (right)
+        (7, 12): 0,  # forward (south) reads as a wall and is retired ...
+        (8, 10): 0,  # ... side pockets sealed so no tier leaks a candidate/frontier
+        (9, 11): 0,
+    }
+    wm.block(54, 7, 12)  # the retired forward dead end
+    wm.block(54, 8, 12)  # (8,11)'s own forward is retired -> not a pressable candidate
+    wm.block(54, 7, 10)  # back retired
+    wm.block(54, 6, 11)  # left retired so the retreat falls through to the right step
+    assert wm.cross_step(54, 7, 11, "south") == "right"
+
+
+def test_cross_step_keeps_forward_nudge_when_forward_is_not_retired():
+    # The forward nudge is preserved when the forward tile is *not* a retired dead end — here it is
+    # known-walkable (its own forward (7,9) is the retired tile, so the sweep does not grab it as a
+    # pressable candidate either). Every tier comes up empty, the forward tile is not in the blocked
+    # set, so the agent still nudges forward (its press into (7,10) is a real step, not a livelock).
+    wm = WorldMap()
+    wm.cells[54] = {
+        (7, 11): 1,  # agent
+        (7, 10): 1,  # forward is known-walkable (a real step, not a dead end)
+        (6, 10): 0,  # seal the side pockets so the tiers find no candidate/frontier
+        (8, 10): 0,
+        (6, 11): 0,
+        (8, 11): 0,
+        (7, 12): 0,
+    }
+    wm.block(54, 7, 9)  # (7,10)'s own forward is retired -> (7,10) is not a pressable candidate
+    assert wm.cross_step(54, 7, 11, "north") == "up"
+
+
 def test_greedy_picks_the_neighbour_closest_to_target():
     wm = WorldMap()
     assert wm._greedy(0, {}, 5, 5, 5, 0) == "up"  # open map: step toward the target (north)
@@ -782,6 +867,19 @@ def test_bounds_stop_the_sweep_walking_off_the_trailing_edge():
     wm.bounds[13] = (20, 72)
     assert wm.cross_step(13, 8, 71, "north") != "down"
     assert wm.explore_step(13, 8, 71) != "down"
+
+
+def test_observe_bounds_never_shrink_below_observed_cells():
+    # Issue #70: a stale/wrong map-header bounds read (map 54 "Pewter gym") shrank to 10x14 while
+    # the agent stood at (16,17) with cells already stamped to (21,21). The east wing then read as
+    # off-map, explore_step went blind, and cross_step livelocked against the west wall row.
+    wm = WorldMap()
+    wm.observe(54, 16, 17, _full(1), bounds=(40, 36))  # first observe: full 40x36 window ok
+    assert wm.bounds[54] == (40, 36)
+    # A later, smaller (stale) header read must NOT clip the map below what's been observed.
+    wm.observe(54, 7, 11, _full(1), bounds=(10, 14))
+    assert wm.bounds[54] == (22, 22)
+    assert (21, 21) in wm.cells[54]  # previously-stamped east wing survives
 
 
 def test_observe_records_bounds_and_clips_garbage_stamps():

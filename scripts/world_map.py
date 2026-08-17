@@ -64,10 +64,20 @@ class WorldMap:
         self, map_id: int, px: int, py: int, grid: list[list[int]], bounds: tuple[int, int] | None = None
     ) -> None:
         """Stamp a 9x10 collision ``grid`` (player at the centre) into the map at ``(px, py)``."""
-        if bounds is not None:
-            self.bounds[map_id] = (int(bounds[0]), int(bounds[1]))
-        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
         m = self.cells.setdefault(map_id, {})
+        if bounds is not None:
+            bw, bh = int(bounds[0]), int(bounds[1])
+            # Bounds come from the map header — normally trustworthy, but a header read that is
+            # stale (map transition) or otherwise wrong used to shrink Pewter gym (map 54) to
+            # 10x14 while the agent stood at (16,17) and had already stamped walkable ground out
+            # to (21,21): the whole east wing then read as "off-map", explore_step went blind, and
+            # cross_step livelocked against the west-wall row. Observed cells are empirical proof
+            # the map is at least that big, so never let a bounds read shrink below their extent.
+            if m:
+                bw = max(bw, max(x for x, _y in m) + 1)
+                bh = max(bh, max(_y for _x, _y in m) + 1)
+            self.bounds[map_id] = (bw, bh)
+        bw, bh = self.bounds.get(map_id, (_MAX_COORD + 1, _MAX_COORD + 1))
         blocked = self.blocked.get(map_id)
         for r in range(min(9, len(grid))):
             row = grid[r]
@@ -347,7 +357,35 @@ class WorldMap:
 
         if untried_wall(px, py):
             return fwd
-        return sweep(untried_wall) or fwd
+        d = sweep(untried_wall)
+        if d:
+            return d
+        # Livelock break (issue #70, Pewter gym): the old tail `or fwd` re-bumped a tile every other
+        # layer had already rejected (a dead wall, or an un-ready NPC such as the locked gym leader).
+        # Pressing it does not move the agent, so next turn the position and the map are identical
+        # and this function returns the same direction — 23,876 turns of it. Nothing upstream can
+        # break that: `stuck_turns` counted every one of those turns (max_stuck_streak=23876) but it
+        # is only consulted by the *waypoint* navigator's skip rule; cross_step is never passed it.
+        # A decision loop with no input that changes has to break itself. With every layer exhausted,
+        # retreat laterally or backward (a step that at least changes the position, so the next
+        # sweep sees something new) rather than re-bumping the retired tile. The pure `return fwd`
+        # remains only for the truly boxed-in case where every neighbour is hard-blocked too.
+        bset = self.blocked.get(map_id, {})
+        if (px, py + sign) not in bset:
+            # The forward tile is not a known dead end (it may be a normal walkable step): keep the
+            # old nudge-forward behaviour.
+            return fwd
+        # Forward is retired, and every other layer found nothing: retreat laterally or backward
+        # (a walkable step at least) instead of re-bumping the dead tile — that bump was the
+        # Pewter-gym livelock.
+        if goal == "north":
+            order = (_DIRS[3], _DIRS[2], _DIRS[1])  # right, left, back (down)
+        else:
+            order = (_DIRS[2], _DIRS[3], _DIRS[0])  # left, right, back (up)
+        for name, dx, dy in order:
+            if (px + dx, py + dy) not in bset:
+                return name
+        return fwd
 
     def known_reachable(self, map_id: int, px: int, py: int, tx: int, ty: int) -> bool:
         """Can ``(tx, ty)`` be reached from ``(px, py)`` over tiles *known* to be walkable?

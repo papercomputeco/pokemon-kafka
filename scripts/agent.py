@@ -2195,6 +2195,41 @@ class PokemonAgent:
             return True
         return False
 
+    def _overworld_settled(self, ow) -> bool:
+        """True when `ow` is a post-transition position, not a mid-warp frame.
+
+        The emulator commits wCurMap before the player coordinates, so the first read
+        after a map change can carry the previous map's coordinates (e.g. map 2 at y=35
+        while Pewter is 29 tall). A baton dumped from that frame warps the next segment
+        to arbitrary maps. The map header (width/height) loads with the settled map, so
+        "position inside the header bounds" is a cheap settled test. A header that is
+        still None (width/height zero) means the transition is not settled either."""
+        reader = getattr(self.memory, "read_map_bounds", None)
+        if reader is None:
+            return True  # a memory double without a header reader cannot be judged: fail open
+        bounds = reader()
+        if bounds is None:
+            return False  # real game: header not loaded yet = mid-transition = not settled
+        try:
+            w, h = bounds
+        except (TypeError, ValueError):
+            return True  # a double returning a non-(w, h) value: fail open
+        return 0 <= ow.x < w and 0 <= ow.y < h
+
+    def _save_settled_stop_state(self, stop_state: str, max_ticks: int = 240) -> bool:
+        """Dump the stop/baton state only once the overworld reads as settled; else retry
+        for up to `max_ticks` frames (no inputs held, so the sprite cannot wander)."""
+        for _ in range(max(1, max_ticks // 8)):
+            ow = self.memory.read_overworld_state()
+            if self._overworld_settled(ow):
+                with open(stop_state, "wb") as f:
+                    self.pyboy.save_state(f)
+                self.log(f"STOP | condition met at turn {self.turn_count} -> {stop_state} (settled)")
+                return True
+            self.pyboy.tick(8)
+        self.log(f"STOP | condition met but state never settled in {max_ticks} ticks; refusing to save {stop_state}")
+        return False
+
     @staticmethod
     def _turns_remaining(loop_turns: int, max_turns: int) -> bool:
         """Negative max_turns = unlimited (the long-loop mode); 0 keeps its
@@ -2499,9 +2534,7 @@ class PokemonAgent:
                     ow = self.memory.read_overworld_state()
                     if self._stop_condition_met(ow, stop_on_map, stop_on_badge):
                         if stop_state:
-                            with open(stop_state, "wb") as f:
-                                self.pyboy.save_state(f)
-                            self.log(f"STOP | condition met at turn {self.turn_count} -> {stop_state}")
+                            self._save_settled_stop_state(stop_state)
                         else:
                             self.log(f"STOP | condition met at turn {self.turn_count}")
                         break

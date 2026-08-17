@@ -2640,12 +2640,63 @@ class TestRun:
         out = tmp_path / "stop.state"
         ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
         ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=51, x=5, y=5))
+        ag.memory.read_map_bounds = MagicMock(return_value=(25, 17))  # forest header loaded = settled
         ag.run_overworld = MagicMock()
         with patch.object(agent, "Image", None):
             ag.run(max_turns=10, stop_on_map=51, stop_state=str(out))
         ag.pyboy.save_state.assert_called_once()
         ag.run_overworld.assert_not_called()
         assert any("STOP | condition met at turn" in e and str(out) in e for e in ag.events)
+
+    def test_run_stop_on_map_wait_for_settle_then_saves(self, tmp_path):
+        """A baton frame read mid-transition (coords outside the map header bounds) is
+        retried until the position settles, then saved — not dumped from the raw frame."""
+        ag = _make_agent(tmp_path)
+        out = tmp_path / "stop.state"
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
+        unsettled = OverworldState(map_id=2, x=18, y=35)  # route-2 coords past Pewter's bounds
+        settled = OverworldState(map_id=2, x=18, y=13)
+        ag.memory.read_overworld_state = MagicMock(
+            side_effect=[unsettled, unsettled, unsettled, settled] + [settled] * 20
+        )
+        ag.memory.read_map_bounds = MagicMock(return_value=(21, 29))
+        ag.run_overworld = MagicMock()
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=10, stop_on_map=2, stop_state=str(out))
+        ag.pyboy.save_state.assert_called_once()
+        ag.run_overworld.assert_not_called()
+        assert any("settled" in e and str(out) in e for e in ag.events)
+
+    def test_run_stop_on_map_refuses_to_save_when_never_settled(self, tmp_path):
+        """A position that never settles means the baton is corrupt: skip the save (the relay
+        then scores the lane as a miss) instead of handing downstream a warp-to-anywhere state."""
+        ag = _make_agent(tmp_path)
+        out = tmp_path / "stop.state"
+        ag.memory.read_battle_state = MagicMock(return_value=BattleState(battle_type=0))
+        ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=2, x=18, y=35))
+        ag.memory.read_map_bounds = MagicMock(return_value=(21, 29))
+        ag.run_overworld = MagicMock()
+        with patch.object(agent, "Image", None):
+            ag.run(max_turns=10, stop_on_map=2, stop_state=str(out))
+        ag.pyboy.save_state.assert_not_called()
+        ag.run_overworld.assert_not_called()
+        assert any("refusing to save" in e for e in ag.events)
+
+    def test_overworld_settled_fails_open_without_a_usable_header_reader(self, tmp_path):
+        """The settle gate only ever *adds* a refusal on a real reader.
+
+        Memory doubles predate `read_map_bounds` or return something that is not a (w, h)
+        pair; judging those as "unsettled" would refuse every baton they produce, so both
+        cases fail open. Only a reader that answers `None` — the real game's "header not
+        loaded yet" — reports unsettled."""
+        ag = _make_agent(tmp_path)
+        ow = OverworldState(map_id=2, x=18, y=35)
+        ag.memory = SimpleNamespace()
+        assert ag._overworld_settled(ow) is True  # no reader at all
+        ag.memory.read_map_bounds = MagicMock(return_value=object())
+        assert ag._overworld_settled(ow) is True  # not unpackable as (w, h)
+        ag.memory.read_map_bounds = MagicMock(return_value=None)
+        assert ag._overworld_settled(ow) is False  # header not loaded = mid-transition
 
     def test_run_stop_on_badge_without_stop_state_logs_and_breaks(self, tmp_path):
         """--stop-on-badge with no --stop-state still breaks and logs, skipping the state dump."""
