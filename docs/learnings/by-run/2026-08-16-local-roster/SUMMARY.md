@@ -171,6 +171,9 @@ cents. Local is cheap in watts and expensive in cloud-equivalent dollars for the
   **r7 (no MTP, 480 W): 84 min, no hang, first clean dense-27B row** — 2/4, wins both Gym trainers,
   a `world_map.py` livelock fix with tests that fail on the parent commit, 3 commits, no fabrication;
   52.7 tok/s, 24.8 s/turn, 590 Wh. See `benchmarks/2026-08-16-local-relay-qwen38-27b-r7.md`.
+  **r8 (no MTP, stock 600 W): 17 min, clean, 77 % of samples ≥ 590 W** — the cap was a correlate,
+  the MTP draft was the cause; `power_w` dropped. Second real fix in two runs (`agent.py` baton
+  settle-gate) and it *refuted* a standing theory with md5 evidence rather than adding one.
 - `qwen3-coder-30b` is retired from the roster (`RETIRED` in `scripts/local_models.py`); its
   rows stay as history.
 - Consider splitting the operator into investigator (cloud or the best local thinker) and fixer

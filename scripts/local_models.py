@@ -94,16 +94,17 @@ ROSTER: tuple[Spec, ...] = (
         "qwen3.8:27b",
         "dense-27b",
         "Qwen3.8 27B dense, 18 GB — newest Qwen, long-horizon agentic",
-        # HANGS: five relay runs ended in a kernel Xid 8 ("GPU is probably locked") on the eGPU — see
-        # benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. Every one of the five llama-server core dumps
-        # has the same stack: common_speculative_impl_draft_mtp::process -> llama_get_embeddings_nextn ->
-        # CUDA error. That is Ollama's MTP speculative decoding for Qwen3.8 (draft_num_predict 4 in the
-        # upstream Modelfile). Neither num_batch 256 nor a 480 W cap (r6, pinned at the cap, still died)
-        # prevented it, so the MTP draft is switched off here (`draft_num_predict 0` -> Ollama logs "no
-        # implementations specified for speculative decoding"): slower decode, one crash path removed.
-        # r7 is the test. power_w stays so r7 changes exactly one variable from r6.
+        # HANGS (resolved): five relay runs ended in a kernel Xid 8 ("GPU is probably locked") on the
+        # eGPU — see benchmarks/2026-08-16-qwen38-27b-egpu-hangs.md. All five llama-server core dumps
+        # share one stack: common_speculative_impl_draft_mtp::process -> llama_get_embeddings_nextn ->
+        # CUDA error, i.e. Ollama's MTP speculative decoding for Qwen3.8 (draft_num_predict 4 upstream).
+        # `draft_num_predict 0` turns it off (Ollama logs "no implementations specified for speculative
+        # decoding") and the hangs stop: r7 ran 84 min capped at 480 W, r8 ran 17 min at the stock
+        # 600 W with 77 % of its power samples at >=590 W — the exact regime that killed four runs in
+        # 2.7-8.3 min. So no `power_w`: the cap was a correlate, not the cause, and capping costs decode
+        # (r8 61.4 tok/s vs r7 52.7). If an Xid ever returns, the harness-death guard in bench_report.py
+        # refuses the row, which is the backstop — set power_w again only on new evidence.
         params={"num_batch": 256, "draft_num_predict": 0},
-        power_w=480,
     ),
     Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),
     Spec(
