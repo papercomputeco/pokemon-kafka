@@ -1006,7 +1006,11 @@ class PokemonAgent:
             return
         if self._in_run_heal.proc.poll() is None:
             return
-        verdict, genome = finish_in_run_heal(self._in_run_heal)
+        # Same notes file both ways: `finish` detects an accepted genome by diffing the file
+        # against the snapshot `start` took. Reading a *different* file here would compare the
+        # lane's before-genome against the repo's notes.md and hot-apply the repo genome into
+        # the lane on the first heal — the cross-contamination the per-lane file prevents.
+        verdict, genome = finish_in_run_heal(self._in_run_heal, notes_path=self.in_run_heal_notes)
         if genome is not None:
             self.apply_genome_live(genome)
             before = self._in_run_heal.genome_before
