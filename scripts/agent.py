@@ -769,6 +769,10 @@ class PokemonAgent:
         # background and hot-apply an accepted genome without stopping the run.
         self.in_run_heal_enabled = True
         self.in_run_heal_streak = 50
+        # Genome file the in-run heal races from and writes its winner to. None = the repo's
+        # notes.md (a single-agent run). Parallel harnesses MUST give each lane its own, or the
+        # lanes race each other for the shared genome — see scripts/relay.py.
+        self.in_run_heal_notes = None
         self._in_run_heal = None  # in-flight InRunHeal race, at most one per run
         self._in_run_heal_done = False
         # Advice inbox: the in-run return path of the feedback loop. JSONL
@@ -986,7 +990,13 @@ class PokemonAgent:
         if self._in_run_heal is None:
             if self._in_run_heal_done or self.stuck_turns < self.in_run_heal_streak:
                 return
-            self._in_run_heal = start_in_run_heal(self.pyboy, self.compute_fitness(), self.rom_path, self.turn_count)
+            self._in_run_heal = start_in_run_heal(
+                self.pyboy,
+                self.compute_fitness(),
+                self.rom_path,
+                self.turn_count,
+                notes_path=self.in_run_heal_notes,
+            )
             if self._in_run_heal is None:
                 self._in_run_heal_done = True  # launch failed — don't retry every turn
                 return
@@ -2768,6 +2778,13 @@ def main():
         "race children spawned by evolve.run_agent always disable it)",
     )
     parser.add_argument(
+        "--in-run-heal-notes",
+        default=None,
+        help="Genome file the in-run heal races from and appends its winner to (default: the repo's "
+        "notes.md). Give each lane its own in a parallel harness so lanes cannot overwrite each "
+        "other's genome",
+    )
+    parser.add_argument(
         "--in-run-heal-streak",
         type=int,
         default=50,
@@ -2819,6 +2836,7 @@ def main():
         agent.world.block_expiry_observations = expiry
     agent.in_run_heal_enabled = args.in_run_heal
     agent.in_run_heal_streak = args.in_run_heal_streak
+    agent.in_run_heal_notes = args.in_run_heal_notes
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
     agent.sideloop_every = max(0, args.sideloop_every)
