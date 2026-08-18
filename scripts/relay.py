@@ -113,28 +113,61 @@ def _pid_alive(pid):
     return True
 
 
-def acquire_relay_lock(lock_path=None, pid=None, alive=None):
+STALE_LOCK_S = 10.0
+
+
+def acquire_relay_lock(lock_path=None, pid=None, alive=None, now=None):
     """Refuse to start while another relay owns the box. Returns (ok, holder_pid).
 
-    An operator that launches relays in parallel multiplies every lane by the number of relays,
-    and the box silently stops delivering the ~30 turns/s the segment budgets assume. The lanes
-    then report as wedged, so the model reads a CPU shortage as a navigation wall and "fixes" the
-    wrong thing. A stale lock (holder gone) is taken over rather than honoured, so a killed relay
-    never blocks the next one.
+    Parallel relays multiply every lane, and the box silently stops delivering the ~30 turns/s the
+    segment budgets assume. The lanes then report as wedged, so the model reads a CPU shortage as a
+    navigation wall and "fixes" the wrong thing.
+
+    Two things have to be true at once, and the second is the one that bites:
+
+    1. The claim is atomic — O_CREAT | O_EXCL, so creation itself is the claim and exactly one of
+       five relays launched from one shell command can win.
+    2. An unreadable lock is NOT assumed stale. O_EXCL creates the file empty and the pid lands a
+       moment later; a racing claimant that reads that window sees no pid. Treating it as stale (as
+       the first version of this did) makes every racer delete the winner's lock and take it — 4 of
+       8 claimants won in the race test. An empty lock younger than STALE_LOCK_S is therefore read
+       as "held by someone mid-write" and refused. Older than that, it is a crash between create
+       and write, and is cleared so a dead relay never blocks the next one.
     """
     lock_path = Path(lock_path or LOCK_PATH)
     alive = alive or _pid_alive
+    now = now or time.time
     pid = pid or os.getpid()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if lock_path.exists():
+    for _attempt in (0, 1):
         try:
-            holder = int(lock_path.read_text().strip() or 0)
-        except ValueError:
-            holder = 0
-        if holder and holder != pid and alive(holder):
-            return False, holder
-    lock_path.write_text(str(pid))
-    return True, pid
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                holder = int(lock_path.read_text().strip() or 0)
+            except (OSError, ValueError):
+                holder = 0
+            if holder == pid:
+                return True, pid
+            if holder:
+                if alive(holder):
+                    return False, holder
+            else:  # created but not yet stamped — the writer is milliseconds behind
+                try:
+                    age = now() - lock_path.stat().st_mtime
+                except OSError:
+                    age = 0.0
+                if age < STALE_LOCK_S:
+                    return False, 0
+            try:  # stale: holder dead, or stamped never arrived
+                lock_path.unlink()
+            except OSError:
+                pass
+            continue
+        with os.fdopen(fd, "w") as f:
+            f.write(str(pid))
+        return True, pid
+    return False, 0
 
 
 def release_relay_lock(lock_path=None, pid=None):

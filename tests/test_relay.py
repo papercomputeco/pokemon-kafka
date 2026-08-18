@@ -763,3 +763,42 @@ def test_build_agent_cmd_passes_the_subloop_budget_to_the_lane(tmp_path):
         sideloop_parallel=4,
     )
     assert "--sideloop-parallel 4" in " ".join(cmd)
+
+
+def test_acquire_relay_lock_is_atomic_under_a_real_race(tmp_path):
+    """Five relays launched from one shell command start within milliseconds of each other.
+
+    A read-then-write check lets all five pass before any writes, which is exactly how a 2 h
+    benchmark run ended up with 238 emulators on a 32-core box. The lock must be won by creation,
+    so this races real processes rather than simulating the interleaving.
+    """
+    import multiprocessing as mp
+
+    lock = tmp_path / "relay.lock"
+
+    def claim(q, barrier):
+        barrier.wait()  # release all claimants at once
+        ok, _holder = relay.acquire_relay_lock(lock, alive=lambda p: True)
+        q.put(ok)
+
+    ctx = mp.get_context("fork")
+    q = ctx.Queue()
+    barrier = ctx.Barrier(8)
+    procs = [ctx.Process(target=claim, args=(q, barrier)) for _ in range(8)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(timeout=30)
+
+    winners = [q.get() for _ in range(8)]
+    assert sum(winners) == 1, f"exactly one relay may hold the lock, got {sum(winners)}"
+
+
+def test_acquire_relay_lock_refuses_an_unstamped_lock_but_clears_an_old_one(tmp_path):
+    """The create-then-stamp window: empty and fresh means held, empty and old means crashed."""
+    lock = tmp_path / "relay.lock"
+    lock.write_text("")  # created by O_EXCL, pid not yet written
+    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True, now=lambda: lock.stat().st_mtime + 1)
+    assert (ok, holder) == (False, 0), "a lock mid-write must not be mistaken for a stale one"
+    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True, now=lambda: lock.stat().st_mtime + 999)
+    assert (ok, holder) == (True, 200), "a crash between create and stamp must not block forever"
