@@ -149,12 +149,17 @@ def test_to_oak_on_an_unlisted_corridor_map_pilots_south():
     assert q.next_target(sig(ROUTE_2, parcel=True))["pilot"] == "south"
 
 
-def test_go_north_pilots_the_forest_gates_and_the_gym():
-    # The two Route 2 <-> Forest gate buildings sit on the corridor and have a north exit; the Gym
-    # is where the badge segment is going and Brock stands at its north end.
+def test_go_north_pilots_the_forest_gates_but_stays_out_of_the_gym():
+    # The two Route 2 <-> Forest gate buildings sit on the corridor and have a north exit.
     q = ParcelQuest()
-    for m in (VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST_NORTH_GATE, PEWTER_GYM):
+    for m in (VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST_NORTH_GATE):
         assert q.next_target(sig(m, pokedex=True))["pilot"] == "north", m
+    # The Gym used to be here too ("Brock stands at its north end"). Measured 2026-08-17: the north
+    # pilot is cross_step, which hunts the map's north EDGE for a walkable tile, and the Gym's y=0
+    # row is solid wall — a healed lane two-cycled (4,2)<->(4,6) for 1400 turns one step from
+    # Brock. The Gym is routed by interior waypoints in routes.json now; the quest must decline so
+    # they can run. Regression for the wall four 08-16 runs and Haiku r1/r4 stopped at.
+    assert q.next_target(sig(PEWTER_GYM, pokedex=True)) is None
 
 
 def test_go_north_declines_off_corridor_buildings():
