@@ -787,6 +787,12 @@ class PokemonAgent:
         # Sideloop spawning: every sideloop_every turns, snapshot the live state and race AlphaEvolve
         # variants in the background (sideloop.py); the winning genome comes back through the advice inbox.
         self.sideloop_every = 0  # turns between live-snapshot sideloops (0 = off)
+        # A subloop only heals the run that spawned it if it FINISHES before that run does: the
+        # lane keeps playing at ~30 turns/s while the subloop races, so a 6x800-turn race (~90 s)
+        # never lands inside a segment shorter than ~2700 turns. Keep the race short enough that
+        # its winner comes back to a lane still playing.
+        self.sideloop_horizon = 250  # turns each subloop lane plays from the snapshot
+        self.sideloop_parallel = 6  # subloop lanes raced at once (one wave, not two)
         self.sideloop_proc = None  # at most one AlphaEvolve subloop in flight
         self.sideloop_popen = subprocess.Popen  # injectable for tests
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
@@ -1071,6 +1077,10 @@ class PokemonAgent:
                 str(work_dir),
                 "--advice-out",
                 str(Path(self.advice_inbox_dir) / "sideloop.jsonl"),
+                "--horizon",
+                str(self.sideloop_horizon),
+                "--parallel",
+                str(self.sideloop_parallel),
             ]
             self.sideloop_proc = self.sideloop_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.log(f"SIDELOOP | spawned at turn {self.turn_count} -> {work_dir}")

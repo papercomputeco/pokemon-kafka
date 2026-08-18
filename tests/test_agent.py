@@ -4878,6 +4878,8 @@ def _sideloop_stub(turn, every=100, inbox="inbox", proc=None):
         advice_inbox_dir=inbox,
         rom_path="rom.gb",
         evolve_params={"door_cooldown": 5},
+        sideloop_horizon=250,
+        sideloop_parallel=6,
         pyboy=SimpleNamespace(save_state=lambda f: f.write(b"state")),
         log=lambda msg: None,
     )
