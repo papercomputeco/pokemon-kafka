@@ -649,3 +649,66 @@ def test_run_segment_seeds_each_lane_its_own_genome_file(tmp_path):
     assert a_genome["hp_run_threshold"] == 0.2  # the lane's own variant value, not the sibling's
     assert b_genome["hp_run_threshold"] == 0.45
     assert a_genome["door_cooldown"] == 9  # inherited from the baton
+
+
+def test_build_agent_cmd_gives_each_lane_a_private_advice_inbox(tmp_path):
+    """Continuous self-heal reaches a running lane through the inbox; a shared one would cross-feed.
+
+    Two lanes must never point at the same inbox: `_apply_advice` hot-applies whatever it finds,
+    so one shared path would push every lane onto the first winner's genome and erase the spread.
+    """
+    va, vb = tmp_path / "a", tmp_path / "b"
+    baton = relay.Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg = relay.SEGMENTS[0]
+    cmd_a, _ = relay.build_agent_cmd("rom.gb", seg, {"label": "base"}, va, baton, tmp_path)
+    cmd_b, _ = relay.build_agent_cmd("rom.gb", seg, {"label": "patient"}, vb, baton, tmp_path)
+    assert f"--advice-inbox {va / 'advice'}" in " ".join(cmd_a)
+    assert f"--advice-inbox {vb / 'advice'}" in " ".join(cmd_b)
+    assert cmd_a[cmd_a.index("--advice-inbox") + 1] != cmd_b[cmd_b.index("--advice-inbox") + 1]
+
+
+def test_build_agent_cmd_sideloop_is_opt_in_and_threaded(tmp_path):
+    """--sideloop-every is off unless asked for; when asked, it reaches the lane verbatim."""
+    vdir = tmp_path / "v"
+    baton = relay.Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg = relay.SEGMENTS[0]
+    off, _ = relay.build_agent_cmd("rom.gb", seg, {"label": "base"}, vdir, baton, tmp_path)
+    assert "--sideloop-every" not in off
+    on, _ = relay.build_agent_cmd("rom.gb", seg, {"label": "base"}, vdir, baton, tmp_path, sideloop_every=400)
+    assert "--sideloop-every 400" in " ".join(on)
+
+
+def test_run_segment_passes_sideloop_cadence_to_every_lane(tmp_path):
+    """The cadence is a segment-level setting: every lane heals, not just the first."""
+    seg = _tiny_seg(({"label": "a"}, {"label": "b"}))
+    baton = Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    seg_dir = tmp_path / "seg"
+    va, vb = seg_dir / "a", seg_dir / "b"
+    va.mkdir(parents=True), vb.mkdir(parents=True)
+    (va / "stop.state").write_bytes(b"x")
+    clock = FakeClock()
+    procs = [
+        FakeProc(va, fitness={"final_map_id": 51, "lead_hp": 20, "turns": 100}, polls_until_done=1),
+        FakeProc(vb, fitness={"final_map_id": 1, "lead_hp": 5, "turns": 100}, polls_until_done=1),
+    ]
+    launched = []
+    popen = _fake_popen_factory(procs)
+
+    def spy(cmd, **kwargs):
+        launched.append(cmd)
+        return popen(cmd, **kwargs)
+
+    run_segment(
+        "rom.gb",
+        seg,
+        baton,
+        seg_dir,
+        tmp_path,
+        popen=spy,
+        sleep=clock.sleep,
+        clock=clock,
+        sideloop_every=250,
+    )
+    assert len(launched) == 2
+    for cmd in launched:
+        assert cmd[cmd.index("--sideloop-every") + 1] == "250"

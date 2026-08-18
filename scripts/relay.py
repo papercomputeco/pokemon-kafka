@@ -5,8 +5,11 @@ Each segment fans out N agent.py processes from the same baton (state + worldmap
 with a different decision variant. The first to satisfy the segment's stop condition self-terminates
 via --stop-on-map/--stop-on-badge; the healthiest winner's artifacts seed the next segment.
 
-Children are plain subprocesses (never `paper start claude`) with self-healing disabled, so the
-only variable per lane is the decision variant.
+Children are plain subprocesses (never `paper start claude`). Self-healing runs *inside* each lane
+and is isolated to it — a private genome file, a private advice inbox, and (with --sideloop-every)
+a private AlphaEvolve subloop — so the only variable between lanes is still the decision variant.
+The end-of-run healer stays off: it writes the shared notes.md, which a relay must not mutate once
+per lane.
 """
 
 import argparse
@@ -99,7 +102,7 @@ SEGMENTS = (
 )
 
 
-def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir):
+def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0):
     """Build (argv, extra-env) for one variant lane. Pure — no filesystem access."""
     genome = {**BASE_GENOME, **baton.genome, **{k: v for k, v in variant.items() if k != "label"}}
     cmd = [
@@ -135,7 +138,17 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir):
         # notes.md, and a relay must not mutate the repo genome once per lane.
         "--in-run-heal-notes",
         str(vdir / "genome.md"),
+        # Continuous self-heal: the advice inbox is how a healed genome reaches a *running* lane.
+        # Per-lane like genome.md, and for the same reason — a shared inbox would hot-apply one
+        # lane's winner into every other lane and destroy the only variable the relay controls.
+        "--advice-inbox",
+        str(vdir / "advice"),
     ]
+    if sideloop_every:
+        # The AlphaEvolve subloop: every N turns the lane snapshots itself, races variants from
+        # that snapshot in the background and hot-applies the winner between turns. In-run heal
+        # is reactive and one-shot (it waits for a terminal wedge); this heals the whole time.
+        cmd += ["--sideloop-every", str(sideloop_every)]
     if seg.stop_on_map is not None:
         cmd += ["--stop-on-map", str(seg.stop_on_map)]
     if seg.stop_on_badge is not None:
@@ -260,6 +273,7 @@ def run_segment(
     sleep=time.sleep,
     clock=time.monotonic,
     pick=None,
+    sideloop_every=0,
 ):
     """Race up to `parallel` decision variants from the same baton; return (pick(results), results)."""
     if pick is None:
@@ -267,7 +281,7 @@ def run_segment(
     lanes = {}
     for variant in seg.variants[:parallel]:
         vdir = prepare_variant_dir(seg_dir, variant, baton)
-        cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir)
+        cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every)
         genome = json.loads(extra_env["EVOLVE_PARAMS"])
         # Seed the lane's private genome file so an in-run heal races from *this* lane's knobs.
         # healer.py's base is DEFAULT_PARAMS + whatever the notes file holds; without this the
@@ -368,6 +382,12 @@ def main(argv=None):
     )
     parser.add_argument("--no-memory", action="store_true", help="Disable all memory write-back")
     parser.add_argument(
+        "--sideloop-every",
+        type=int,
+        default=0,
+        help="Turns between per-lane AlphaEvolve self-heal subloops (0 = off; 400 is a sane cadence)",
+    )
+    parser.add_argument(
         "--max-turns-scale",
         type=float,
         default=1.0,
@@ -393,7 +413,7 @@ def main(argv=None):
             scaled_seg = dataclasses.replace(seg, max_turns=max(1, int(seg.max_turns * args.max_turns_scale)))
             for variant in scaled_seg.variants[: args.parallel]:
                 vdir = run_dir / scaled_seg.name / variant["label"]
-                cmd, env = build_agent_cmd(args.rom, scaled_seg, variant, vdir, baton, run_dir)
+                cmd, env = build_agent_cmd(args.rom, scaled_seg, variant, vdir, baton, run_dir, args.sideloop_every)
                 print(f"# {scaled_seg.name}/{variant['label']}")
                 print(f"EVOLVE_PARAMS='{env['EVOLVE_PARAMS']}' \\\n  {' '.join(cmd)}")
             print(f"# ... then baton = {run_dir / 'batons' / (seg.name + '.state')}")
@@ -425,6 +445,7 @@ def main(argv=None):
                 parallel=args.parallel,
                 timeout=args.timeout,
                 grace=args.grace,
+                sideloop_every=args.sideloop_every,
             )
             attempts.append(
                 [
