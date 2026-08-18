@@ -86,6 +86,31 @@ ROUTES_PATH = SCRIPT_DIR.parent / "references" / "routes.json"
 # detour up to this many tiles longer is preferred over re-crossing one known grass tile.
 GRASS_ENCOUNTER_COST = 8
 
+# --- Pewter badge-1 heal loop -------------------------------------------------------------------
+# Measured 2026-08-17 (data/probe/b): from the Pewter arrival baton the agent walks map 2 -> Gym
+# (map 54) in ~10 turns and stands on Brock's tile ~40 turns later, so the badge-1 wall is NOT
+# navigation. It arrives at 3/48 HP (the Gym's Jr. Trainer — Diglett + Sandshrew — eats the rest of
+# a party that already crossed the forest unhealed) and Brock's Onix one-shots it: the lane whites
+# out and respawns in Pallet. Pewter's Pokemon Center sits on the map the lane is already standing
+# on, so the fix is to walk into it: heal before the Gym, retreat and heal again when the Gym
+# trainer leaves us too low for Brock.
+PEWTER_CITY_MAP = 2
+PEWTER_GYM_MAP = 54
+PEWTER_CENTER_MAP = 58
+PEWTER_CENTER_DOOR = (13, 25)  # Pewter City warp tile -> map 58 (from the map's own warp table)
+POKECENTER_NURSE_TILE = (3, 3)  # stand here, face up, press A: the Gen-1 Center counter/nurse
+# HP ratio (lead) at or below which we detour to the Center before walking into the Gym. Brock's
+# Onix (L14 Tackle/Screech, ~40 HP) trades ~6-12 per turn against ~12 from a L16 Charmeleon's
+# Ember, so the fight needs most of a full bar; anything under this loses on the last two turns.
+PEWTER_HEAL_GATE = 0.85
+# Inside the Gym: below this, walk back out the door and heal rather than meet Brock. Set high on
+# purpose — the Gym's Jr. Trainer costs ~12 HP, and Brock (Geodude L12 then Onix L14) costs close to
+# a full bar, so "healthy enough to keep walking" is not the same as "healthy enough for Brock".
+# The round trip to the Center and back is ~40 turns; losing the badge fight costs 4000.
+PEWTER_GYM_RETREAT_GATE = 0.9
+# Cap the round trips so a Center that refuses to heal (no room, wedged menu) cannot livelock.
+PEWTER_MAX_HEAL_TRIPS = 6
+
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
 # before it gives up and flees. Escapes livelocks where the only PP'd move can't end the fight
 # (e.g. a 0-power status move scored as "unknown") — the agent would otherwise loop forever.
@@ -830,7 +855,12 @@ class PokemonAgent:
         # Brock (gym 1) outcome, recorded once. Map id is parameterized because the
         # Pewter Gym interior is its own map (not Pewter City map 2); set BROCK_MAP_ID
         # once discovered to pin detection, otherwise fall back to a level heuristic.
-        self.brock_map_id: int | None = int(os.environ["BROCK_MAP_ID"]) if os.environ.get("BROCK_MAP_ID") else None
+        # Gym 1's interior map. Identifying Brock by map id is the only reliable signal: the
+        # opponent snapshot below is taken on the first battle turn, before the game has finished
+        # writing the enemy struct, so it can read stale garbage (measured 2026-08-17: Brock's
+        # Geodude L12 snapshotted as "Pidgey L3", which sank the >=12 level fallback and left
+        # brock_won null on a run that DID take the badge). Overridable via BROCK_MAP_ID.
+        self.brock_map_id: int = int(os.environ.get("BROCK_MAP_ID") or PEWTER_GYM_MAP)
         self.brock_turns: int | None = None
         self.brock_won: bool | None = None
         self.brock_lead_species: str | None = None
@@ -1151,6 +1181,22 @@ class PokemonAgent:
                 return "down"  # walk south away from door
             return "left"  # sidestep to avoid door on return north
 
+        # Pewter badge-1 heal loop (Center round trip); None everywhere else.
+        heal = self._pewter_heal_action(state)
+        if heal is not None:
+            return heal
+
+        # Inside the Gym the route is a six-waypoint walk across a 10x14 room: a backtrack restore
+        # there teleports the agent back to the door mat (or out to Pewter) and undoes a correct
+        # climb, which is exactly what probe E measured — it stood on Brock's face tile and was
+        # yanked back to (4,13) three times before the turn budget ran out. Treat the Gym like the
+        # quest pilot's routes: deterministic navigation, no restores.
+        if state.map_id == PEWTER_GYM_MAP and not (state.badges & 0x01):
+            self._quest_nav_active = True
+        engage = self._brock_engage_action(state)
+        if engage is not None:
+            return engage
+
         # In Oak's lab with no Pokemon: walk to the Pokeball table and pick one.
         # The Pallet Town script (0xD5F1) tracks the cutscene state but we don't
         # gate on it — the phases below handle all states by pressing B to
@@ -1389,6 +1435,109 @@ class PokemonAgent:
         when it can and otherwise sweeps along the boundary to the real exit column, learning the
         map-edge non-exits as it goes (via the failed-move hard-blocks)."""
         return self.world.cross_step(state.map_id, state.x, state.y, goal)
+
+    def _brock_engage_action(self, state: OverworldState) -> str | None:
+        """Start (and keep starting) the Brock fight once the Gym route has climbed to his row.
+
+        The route waypoints end on the face tile (5,1); after that the navigator has nothing left
+        to return and the agent falls back to a bare "a". Measured (probe E): that press does
+        nothing, because A* can arrive along the y=1 row from the east and the player is then facing
+        LEFT into the wall at (4,1) — the agent stood one tile from the badge pressing A into a wall
+        for 2000 turns. Facing is not readable as a plan input, so cycle it: face a direction, press
+        A, rotate. Brock is adjacent from this tile in exactly one of the four, and the press that
+        finds him opens his challenge dialogue (captured as a discovery) and then the battle.
+        """
+        if state.map_id != PEWTER_GYM_MAP or (state.badges & 0x01):
+            return None
+        if state.y > 2 or not (3 <= state.x <= 7):  # only in Brock's row, at the top of the room
+            return None
+        n = getattr(self, "_brock_press", 0)
+        self._brock_press = n + 1
+        if n % 2:
+            return "a"
+        facing = ["up", "left", "right", "down"][(n // 2) % 4]
+        if n % 8 == 0:
+            self.log(f"BROCK | map=54 pos=({state.x},{state.y}) engaging — face {facing} then A (press {n})")
+        return facing
+
+    def _pewter_heal_action(self, state: OverworldState) -> str | None:
+        """Drive the Pewter Pokemon Center round trip before the Brock fight, or ``None``.
+
+        Three legs, all keyed off the lead's HP ratio and the Boulder Badge bit:
+
+        * map 2 (Pewter City) below ``PEWTER_HEAL_GATE`` -> pilot onto the Center's warp tile;
+        * map 58 (the Center) -> stand at the counter, face the nurse and press A until the party
+          reads full, then hand back to ``_building_exit`` which walks us out the door;
+        * map 54 (the Gym) below ``PEWTER_GYM_RETREAT_GATE`` -> pilot onto the Gym's own warp and
+          leave, which drops us on map 2 and re-enters leg one.
+
+        Returns ``None`` once the badge is won, off these maps, or when the party is healthy, so
+        the normal quest/waypoint navigation is untouched everywhere else.
+        """
+        if state.map_id not in (PEWTER_CITY_MAP, PEWTER_GYM_MAP, PEWTER_CENTER_MAP):
+            return None
+        if state.badges & 0x01:  # badge in hand: never detour again
+            return None
+        party = self.memory.read_party()
+        if not party or party[0]["max_hp"] <= 0:
+            return None
+        ratio = party[0]["hp"] / party[0]["max_hp"]
+
+        if state.map_id == PEWTER_CENTER_MAP:
+            if ratio >= 0.999:
+                if not getattr(self, "_pewter_heal_done", False):
+                    self._pewter_heal_done = True
+                    self._heal_trip_open = False  # this trip is spent; a later dip opens a new one
+                    self.log(f"HEAL | map=58 party healed to {party[0]['hp']}/{party[0]['max_hp']} — leaving")
+                return None  # healthy indoors: _building_exit walks us back to Pewter
+            self._pewter_heal_done = False
+            d = self._pilot_to(state, *POKECENTER_NURSE_TILE)
+            if d is not None:
+                return d
+            # On the counter tile: alternate facing the nurse and talking. The yes/no prompt is a
+            # text box, so the text_box_active branch above mashes A through it (cursor defaults to
+            # YES) — we only have to keep pressing.
+            self._nurse_toggle = not getattr(self, "_nurse_toggle", False)
+            if self.turn_count % 40 == 0:
+                self.log(f"HEAL | map=58 pos=({state.x},{state.y}) at counter hp={party[0]['hp']}/{party[0]['max_hp']}")
+            return "up" if self._nurse_toggle else "a"
+
+        trips = getattr(self, "_pewter_heal_trips", 0)
+        if trips >= PEWTER_MAX_HEAL_TRIPS:
+            return None
+
+        if state.map_id == PEWTER_GYM_MAP:
+            if ratio >= PEWTER_GYM_RETREAT_GATE:
+                return None
+            warps = self.memory.read_warps()
+            if not warps:
+                return None
+            wx, wy, _dest = min(warps, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))
+            if not getattr(self, "_gym_retreat", False):
+                self._gym_retreat = True
+                self.log(
+                    f"RETREAT | map=54 pos=({state.x},{state.y}) hp={party[0]['hp']}/{party[0]['max_hp']} "
+                    f"-> gym door ({wx},{wy}) to heal"
+                )
+            d = self._pilot_to(state, wx, wy)
+            return d if d is not None else "down"  # standing on the mat: step off it southward
+
+        # map 2 — Pewter City.
+        self._gym_retreat = False
+        if ratio >= PEWTER_HEAL_GATE:
+            self._heal_trip_open = False
+            return None
+        d = self._pilot_to(state, *PEWTER_CENTER_DOOR)
+        if d is None:
+            return "up"  # on the door tile and not warped yet: press into it
+        if not getattr(self, "_heal_trip_open", False):
+            self._heal_trip_open = True
+            self._pewter_heal_trips = trips + 1
+            self.log(
+                f"HEAL | map=2 pos=({state.x},{state.y}) hp={party[0]['hp']}/{party[0]['max_hp']} "
+                f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
+            )
+        return d
 
     def _building_exit(self, state: OverworldState) -> str | None:
         """Direction toward the nearest exit warp when standing inside a building nothing has a
@@ -2399,6 +2548,10 @@ class PokemonAgent:
                     self._battle_my_max_hp = battle.player_max_hp
                     self._battle_enemy_type = battle.enemy_type_name
                     self._battle_my_move_types = [MOVE_DATA.get(m, ("", "none", 0, 0))[1] for m in battle.moves if m]
+                    self.log(
+                        f"BATTLE START | type={self._battle_type} map={self._battle_map_id} "
+                        f"opp={self._battle_opponent_species} L{self._battle_opponent_level}"
+                    )
                     self._battle_had_healing = self.memory.find_healing_item() is not None
 
                     # Learn the grass: a wild battle (type 1) fires on the tile the agent just
@@ -2427,6 +2580,14 @@ class PokemonAgent:
                         self.pyboy.save_state(f)
                     self._trainer_state_saved = True
                     self.log(f"Saved trainer-battle state (map {save_trainer_target}) to {save_trainer_path}")
+
+                # The first-turn snapshot above can catch the enemy struct mid-write, so keep the
+                # highest level actually observed during the fight — that is what identifies a gym
+                # leader for fitness (and it is also the level of the ace, not the lead).
+                if battle.battle_type and battle.enemy_level > self._battle_opponent_level:
+                    self._battle_opponent_level = battle.enemy_level
+                    if not self._battle_opponent_species or self._battle_opponent_species == "Unknown":
+                        self._battle_opponent_species = battle.enemy_species_name
 
                 # Battle-wedge watchdog: if the battle state is identical to the previous turns,
                 # the screen is frozen and neither run nor fight can land. Recover before acting.
@@ -2484,8 +2645,7 @@ class PokemonAgent:
                     # the low-level Viridian Forest bug-catcher trainers. The badge bit
                     # (Boulder Badge = bit 0) is the authoritative win signal.
                     is_brock = self._battle_type == 2 and (
-                        (self.brock_map_id is not None and self._battle_map_id == self.brock_map_id)
-                        or (self.brock_map_id is None and self._battle_opponent_level >= 12)
+                        self._battle_map_id == self.brock_map_id or self._battle_opponent_level >= 12
                     )
                     if self.brock_turns is None and is_brock:
                         lead = self._pre_battle_species[0] if self._pre_battle_species else 0

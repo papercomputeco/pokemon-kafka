@@ -38,14 +38,20 @@ REDS_HOUSE_1F = 37  # the blackout respawn point (fainting with no Center visite
 QUEST_MAPS = frozenset({PALLET_TOWN, VIRIDIAN_CITY, ROUTE_1, ROUTE_2, VIRIDIAN_FOREST, OAKS_LAB, VIRIDIAN_MART})
 
 # The maps the GO_NORTH pilot crosses by walking north: the outdoor corridor to Pewter and the two
-# forest gate buildings on it (both have a north exit). Pewter Gym is listed because the badge
-# segment enters it from Pewter and Brock stands at its north end, so "north" is still the way
-# forward there. Anywhere else with the Pokédex in hand — a Pokémon Center, a Mart, a house —
-# piloting north just presses into a counter forever (the Pewter Center wedge at (11,3) that every
-# 08-15/16 lane hit; evals/cases/pewter-pokecenter-exit.json), so the quest declines to steer and
-# the agent's generic building-exit rule walks back out the door.
+# forest gate buildings on it (both have a north exit). Anywhere else with the Pokédex in hand — a
+# Pokémon Center, a Mart, a house — piloting north just presses into a counter forever (the Pewter
+# Center wedge at (11,3) that every 08-15/16 lane hit; evals/cases/pewter-pokecenter-exit.json), so
+# the quest declines to steer and the agent's generic building-exit rule walks back out the door.
+#
+# Pewter Gym (54) used to be listed here on the theory that Brock stands at its north end so
+# "north" is still forward. Measured 2026-08-17 (data/probe/c): it is not. The pilot is
+# ``cross_step``, which hunts for a walkable tile on the map's north EDGE — and the Gym's row y=0 is
+# solid wall, so cross_step sweeps the boundary forever. A lane that had already healed and beaten
+# the Gym trainer then burned 1400 of its 1500 turns two-cycling (4,2)<->(4,6), one step and one
+# turn away from Brock's tile at (5,1). The Gym now has interior waypoints in routes.json instead,
+# which end ON Brock's face tile; the quest must stay out of the way for them to run.
 GO_NORTH_PILOT_MAPS = frozenset(
-    {PALLET_TOWN, ROUTE_1, ROUTE_2, VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST, VIRIDIAN_FOREST_NORTH_GATE, PEWTER_GYM}
+    {PALLET_TOWN, ROUTE_1, ROUTE_2, VIRIDIAN_FOREST_SOUTH_GATE, VIRIDIAN_FOREST, VIRIDIAN_FOREST_NORTH_GATE}
 )
 
 # --- Phases ---

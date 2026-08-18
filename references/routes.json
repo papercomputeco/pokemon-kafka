@@ -50,6 +50,20 @@
     ]
   },
 
+  "54": {
+    "name": "Pewter Gym",
+    "_comment": "Interior geometry read back from a lane's own WorldMap (data/probe/c+d/world.map, 2026-08-17): a 10x14 room entered on the door mats at (4,13)/(5,13), with row y=0 solid wall and Brock's sprite blocking (5,0) — there is no north map edge here, which is why the parcel quest's 'pilot north' (cross_step) swept the boundary forever instead of walking to Brock. Rock rows run across y=3, y=5, y=7 and y=9 with gaps only at x=4-5 (y=3/y=9) and x=1,3-4,8 (y=5/y=7). The straight climb up x=4 is blocked at (4,5) by the Jr. Trainer, who faces away — the player bumps his back forever without even starting the battle (probe D: 2000 turns, 0 battles, wedged at (4,6)). These waypoints take the east detour around him: up x=4 to y=8, east along the open y=8 row to x=8, north up the x=8 gap to y=4, west along y=4 to x=5, then north through the y=3 gap to Brock's face tile. The last waypoint IS the face tile: the navigator runs out of waypoints there and the agent's default 'a' talks to Brock.",
+    "waypoints": [
+      {"x": 4, "y": 10, "note": "North off the door mats up the open x=4 column"},
+      {"x": 4, "y": 8,  "note": "Through the y=9 gap (only x=4-5 are open)"},
+      {"x": 8, "y": 8,  "note": "East along the open y=8 row — around the Jr. Trainer parked at (4,5)"},
+      {"x": 8, "y": 4,  "note": "North up the x=8 gap through the y=7 and y=5 rock rows"},
+      {"x": 5, "y": 4,  "note": "West along y=4 to the y=3 gap"},
+      {"x": 5, "y": 2,  "note": "North through the y=3 gap (x=4-5) into Brock's row"},
+      {"x": 5, "y": 1,  "note": "Brock's face tile — waypoints end here and the agent presses A"}
+    ]
+  },
+
   "2": {
     "name": "Pewter City",
     "_comment": "Doors are the map's warp table (read back from wWarpEntries): Gym (16,17)->54, Pokemon Center (13,25)->58, Mart (23,17)->56, Museum (14,7)/(19,5)->52. The old first waypoint (13,25) 'Enter from forest' WAS the Pokemon Center door — every lane walked in and wedged at the counter (evals/cases/pewter-pokecenter-exit.json) — and the old 'Pewter Gym' waypoint (16,11) is open ground north of the building. Layout (emulator BFS from the Route 2 entry): a fence spans y=21 for x<=18 with the gap at x>=19; the Gym block (x 12-17, y 14-17) is fenced on its east side (x=18, y 18-21), so its door is reached from the west: north up x=19, west along y=13, south down x=10, east along y=18.",
