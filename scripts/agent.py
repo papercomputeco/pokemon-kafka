@@ -111,6 +111,13 @@ PEWTER_GYM_RETREAT_GATE = 0.9
 # Cap the round trips so a Center that refuses to heal (no room, wedged menu) cannot livelock.
 PEWTER_MAX_HEAL_TRIPS = 6
 
+# The badge_to_mtmoon leg: Pewter Gym (54) -> Pewter (2) -> Route 3 (14) -> Mt. Moon 1F (59).
+# Route 3 and Mt. Moon 1F are uncharted in references/routes.json by design — the leg never
+# hard-codes their tiles. Each hop's destination is the current map's own warp-table entry that
+# leads to the next hop (see _mtmoon_action); the game is the source of geometry.
+ROUTE_3_MAP = 14
+MT_MOON_1F_MAP = 59
+
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
 # before it gives up and flees. Escapes livelocks where the only PP'd move can't end the fight
 # (e.g. a 0-power status move scored as "unknown") — the agent would otherwise loop forever.
@@ -1186,6 +1193,13 @@ class PokemonAgent:
         if heal is not None:
             return heal
 
+        # Badge 1 in hand: the way to Mt. Moon. Takes the exit of whichever map the lane is on —
+        # the only door on 54, the east edge on 2, the cave warps on 14 — before the pre-badge
+        # Pewter machinery or the waypoint navigator can steer it at the Gym door again.
+        mtmoon = self._mtmoon_action(state)
+        if mtmoon is not None:
+            return mtmoon
+
         # Inside the Gym the route is a six-waypoint walk across a 10x14 room: a backtrack restore
         # there teleports the agent back to the door mat (or out to Pewter) and undoes a correct
         # climb, which is exactly what probe E measured — it stood on Brock's face tile and was
@@ -1538,6 +1552,50 @@ class PokemonAgent:
                 f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
             )
         return d
+
+    def _mtmoon_action(self, state: OverworldState) -> str | None:
+        """With Badge 1 in hand, drive the current map's own exit toward Mt. Moon. ``None`` elsewhere.
+
+        The road is 54 (Pewter Gym) -> 2 (Pewter) -> 14 (Route 3) -> 59 (Mt. Moon 1F). Every hop's
+        destination is read from the game's live warp table (``wWarps``, the same API the heal
+        leg uses) rather than baked in: map 54's only warp heads to Pewter; on map 2 the warps
+        that leave to Route 3 (14) are exactly the east-edge exits we want (the others are the
+        Gym 54, Center 58, Mart 56, Museum 52 — all backwards); on map 14 the only warps to
+        Mt. Moon 1F (59) are the cave entrance. The route to those tiles is the accumulated
+        WorldMap A* (`_pilot_to`): unknown ground reads optimistically walkable so the pilot
+        draws straight for the exit, failed steps hard-block the wall, and the backtrack
+        restore breaks wedges — the same machinery that already crossed the city's fences and
+        the forest maze.
+
+        Gated on the badge bit so the pre-badge Pewter segment (heal trip, Brock engage, gym
+        waypoints) is untouched, and on the three transit maps only, so it never fires on the
+        destination (59), inside a Center, or anywhere off the road.
+        """
+        if not (state.badges & 0x01):
+            return None
+        dest = {
+            PEWTER_GYM_MAP: PEWTER_CITY_MAP,
+            PEWTER_CITY_MAP: ROUTE_3_MAP,
+            ROUTE_3_MAP: MT_MOON_1F_MAP,
+        }.get(state.map_id)
+        if dest is None:
+            return None
+        exits = [w for w in (self.memory.read_warps() or []) if w[2] == dest]
+        if not exits:
+            return None  # warp table unreadable (mid transition) or no door to the next hop
+        wx, wy = min(exits, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))[:2]
+        if state.x == wx and state.y == wy:
+            # Warps fire on the step that lands on them, so a state read on the tile is either
+            # mid-transition or stale; the map change happens on its own from here.
+            return "down"
+        if getattr(self, "_mtmoon_logged", None) != state.map_id:
+            self._mtmoon_logged = state.map_id
+            self.log(
+                f"MTMOON | map={state.map_id} pos=({state.x},{state.y}) "
+                f"-> warp ({wx},{wy}) to map {dest}"
+            )
+        d = self._pilot_to(state, wx, wy)
+        return d if d is not None else "down"
 
     def _building_exit(self, state: OverworldState) -> str | None:
         """Direction toward the nearest exit warp when standing inside a building nothing has a

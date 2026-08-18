@@ -440,6 +440,13 @@ def main(argv=None):
     parser.add_argument("--timeout", type=float, default=1200.0, help="Per-segment wall clock (s)")
     parser.add_argument("--grace", type=float, default=90.0, help="Straggler grace after first success (s)")
     parser.add_argument("--seed-state", default=str(DEFAULT_SEED))
+    parser.add_argument(
+        "--seed-worldmap",
+        default=None,
+        help="Learned map (worldmap JSON) the seed starts from — e.g. the previous segment's "
+        "winning lane's .worldmap. Each lane gets its own copy; the relay's default is a "
+        "blank map so a lane rediscovers what the previous run already knew.",
+    )
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Print the lane commands; launch nothing")
     parser.add_argument("--memory-dir", default=str(DEFAULT_MEMORY_DIR), help="observations.md dir for win write-back")
@@ -480,7 +487,11 @@ def main(argv=None):
         if args.run_dir
         else (WORKSPACE / "data" / "relay" / datetime.now(timezone.utc).strftime("%y%m%d-%H%M%S"))
     )
-    baton = Baton(state_path=Path(args.seed_state), worldmap_path=None, genome={})
+    baton = Baton(
+        state_path=Path(args.seed_state),
+        worldmap_path=Path(args.seed_worldmap) if args.seed_worldmap else None,
+        genome={},
+    )
 
     if args.dry_run:
         for seg in segments:
