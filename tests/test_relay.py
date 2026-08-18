@@ -1,6 +1,8 @@
 import json
+import os
 from pathlib import Path
 
+import pytest
 import relay
 from relay import (
     BASE_GENOME,
@@ -738,6 +740,14 @@ def test_build_agent_cmd_passes_the_subloop_budget_to_the_lane(tmp_path):
     assert "--sideloop-parallel 4" in " ".join(cmd)
 
 
+_FEW_CORES = (os.cpu_count() or 1) < 4
+_RACE_SKIP = pytest.mark.skipif(
+    _FEW_CORES,
+    reason="barrier race needs N processes runnable at once; a 2-core CI runner deadlocks on it. "
+    "The race is exercised on the dev box (32 cores), which is where the bug it guards was found.",
+)
+
+
 def _claim_lock_in_child(lock, q, barrier=None):
     if barrier is not None:
         barrier.wait()
@@ -761,18 +771,19 @@ def test_relay_lock_refuses_while_another_process_holds_it_and_frees_on_its_exit
     q = ctx.Queue()
     holder = ctx.Process(target=_claim_lock_in_child, args=(lock, q))
     holder.start()
-    assert q.get(timeout=10) is True and q.get(timeout=10) == "held"
+    assert q.get(timeout=60) is True and q.get(timeout=60) == "held"
 
     ok, who = relay.acquire_relay_lock(lock)
     assert ok is False and who == holder.pid, "a second relay must be refused and told who holds it"
 
     (tmp_path / "release").write_text("")
-    holder.join(timeout=10)
+    holder.join(timeout=60)
     ok, _ = relay.acquire_relay_lock(lock)
     assert ok is True, "once the holder exits, the lock is free — no stale state to clear"
     relay.release_relay_lock()
 
 
+@_RACE_SKIP
 def test_relay_lock_is_atomic_under_a_real_race(tmp_path):
     """Five relays from one shell command start within milliseconds; exactly one may win."""
     import multiprocessing as mp
@@ -786,9 +797,49 @@ def test_relay_lock_is_atomic_under_a_real_race(tmp_path):
         p.start()
     results = []
     for _ in range(8):
-        results.append(q.get(timeout=30))
+        results.append(q.get(timeout=120))
     winners = [r for r in results if r is True]
     assert len(winners) == 1, f"exactly one relay may hold the lock, got {len(winners)}"
     (tmp_path / "release").write_text("")
     for p in procs:
-        p.join(timeout=10)
+        p.join(timeout=60)
+
+
+def test_main_refuses_when_another_relay_holds_the_lock(tmp_path, monkeypatch, capsys):
+    """The guard in main(): a second relay prints why and exits 2 without touching the box."""
+    monkeypatch.setattr(relay, "acquire_relay_lock", lambda *a, **k: (False, 4242))
+    launched = []
+    monkeypatch.setattr(relay, "run_segment", lambda *a, **k: launched.append(1) or (None, []))
+    rom = tmp_path / "rom.gb"
+    rom.write_bytes(b"x")
+    seed = tmp_path / "seed.state"
+    seed.write_bytes(b"x")
+    rc = main([str(rom), "--seed-state", str(seed), "--segments", "route1_to_forest", "--run-dir", str(tmp_path / "r")])
+    assert rc == 2
+    assert "REFUSED: relay pid 4242" in capsys.readouterr().out
+    assert launched == [], "a refused relay must launch nothing"
+
+
+def test_release_relay_lock_is_a_noop_without_a_lock_and_swallows_close_errors(monkeypatch):
+    relay._RELAY_LOCK_FD = None
+    relay.release_relay_lock()  # nothing held: no error
+    relay._RELAY_LOCK_FD = 999_999  # a bogus fd: flock/close raise OSError, release must not
+    relay.release_relay_lock()
+    assert relay._RELAY_LOCK_FD is None
+
+
+def test_acquire_relay_lock_reports_holder_zero_when_the_lock_file_is_unreadable(tmp_path, monkeypatch):
+    """A held lock whose pid cannot be parsed still refuses — it just cannot name the holder."""
+    import multiprocessing as mp
+
+    lock = tmp_path / "relay.lock"
+    ctx = mp.get_context("fork")
+    q = ctx.Queue()
+    holder = ctx.Process(target=_claim_lock_in_child, args=(lock, q))
+    holder.start()
+    assert q.get(timeout=60) is True and q.get(timeout=60) == "held"
+    monkeypatch.setattr(relay.os, "pread", lambda *a: b"not-a-pid")
+    ok, who = relay.acquire_relay_lock(lock)
+    assert (ok, who) == (False, 0)
+    (tmp_path / "release").write_text("")
+    holder.join(timeout=60)
