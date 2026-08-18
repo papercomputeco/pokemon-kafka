@@ -34,7 +34,11 @@ jobs:
       - run: uv sync --group dev
 
       - name: Run tests with coverage
-        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+        # -v names each test as it starts; faulthandler dumps every thread's stack if one test
+        # runs past 120 s, so a hang shows up as a traceback in the log instead of a job that
+        # sits at "in progress" until the 6 h runner limit. timeout-minutes bounds the whole job.
+        timeout-minutes: 20
+        run: uv run pytest -v --cov --cov-report=term-missing --cov-report=xml -o faulthandler_timeout=120
 
       - name: Upload coverage report
         if: always()
