@@ -2971,6 +2971,9 @@ def main():
             recorder.finish(fitness if fitness is not None else {})
         if game_pub is not None:
             game_pub.close()
+        # The emulator is done: give the core back now, not at process exit. The self-heal that
+        # follows (healer.py check) is a parameter race of its own and takes its own slots.
+        slot.release()
 
     if args.output_json:
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)

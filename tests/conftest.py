@@ -5,6 +5,22 @@ from unittest.mock import MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _private_emulator_slot_pool(tmp_path, monkeypatch):
+    """Point every test at its own slot pool with plenty of slots.
+
+    agent.main() acquires a box-wide emulator slot before it builds the agent (default wait
+    900 s). The pool is sized cores-2, which is ONE slot on a 2-vCPU CI runner; a test whose
+    mocked PokemonAgent never exits then holds that slot for the process lifetime and every later
+    main() test blocks on it — the suite hung at "in progress" for 10+ minutes, three times, and
+    never reproduced on a 32-core dev box. Tests must not touch the real pool at all.
+    """
+    import emulator_slots
+
+    monkeypatch.setattr(emulator_slots, "DEFAULT_DIR", tmp_path / "slots")
+    monkeypatch.setenv("POKEMON_EMULATOR_SLOTS", "64")
+
+
 class FakeMemory:
     """Dict-backed memory that mimics pyboy.memory[addr] access."""
 
