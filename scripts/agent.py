@@ -787,6 +787,12 @@ class PokemonAgent:
         # Sideloop spawning: every sideloop_every turns, snapshot the live state and race AlphaEvolve
         # variants in the background (sideloop.py); the winning genome comes back through the advice inbox.
         self.sideloop_every = 0  # turns between live-snapshot sideloops (0 = off)
+        # A subloop only heals the run that spawned it if it FINISHES before that run does: the
+        # lane keeps playing at ~30 turns/s while the subloop races, so a 6x800-turn race (~90 s)
+        # never lands inside a segment shorter than ~2700 turns. Keep the race short enough that
+        # its winner comes back to a lane still playing.
+        self.sideloop_horizon = 250  # turns each subloop lane plays from the snapshot
+        self.sideloop_parallel = 6  # subloop lanes raced at once (one wave, not two)
         self.sideloop_proc = None  # at most one AlphaEvolve subloop in flight
         self.sideloop_popen = subprocess.Popen  # injectable for tests
         # Oak's Parcel quest: drives the Viridian Mart pickup → Oak delivery → Old-Man gate, the
@@ -1071,6 +1077,10 @@ class PokemonAgent:
                 str(work_dir),
                 "--advice-out",
                 str(Path(self.advice_inbox_dir) / "sideloop.jsonl"),
+                "--horizon",
+                str(self.sideloop_horizon),
+                "--parallel",
+                str(self.sideloop_parallel),
             ]
             self.sideloop_proc = self.sideloop_popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.log(f"SIDELOOP | spawned at turn {self.turn_count} -> {work_dir}")
@@ -2839,6 +2849,19 @@ def main():
         help="Poll the advice inbox every N loop turns (default: 50)",
     )
     parser.add_argument(
+        "--slot-wait",
+        type=float,
+        default=float(os.environ.get("POKEMON_SLOT_WAIT", "900")),
+        help="Seconds to wait for a box-wide emulator slot before giving up (0 = skip if the box is full; "
+        "subloop lanes use 0 so a heal never starves the lane it is healing)",
+    )
+    parser.add_argument(
+        "--sideloop-parallel",
+        type=int,
+        default=6,
+        help="Subloop lanes raced at once (relay sizes this from the CPU budget)",
+    )
+    parser.add_argument(
         "--sideloop-every",
         type=int,
         default=0,
@@ -2849,6 +2872,24 @@ def main():
     if not Path(args.rom).exists():
         print(f"ROM not found: {args.rom}")
         sys.exit(1)
+
+    # Box-wide emulator budget: every PyBoy on the machine — relay lane, subloop lane, another
+    # worktree's leftover — draws from one pool sized to the core count. Without this, self-heal
+    # subloops multiplied concurrent relays into 238 emulators on 32 cores, and starved lanes
+    # reported as wedged rather than as slow. A lane that cannot get a core says so and exits 0
+    # with no fitness file, which the relay/sideloop already read as "no result".
+    from emulator_slots import acquire as _acquire_slot
+    from emulator_slots import busy as _slots_busy
+    from emulator_slots import slot_count as _slot_count
+
+    slot = _acquire_slot(wait_s=max(0.0, args.slot_wait), log=lambda m: print(f"[agent] {m}", flush=True))
+    if slot is None:
+        print(
+            f"[agent] SLOT | no free emulator slot ({_slots_busy()}/{_slot_count()} busy) after "
+            f"{args.slot_wait:.0f}s — skipping this run rather than starving the box",
+            flush=True,
+        )
+        sys.exit(0)
 
     # Set up real-time game event publisher (local JSONL)
     game_pub = None
@@ -2876,6 +2917,7 @@ def main():
     agent.in_run_heal_notes = args.in_run_heal_notes
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.sideloop_parallel = max(1, args.sideloop_parallel)
     agent.sideloop_every = max(0, args.sideloop_every)
 
     # One run identity for the whole session: recorder folder, live tile, and
@@ -2929,6 +2971,9 @@ def main():
             recorder.finish(fitness if fitness is not None else {})
         if game_pub is not None:
             game_pub.close()
+        # The emulator is done: give the core back now, not at process exit. The self-heal that
+        # follows (healer.py check) is a parameter race of its own and takes its own slots.
+        slot.release()
 
     if args.output_json:
         Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)

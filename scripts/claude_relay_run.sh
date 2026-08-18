@@ -19,6 +19,10 @@ BUDGET_S="${BUDGET_S:-10800}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PARENT="$(dirname "$REPO")"
 WT="$PARENT/pokemon-kafka-speedrun-${TAG}"
+# Whatever the operator leaves running when it exits (or is killed) is reaped, parents first, and
+# verified gone — a leftover relay in this worktree is invisible to the next run's guards until it
+# has already starved it.
+trap '"$REPO/scripts/reap_emulators.sh" "$WT" || true' EXIT
 SVC="game-event-bridge-${TAG}"
 OUT="${OUT_DIR:-$REPO/data/local_runs}"; mkdir -p "$OUT"
 PROMPT="${PROMPT_FILE:-$REPO/docs/prompts/operator_prompt_v2.md}"

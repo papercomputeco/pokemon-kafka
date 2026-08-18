@@ -148,3 +148,38 @@ def test_fitness_snapshot_disabled_without_path_or_interval(tmp_path):
     ag.turn_count = 0
     ag._maybe_snapshot_fitness(100, str(tmp_path / "a.json"))
     assert list(tmp_path.glob("*.json")) == []
+
+
+def test_sideloop_spawn_bounds_the_race_so_its_winner_can_land(tmp_path):
+    """A subloop that outlives its parent heals nobody.
+
+    The lane keeps playing while the subloop races, so the race has to be short enough to finish
+    inside the segment that spawned it. Regression for a smoke run where 6x800-turn subloops were
+    still in flight at lane exit and wrote their winners to an inbox nobody was left to read.
+    """
+    spawned = {}
+
+    class _Proc:
+        returncode = 0
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        spawned["cmd"] = cmd
+        return _Proc()
+
+    ag = _make_agent(tmp_path)
+    ag.advice_inbox_dir = str(tmp_path)
+    ag.sideloop_every = 10
+    ag.turn_count = 10
+    ag.rom_path = "rom.gb"
+    ag.evolve_params = {}
+    ag.sideloop_popen = fake_popen
+    ag._tick_sideloop()
+
+    cmd = spawned["cmd"]
+    horizon = int(cmd[cmd.index("--horizon") + 1])
+    parallel = int(cmd[cmd.index("--parallel") + 1])
+    assert horizon <= 400, "a long horizon pushes the winner past the parent's exit"
+    assert parallel >= 6, "fewer lanes than the spread means two waves, doubling the race"

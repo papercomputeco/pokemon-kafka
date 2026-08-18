@@ -20,6 +20,8 @@ BUDGET_S="${BUDGET_S:-10800}"                      # hard kill; the mission text
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PARENT="$(dirname "$REPO")"
 WT="$PARENT/pokemon-kafka-speedrun-pi-${TAG}"
+# Reap whatever the operator leaves running, parents first, verified gone (see reap_emulators.sh).
+trap '"$REPO/scripts/reap_emulators.sh" "$WT" || true' EXIT
 SVC="game-event-bridge-pi-${TAG}"
 OUT="${OUT_DIR:-$REPO/data/local_runs}"; mkdir -p "$OUT"
 PROMPT="${PROMPT_FILE:-$REPO/docs/prompts/operator_prompt_v2.md}"

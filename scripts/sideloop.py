@@ -9,6 +9,7 @@ pokemon.advice.v1 genome_patch line — the game hot-applies it between turns an
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -45,6 +46,10 @@ def advice_line(genome, source="sideloop"):
 
 def run_sideloop(rom, state_path, genome, work_dir, advice_out, horizon=800, parallel=4, timeout=600.0, **race_kwargs):
     """Race lanes from the snapshot; append the winner's genome as advice. Returns the winner."""
+    # Subloop lanes are the low-priority tenant of the box-wide emulator pool: they ask for a slot
+    # with no wait, so under load a heal is skipped (the lane logs "SIDELOOP | finished rc=1")
+    # instead of queuing behind — and starving — the very lane it is trying to heal.
+    os.environ.setdefault("POKEMON_SLOT_WAIT", "0")
     baton = Baton(state_path=Path(state_path), worldmap_path=None, genome=genome)
     seg = sideloop_segment(horizon)
     winner, _results = run_segment(
