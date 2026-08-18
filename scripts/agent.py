@@ -2849,6 +2849,13 @@ def main():
         help="Poll the advice inbox every N loop turns (default: 50)",
     )
     parser.add_argument(
+        "--slot-wait",
+        type=float,
+        default=float(os.environ.get("POKEMON_SLOT_WAIT", "900")),
+        help="Seconds to wait for a box-wide emulator slot before giving up (0 = skip if the box is full; "
+        "subloop lanes use 0 so a heal never starves the lane it is healing)",
+    )
+    parser.add_argument(
         "--sideloop-parallel",
         type=int,
         default=6,
@@ -2865,6 +2872,24 @@ def main():
     if not Path(args.rom).exists():
         print(f"ROM not found: {args.rom}")
         sys.exit(1)
+
+    # Box-wide emulator budget: every PyBoy on the machine — relay lane, subloop lane, another
+    # worktree's leftover — draws from one pool sized to the core count. Without this, self-heal
+    # subloops multiplied concurrent relays into 238 emulators on 32 cores, and starved lanes
+    # reported as wedged rather than as slow. A lane that cannot get a core says so and exits 0
+    # with no fitness file, which the relay/sideloop already read as "no result".
+    from emulator_slots import acquire as _acquire_slot
+    from emulator_slots import busy as _slots_busy
+    from emulator_slots import slot_count as _slot_count
+
+    slot = _acquire_slot(wait_s=max(0.0, args.slot_wait), log=lambda m: print(f"[agent] {m}", flush=True))
+    if slot is None:
+        print(
+            f"[agent] SLOT | no free emulator slot ({_slots_busy()}/{_slot_count()} busy) after "
+            f"{args.slot_wait:.0f}s — skipping this run rather than starving the box",
+            flush=True,
+        )
+        sys.exit(0)
 
     # Set up real-time game event publisher (local JSONL)
     game_pub = None

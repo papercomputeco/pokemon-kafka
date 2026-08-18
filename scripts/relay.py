@@ -14,6 +14,7 @@ per lane.
 
 import argparse
 import dataclasses
+import fcntl
 import json
 import os
 import shutil
@@ -102,83 +103,55 @@ SEGMENTS = (
 )
 
 
-LOCK_PATH = WORKSPACE / "data" / "relay" / ".relay.lock"
+# Box-wide, not per-worktree: the relay that starves this one may be a leftover in a sibling
+# worktree, which a lock under WORKSPACE/data can never see.
+LOCK_PATH = Path(os.environ.get("POKEMON_SLOTS_DIR", "/tmp/pokemon-kafka-slots")) / "relay.lock"
+_RELAY_LOCK_FD = None  # held for the life of the process; the kernel drops it if we die
 
 
-def _pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
-
-
-STALE_LOCK_S = 10.0
-
-
-def acquire_relay_lock(lock_path=None, pid=None, alive=None, now=None):
+def acquire_relay_lock(lock_path=None, pid=None):
     """Refuse to start while another relay owns the box. Returns (ok, holder_pid).
 
     Parallel relays multiply every lane, and the box silently stops delivering the ~30 turns/s the
     segment budgets assume. The lanes then report as wedged, so the model reads a CPU shortage as a
     navigation wall and "fixes" the wrong thing.
 
-    Two things have to be true at once, and the second is the one that bites:
-
-    1. The claim is atomic — O_CREAT | O_EXCL, so creation itself is the claim and exactly one of
-       five relays launched from one shell command can win.
-    2. An unreadable lock is NOT assumed stale. O_EXCL creates the file empty and the pid lands a
-       moment later; a racing claimant that reads that window sees no pid. Treating it as stale (as
-       the first version of this did) makes every racer delete the winner's lock and take it — 4 of
-       8 claimants won in the race test. An empty lock younger than STALE_LOCK_S is therefore read
-       as "held by someone mid-write" and refused. Older than that, it is a crash between create
-       and write, and is cleared so a dead relay never blocks the next one.
+    fcntl.flock, not a pid file: it is atomic across processes (five relays launched from one shell
+    command start within milliseconds — a read-then-write check let all five through) and the
+    kernel releases it when the holder dies, so there is no stale state to detect and no
+    create-then-stamp window to race (the pid-file version lost that race 4 times out of 8).
     """
+    global _RELAY_LOCK_FD
     lock_path = Path(lock_path or LOCK_PATH)
-    alive = alive or _pid_alive
-    now = now or time.time
     pid = pid or os.getpid()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    for _attempt in (0, 1):
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            try:
-                holder = int(lock_path.read_text().strip() or 0)
-            except (OSError, ValueError):
-                holder = 0
-            if holder == pid:
-                return True, pid
-            if holder:
-                if alive(holder):
-                    return False, holder
-            else:  # created but not yet stamped — the writer is milliseconds behind
-                try:
-                    age = now() - lock_path.stat().st_mtime
-                except OSError:
-                    age = 0.0
-                if age < STALE_LOCK_S:
-                    return False, 0
-            try:  # stale: holder dead, or stamped never arrived
-                lock_path.unlink()
-            except OSError:
-                pass
-            continue
-        with os.fdopen(fd, "w") as f:
-            f.write(str(pid))
-        return True, pid
-    return False, 0
+            holder = int(os.pread(fd, 32, 0).decode().strip() or 0)
+        except (OSError, ValueError):
+            holder = 0
+        os.close(fd)
+        return False, holder
+    os.ftruncate(fd, 0)
+    os.write(fd, str(pid).encode())
+    _RELAY_LOCK_FD = fd
+    return True, pid
 
 
 def release_relay_lock(lock_path=None, pid=None):
-    """Drop the lock if we still hold it; never raise, a failed release must not fail the run."""
-    lock_path = Path(lock_path or LOCK_PATH)
-    pid = pid or os.getpid()
+    """Drop the lock if we hold it; never raise, a failed release must not fail the run."""
+    global _RELAY_LOCK_FD
+    if _RELAY_LOCK_FD is None:
+        return
     try:
-        if lock_path.exists() and lock_path.read_text().strip() == str(pid):
-            lock_path.unlink()
+        fcntl.flock(_RELAY_LOCK_FD, fcntl.LOCK_UN)
+        os.close(_RELAY_LOCK_FD)
     except OSError:
         pass
+    _RELAY_LOCK_FD = None
 
 
 def sideloop_parallel_for(lanes, cpus=None):

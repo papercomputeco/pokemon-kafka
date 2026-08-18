@@ -714,33 +714,6 @@ def test_run_segment_passes_sideloop_cadence_to_every_lane(tmp_path):
         assert cmd[cmd.index("--sideloop-every") + 1] == "250"
 
 
-def test_acquire_relay_lock_refuses_while_a_live_relay_holds_it(tmp_path):
-    """Parallel relays starve every lane; a starved lane reports as wedged, not as slow."""
-    lock = tmp_path / "relay.lock"
-    ok, holder = relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
-    assert (ok, holder) == (True, 100)
-    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True)
-    assert ok is False and holder == 100
-
-
-def test_acquire_relay_lock_takes_over_a_stale_lock(tmp_path):
-    """A killed relay must not block the next one — the holder is checked for liveness, not trusted."""
-    lock = tmp_path / "relay.lock"
-    relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
-    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: False)
-    assert ok is True and holder == 200
-    assert lock.read_text() == "200"
-
-
-def test_release_relay_lock_only_drops_our_own(tmp_path):
-    lock = tmp_path / "relay.lock"
-    relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
-    relay.release_relay_lock(lock, pid=200)
-    assert lock.exists(), "a relay must never release a lock it does not hold"
-    relay.release_relay_lock(lock, pid=100)
-    assert not lock.exists()
-
-
 def test_sideloop_parallel_is_budgeted_from_the_cpu_count():
     """6 lanes x 6 subloops on a 32-core box is 42 emulators — the starvation that invalidated a run."""
     assert relay.sideloop_parallel_for(6, cpus=32) == 4  # 6 lanes + 24 subloop lanes <= 32
@@ -765,40 +738,57 @@ def test_build_agent_cmd_passes_the_subloop_budget_to_the_lane(tmp_path):
     assert "--sideloop-parallel 4" in " ".join(cmd)
 
 
-def test_acquire_relay_lock_is_atomic_under_a_real_race(tmp_path):
-    """Five relays launched from one shell command start within milliseconds of each other.
+def _claim_lock_in_child(lock, q, barrier=None):
+    if barrier is not None:
+        barrier.wait()
+    ok, holder = relay.acquire_relay_lock(lock)
+    q.put(ok)
+    if ok:  # hold it until told to let go, so the parent can observe refusal
+        q.put("held")
+        while not (lock.parent / "release").exists():
+            import time as _t
 
-    A read-then-write check lets all five pass before any writes, which is exactly how a 2 h
-    benchmark run ended up with 238 emulators on a 32-core box. The lock must be won by creation,
-    so this races real processes rather than simulating the interleaving.
-    """
+            _t.sleep(0.05)
+        relay.release_relay_lock()
+
+
+def test_relay_lock_refuses_while_another_process_holds_it_and_frees_on_its_exit(tmp_path):
+    """flock is per-process: it must be tested across processes, and it must vanish with the holder."""
     import multiprocessing as mp
 
     lock = tmp_path / "relay.lock"
+    ctx = mp.get_context("fork")
+    q = ctx.Queue()
+    holder = ctx.Process(target=_claim_lock_in_child, args=(lock, q))
+    holder.start()
+    assert q.get(timeout=10) is True and q.get(timeout=10) == "held"
 
-    def claim(q, barrier):
-        barrier.wait()  # release all claimants at once
-        ok, _holder = relay.acquire_relay_lock(lock, alive=lambda p: True)
-        q.put(ok)
+    ok, who = relay.acquire_relay_lock(lock)
+    assert ok is False and who == holder.pid, "a second relay must be refused and told who holds it"
 
+    (tmp_path / "release").write_text("")
+    holder.join(timeout=10)
+    ok, _ = relay.acquire_relay_lock(lock)
+    assert ok is True, "once the holder exits, the lock is free — no stale state to clear"
+    relay.release_relay_lock()
+
+
+def test_relay_lock_is_atomic_under_a_real_race(tmp_path):
+    """Five relays from one shell command start within milliseconds; exactly one may win."""
+    import multiprocessing as mp
+
+    lock = tmp_path / "relay.lock"
     ctx = mp.get_context("fork")
     q = ctx.Queue()
     barrier = ctx.Barrier(8)
-    procs = [ctx.Process(target=claim, args=(q, barrier)) for _ in range(8)]
+    procs = [ctx.Process(target=_claim_lock_in_child, args=(lock, q, barrier)) for _ in range(8)]
     for p in procs:
         p.start()
+    results = []
+    for _ in range(8):
+        results.append(q.get(timeout=30))
+    winners = [r for r in results if r is True]
+    assert len(winners) == 1, f"exactly one relay may hold the lock, got {len(winners)}"
+    (tmp_path / "release").write_text("")
     for p in procs:
-        p.join(timeout=30)
-
-    winners = [q.get() for _ in range(8)]
-    assert sum(winners) == 1, f"exactly one relay may hold the lock, got {sum(winners)}"
-
-
-def test_acquire_relay_lock_refuses_an_unstamped_lock_but_clears_an_old_one(tmp_path):
-    """The create-then-stamp window: empty and fresh means held, empty and old means crashed."""
-    lock = tmp_path / "relay.lock"
-    lock.write_text("")  # created by O_EXCL, pid not yet written
-    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True, now=lambda: lock.stat().st_mtime + 1)
-    assert (ok, holder) == (False, 0), "a lock mid-write must not be mistaken for a stale one"
-    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True, now=lambda: lock.stat().st_mtime + 999)
-    assert (ok, holder) == (True, 200), "a crash between create and stamp must not block forever"
+        p.join(timeout=10)
