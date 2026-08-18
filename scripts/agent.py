@@ -2849,6 +2849,12 @@ def main():
         help="Poll the advice inbox every N loop turns (default: 50)",
     )
     parser.add_argument(
+        "--sideloop-parallel",
+        type=int,
+        default=6,
+        help="Subloop lanes raced at once (relay sizes this from the CPU budget)",
+    )
+    parser.add_argument(
         "--sideloop-every",
         type=int,
         default=0,
@@ -2886,6 +2892,7 @@ def main():
     agent.in_run_heal_notes = args.in_run_heal_notes
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.sideloop_parallel = max(1, args.sideloop_parallel)
     agent.sideloop_every = max(0, args.sideloop_every)
 
     # One run identity for the whole session: recorder folder, live tile, and

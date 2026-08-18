@@ -712,3 +712,54 @@ def test_run_segment_passes_sideloop_cadence_to_every_lane(tmp_path):
     assert len(launched) == 2
     for cmd in launched:
         assert cmd[cmd.index("--sideloop-every") + 1] == "250"
+
+
+def test_acquire_relay_lock_refuses_while_a_live_relay_holds_it(tmp_path):
+    """Parallel relays starve every lane; a starved lane reports as wedged, not as slow."""
+    lock = tmp_path / "relay.lock"
+    ok, holder = relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
+    assert (ok, holder) == (True, 100)
+    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: True)
+    assert ok is False and holder == 100
+
+
+def test_acquire_relay_lock_takes_over_a_stale_lock(tmp_path):
+    """A killed relay must not block the next one — the holder is checked for liveness, not trusted."""
+    lock = tmp_path / "relay.lock"
+    relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
+    ok, holder = relay.acquire_relay_lock(lock, pid=200, alive=lambda p: False)
+    assert ok is True and holder == 200
+    assert lock.read_text() == "200"
+
+
+def test_release_relay_lock_only_drops_our_own(tmp_path):
+    lock = tmp_path / "relay.lock"
+    relay.acquire_relay_lock(lock, pid=100, alive=lambda p: True)
+    relay.release_relay_lock(lock, pid=200)
+    assert lock.exists(), "a relay must never release a lock it does not hold"
+    relay.release_relay_lock(lock, pid=100)
+    assert not lock.exists()
+
+
+def test_sideloop_parallel_is_budgeted_from_the_cpu_count():
+    """6 lanes x 6 subloops on a 32-core box is 42 emulators — the starvation that invalidated a run."""
+    assert relay.sideloop_parallel_for(6, cpus=32) == 4  # 6 lanes + 24 subloop lanes <= 32
+    assert relay.sideloop_parallel_for(6, cpus=8) == 1  # never zero, never unbounded
+    assert relay.sideloop_parallel_for(1, cpus=64) == 6  # capped at the spread width
+    assert relay.sideloop_parallel_for(6, cpus=4) == 1
+
+
+def test_build_agent_cmd_passes_the_subloop_budget_to_the_lane(tmp_path):
+    vdir = tmp_path / "v"
+    baton = relay.Baton(state_path=tmp_path / "s.state", worldmap_path=None, genome={})
+    cmd, _ = relay.build_agent_cmd(
+        "rom.gb",
+        relay.SEGMENTS[0],
+        {"label": "base"},
+        vdir,
+        baton,
+        tmp_path,
+        sideloop_every=300,
+        sideloop_parallel=4,
+    )
+    assert "--sideloop-parallel 4" in " ".join(cmd)

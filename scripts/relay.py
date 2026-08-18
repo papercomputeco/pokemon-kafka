@@ -102,7 +102,66 @@ SEGMENTS = (
 )
 
 
-def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0):
+LOCK_PATH = WORKSPACE / "data" / "relay" / ".relay.lock"
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def acquire_relay_lock(lock_path=None, pid=None, alive=None):
+    """Refuse to start while another relay owns the box. Returns (ok, holder_pid).
+
+    An operator that launches relays in parallel multiplies every lane by the number of relays,
+    and the box silently stops delivering the ~30 turns/s the segment budgets assume. The lanes
+    then report as wedged, so the model reads a CPU shortage as a navigation wall and "fixes" the
+    wrong thing. A stale lock (holder gone) is taken over rather than honoured, so a killed relay
+    never blocks the next one.
+    """
+    lock_path = Path(lock_path or LOCK_PATH)
+    alive = alive or _pid_alive
+    pid = pid or os.getpid()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if lock_path.exists():
+        try:
+            holder = int(lock_path.read_text().strip() or 0)
+        except ValueError:
+            holder = 0
+        if holder and holder != pid and alive(holder):
+            return False, holder
+    lock_path.write_text(str(pid))
+    return True, pid
+
+
+def release_relay_lock(lock_path=None, pid=None):
+    """Drop the lock if we still hold it; never raise, a failed release must not fail the run."""
+    lock_path = Path(lock_path or LOCK_PATH)
+    pid = pid or os.getpid()
+    try:
+        if lock_path.exists() and lock_path.read_text().strip() == str(pid):
+            lock_path.unlink()
+    except OSError:
+        pass
+
+
+def sideloop_parallel_for(lanes, cpus=None):
+    """How many subloop lanes each relay lane may race at once, given the box.
+
+    Every relay lane is a headless emulator pinning a core, and each spawns its own subloop race
+    on top. Unbudgeted, six lanes x six subloop lanes is 42 emulators on a 32-core box: the lanes
+    slow below the ~30 turns/s the segment budgets assume, hit --max-turns without moving, and
+    report as wedged. That failure is indistinguishable from a real navigation wall in the report,
+    which makes it the expensive kind of wrong.
+    """
+    cpus = cpus or os.cpu_count() or 4
+    return max(1, min(6, (cpus - lanes) // max(1, lanes)))
+
+
+def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0, sideloop_parallel=None):
     """Build (argv, extra-env) for one variant lane. Pure — no filesystem access."""
     genome = {**BASE_GENOME, **baton.genome, **{k: v for k, v in variant.items() if k != "label"}}
     cmd = [
@@ -145,6 +204,8 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0):
         str(vdir / "advice"),
     ]
     if sideloop_every:
+        if sideloop_parallel:
+            cmd += ["--sideloop-parallel", str(sideloop_parallel)]
         # The AlphaEvolve subloop: every N turns the lane snapshots itself, races variants from
         # that snapshot in the background and hot-applies the winner between turns. In-run heal
         # is reactive and one-shot (it waits for a terminal wedge); this heals the whole time.
@@ -279,9 +340,11 @@ def run_segment(
     if pick is None:
         pick = pick_winner
     lanes = {}
+    lane_count = len(seg.variants[:parallel])
+    subloop_parallel = sideloop_parallel_for(lane_count) if sideloop_every else None
     for variant in seg.variants[:parallel]:
         vdir = prepare_variant_dir(seg_dir, variant, baton)
-        cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every)
+        cmd, extra_env = build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every, subloop_parallel)
         genome = json.loads(extra_env["EVOLVE_PARAMS"])
         # Seed the lane's private genome file so an in-run heal races from *this* lane's knobs.
         # healer.py's base is DEFAULT_PARAMS + whatever the notes file holds; without this the
@@ -382,6 +445,11 @@ def main(argv=None):
     )
     parser.add_argument("--no-memory", action="store_true", help="Disable all memory write-back")
     parser.add_argument(
+        "--allow-concurrent",
+        action="store_true",
+        help="Run even if another relay holds the lock (the row it produces is not a verdict)",
+    )
+    parser.add_argument(
         "--sideloop-every",
         type=int,
         default=0,
@@ -426,6 +494,17 @@ def main(argv=None):
         print(f"[relay] seed state not found: {baton.state_path}")
         return 1
 
+    if not args.allow_concurrent:
+        ok, holder = acquire_relay_lock()
+        if not ok:
+            print(
+                f"[relay] REFUSED: relay pid {holder} is already running. Each relay launches up to "
+                f"{args.parallel} emulators (plus subloops); running them in parallel starves every "
+                "lane, and a starved lane reports as wedged — a CPU shortage read as a navigation "
+                "wall. Wait for it, or pass --allow-concurrent (that run is not a verdict)."
+            )
+            return 2
+
     (run_dir / "batons").mkdir(parents=True, exist_ok=True)
 
     report = {"run_dir": str(run_dir), "segments": []}
@@ -466,6 +545,7 @@ def main(argv=None):
         if winner is None:
             _write_report(run_dir, report)
             print(f"[relay] FAILED at {seg.name} after 2 attempts — report: {run_dir / 'report.json'}")
+            release_relay_lock()
             return 1
         baton = promote_winner(run_dir, seg, winner)
         f = winner["fitness"]
@@ -482,6 +562,7 @@ def main(argv=None):
     _write_report(run_dir, report)
     print(f"[relay] CONQUERED {' -> '.join(s.name for s in segments)}")
     print(f"[relay] final baton: {baton.state_path} | report: {run_dir / 'report.json'}")
+    release_relay_lock()
     return 0
 
 
