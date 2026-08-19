@@ -4,7 +4,7 @@
 # (Claude Code has its own compaction and permission model), no power sampler (cloud).
 #
 #   scripts/claude_relay_run.sh <model> [base-commit]      e.g. scripts/claude_relay_run.sh claude-haiku-4-5-20251001 main
-#   RUN_TAG=haiku-cc-r2 ... for a rerun; ASSIST=none|tips (consult is a pi tool; not available here)
+#   RUN_TAG=haiku-cc-r2 ... for a rerun; ASSIST=none|tips|fit|all (consult is a pi tool; not available here)
 #
 # Captured to tapes via `tapesctl start --tapes-url http://localhost:8082 claude` (the ingest port; the
 # read port 404s — see memory). ANTHROPIC_API_KEY is unset for the run so the claude.ai login (Max) is
@@ -41,6 +41,16 @@ case "$ASSIST" in
 
 ## Tips from past runs (each one proved lift on a fresh model before it was written here)
 $(grep '^- ' "$TIPS")"; fi ;;
+esac
+# ASSIST=fit: append this model's measured operator character (references/model_fit.json) — what it
+# is good at, what it tends to do on a wall, and the concrete move to make instead. Knowledge from
+# other runs, so the row is assisted and labelled; compare only with other fit rows. An unlisted
+# model gets nothing and the run says so, so a new roster entry never silently becomes assisted.
+case "$ASSIST" in
+  fit|all) FIT="$(cd "$REPO" && uv run python scripts/model_fit.py section "$MODEL" 2>/dev/null)"
+    if [ -n "$FIT" ]; then MISSION="$MISSION
+
+$FIT"; else echo "   (ASSIST=fit: no fit entry for $MODEL — running unassisted)"; ASSIST="none"; fi ;;
 esac
 echo "== assist: $ASSIST"
 
