@@ -104,6 +104,22 @@ guardrails cap it; the design response is smaller reads, deliverables committed 
 per obstacle *before* the next relay call. `qwen38-27b` at 27B dense is the exception that reads,
 edits and tests — and pays 3× the per-turn latency for it.
 
+## Making it context — `ASSIST=fit`
+
+`references/model_fit.json` is this file's machine-readable twin: per model, the characters it plays
+well and badly, a few lines of guidance written against its measured tendency, and a `measured`
+block that `scripts/model_fit.py update <sessions...>` regenerates from `role_metrics`. Launch with
+`ASSIST=fit` and `scripts/model_fit.py section <model>` is appended to the mission — the model is
+told what it is good at, what it tends to do on a wall, its own numbers, and the concrete move to
+make instead. That is knowledge from other runs, so the row is **assisted** and labelled; it is
+compared with the same model's `none` row, on the same signals, and nothing else. An unlisted model
+gets no section and the launcher says so, so adding a model never silently assists it.
+
+The first question it can answer is the one this file keeps circling: if Haiku is told *"0 probes
+in 9 relays, twice — when two relays end on the same tile the next command is one lane"*, does its
+probe/relay leave zero? If it does, the Driver verdict is partly a prompt artefact. If it does not,
+it is the model.
+
 ## How to use this
 
 - **Open path** (a segment some model has already cleared): run the Drivers. Haiku is the baseline;

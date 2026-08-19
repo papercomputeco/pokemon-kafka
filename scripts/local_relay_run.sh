@@ -32,7 +32,8 @@ PI_CLI="${PI_CLI:-$(ls "$HOME"/.local/share/fnm/node-versions/*/installation/lib
 #   ASSIST=none     (default) no tips, no consult — the row is comparable to every earlier benchmark row
 #   ASSIST=tips     append docs/prompts/tips.md (gated tips from scripts/advisor.py promote) to the mission
 #   ASSIST=consult  register the `consult` (Oracle) tool in the guardrails
-#   ASSIST=both     both
+#   ASSIST=fit      append this model's measured operator character (references/model_fit.json, scripts/model_fit.py)
+#   ASSIST=both     tips + consult;  ASSIST=all  tips + consult + fit
 # The bench row label carries the assist mode; assisted rows are a separate comparison.
 ASSIST="${ASSIST:-none}"
 TIPS="$REPO/docs/prompts/tips.md"
@@ -44,7 +45,15 @@ case "$ASSIST" in
 ## Tips from past runs (each one proved lift on a fresh model before it was written here)
 $(grep '^- ' "$TIPS")"; fi ;;
 esac
-case "$ASSIST" in consult|both) export PI_GUARD_CONSULT=1 ;; *) unset PI_GUARD_CONSULT ;; esac
+case "$ASSIST" in consult|both|all) export PI_GUARD_CONSULT=1 ;; *) unset PI_GUARD_CONSULT ;; esac
+# ASSIST=fit: this model's measured operator character (references/model_fit.json) appended to the
+# mission. Knowledge from other runs -> assisted row, labelled. Unlisted alias -> nothing, and says so.
+case "$ASSIST" in
+  fit|all) FIT="$(cd "$REPO" && uv run python scripts/model_fit.py section "$ALIAS" 2>/dev/null)"
+    if [ -n "$FIT" ]; then MISSION="$MISSION
+
+$FIT"; else echo "   (ASSIST=fit: no fit entry for $ALIAS — running unassisted)"; ASSIST="none"; fi ;;
+esac
 echo "== assist: $ASSIST"
 curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }

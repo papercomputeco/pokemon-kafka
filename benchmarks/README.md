@@ -73,8 +73,15 @@ context window, cost and speed per unit of progress.
 Every row is **unassisted** unless it says otherwise: the model, the mission, the guardrails
 (timeouts, result cap, read cap, compaction) and nothing that carries knowledge from other runs.
 The advisors (`scripts/advisor.py`) can assist a run in two opt-in ways — gated tips appended to
-the mission (`ASSIST=tips`) and the `consult` Oracle tool (`ASSIST=consult`; `both`) — and
-`scripts/local_relay_run.sh` puts the mode in the row label (`assist=none|tips|consult|both`).
+the mission (`ASSIST=tips`), the `consult` Oracle tool (`ASSIST=consult`), and — new — the model's own
+measured operator character (`ASSIST=fit`: `references/model_fit.json` rendered by
+`scripts/model_fit.py section <model>`, which tells a Driver it is a Driver and what move to make
+on a wall instead of re-racing; `all` = every assist) — and both launchers put the mode in the row
+label (`assist=none|tips|consult|fit|both|all`). `fit` answers a specific question: **does knowing
+its own tendency change a model's behaviour?** — measured by `scripts/role_metrics.py` on the
+session (probe/relay, calls before the first relay, early exit) against the same model's `none`
+row. `scripts/model_fit.py update <sessions...>` folds real sessions back into the `measured`
+block, so the guidance a model receives carries its own numbers.
 Assisted rows answer a different question ("how much does the accumulated knowledge help this
 model?") and are compared only with each other or with the same model's unassisted row. Never
 average them into the model-vs-model tables.
