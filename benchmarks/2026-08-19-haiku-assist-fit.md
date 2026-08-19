@@ -54,8 +54,12 @@ $1.86, 121 turns, `success`. Worktree `speedrun/haiku-cc-mtmoon-fit`, 8 commits.
 
 ## Next
 
-- `model_fit.py update` folded this session in: Haiku is now 3 sessions, probe/relay 1.4 avg,
-  early exit 3 of 3. The fit section a future run receives carries these numbers automatically.
+- This session is deliberately NOT folded into `measured{}`. Doing so was the first draft of this
+  file, and it is a bug twice over: `update` replaces rather than merges (a partial list shrinks
+  the history), and an assisted session in `measured` makes the assist measure itself — the block
+  exists to describe the *unassisted* tendency that the fit section corrects against.
+  `measured{}` stays: Haiku 2 unassisted sessions, probe/relay 0.0, early exit 2/2, with this row
+  beside it as the assisted comparison. `update`'s docstring now says so.
 - The symmetric experiment: `ASSIST=fit` on **qwen38-27b** (told: "state the furthest tile before
   any 'impossible'") on Route 3 — its wall was the inverse of Haiku's.
 - Harness-side continuation is now the top early-exit lever; mission text is exhausted.

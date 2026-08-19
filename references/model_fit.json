@@ -22,13 +22,14 @@
         "Keep working after the summary is written. Three of your runs ended with 80+ minutes left and an unsolved, named blocker; each was graded a failure of the run."
       ],
       "measured": {
-        "sessions": 1,
-        "probe_per_relay": 3.25,
-        "calls_before_first_relay": 53.0,
-        "code_files_edited_per_session": 3.0,
-        "early_exit_sessions": 1,
+        "sessions": 2,
+        "probe_per_relay": 0.0,
+        "calls_before_first_relay": 28.5,
+        "code_files_edited_per_session": 3.5,
+        "early_exit_sessions": 2,
         "labels": [
-          "haiku-cc-mtmoon-fit"
+          "haiku-cc-brock-r4",
+          "haiku-cc-mtmoon"
         ]
       }
     },
