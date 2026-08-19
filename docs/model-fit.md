@@ -30,15 +30,47 @@ Investigator (SUMMARY §10's suggestion) is how you get both.
 | model | harness | Driver | Investigator | Experimenter | Reporter | rests on |
 |---|---|---|---|---|---|---|
 | **Opus 5** | Claude Code | — (not measured on an open path) | **strong** | **strong** — the defining trait | **strong**, and it corrects the *operator* (caught the seed-manifest error, wrote it into the learnings) | Brock, 2026-08-17: 30 single-lane probes vs 4 relay calls; three-obstacle diagnosis with a causal read of the type chart; refuted the corrupted-baton prior; badge in 14 min. Not a benchmark row — a fix source. |
-| **Haiku 4.5** | Claude Code | **strong** | weak — reads code early (`relay.py` at call 8) but stops at the pointer it was handed; edits are one-line and untested against the emulator | weak — 11 probes vs 20 relays; re-races the spread hoping it finds the wall | mixed: honest numbers on the reports it *ran*; **quotes a log line that does not exist** in `self-healing-observed.md` (r4); inflates its own wall clock ~2.4× | 08-16 r2 (1/4, 11 min, 2 honest commits, no code read); Brock r4 (removed the pilot-map suppression — correct — then aimed at (3,9) beside the door and quit at 15.6 min with 1h44m left, calling it "37 of 120 minutes"). |
+| **Haiku 4.5** | Claude Code | **strong** | weak — reads code early (`relay.py` at call 8) but stops at the pointer it was handed; edits are one-line and untested against the emulator | **absent** — 0 probes vs 9 relays, on both missions; re-races the spread hoping it finds the wall | mixed: honest numbers on the reports it *ran*; **quotes a log line that does not exist** in `self-healing-observed.md` (r4); inflates its own wall clock ~2.4× | 08-16 r2 (1/4, 11 min, 2 honest commits, no code read); Brock r4 (removed the pilot-map suppression — correct — then aimed at (3,9) beside the door and quit at 15.6 min with 1h44m left, calling it "37 of 120 minutes"). |
 | **Sonnet 5 / Kimi K2.6** | pi | ok | **investigator** | — | honest unresolved entries | 08-15 Mt. Moon relay (SUMMARY §10). Not rerun since; verdict is 08-15 vintage. |
-| **qwen38-27b** | pi, local | slow (9.9–24.8 s/turn) | **investigator, needs the guard** | some | **strong** — r8's `baton-integrity-refuted.md`; "N/A — not attempted" where true | r7 (`world_map.py` livelock fix + tests), r8 (`agent.py` settle-gate + 3 tests). Two runs, two real fixes, neither a genome tweak. Quits early (r8: 17 min, 2.4 h left). |
+| **qwen38-27b** | pi, local | slow (9.9–24.8 s/turn) | **investigator, needs the guard** | **strong on Mt. Moon** — 33 probes, 305 calls before its one relay; all six lanes to Route 3 | **strong** — r8's `baton-integrity-refuted.md`; "N/A — not attempted" where true | r7 (`world_map.py` livelock fix + tests), r8 (`agent.py` settle-gate + 3 tests). Two runs, two real fixes, neither a genome tweak. Quits early (r8: 17 min, 2.4 h left). |
 | **laguna-xs** | pi, local | **strong** — Haiku's cadence (3.3–4.0 s/turn), reached the Gym first | attempts, unverified ("✅ FIXED" on a failing relay) | — | honest about what it saw; wrong about what it fixed | r1, r2. Whole-file reads → 12 compactions → amnesia; needs `PI_GUARD_READ_LIMIT`. |
 | **qwen3-coder-30b** | pi, local | — | — | — | **fabricated run history** | 08-16 (0/4, 12 min). Retired from the operator seat. |
 | glm / nemotron / qwen35b / qwen36 | pi, local | — | — | — | — | went silent on the quiz (thinking budget); never ran a relay. Not verdicts, just not run. |
 
 Bold = a strength backed by more than one run, or one run with a result that could not have
 happened without it (the badge).
+
+## The signals, measured
+
+`scripts/role_metrics.py` extracts the behaviours above from a session transcript (Claude Code
+stream-json or a pi session) — executions, not mentions: a `grep` of `agent.py` is a code read, not
+a probe. Eight sessions from 2026-08-16 → 08-18; every row regenerates with one command
+(`uv run python scripts/role_metrics.py <logs...>`).
+
+| run | harness | wall m | calls | relay | probes | probe/relay | calls→1st relay | code reads→1st edit | calls→1st edit | code files | tests | learnings | commits | early exit |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| opus5-cc-brock | claude-code | 16.2 | 67 | 1 | 9 | 9.0 | 57 | 14 | 27 | 3 | 0 | 3 | 0 | no |
+| haiku-cc-brock-r4 | claude-code | 15.5 | 133 | 9 | 0 | 0.0 | 46 | 17 | 37 | 4 | 1 | 3 | 3 | yes |
+| haiku-cc-mtmoon | claude-code | 38.5 | 80 | 9 | 0 | 0.0 | 11 | 3 | 11 | 3 | 0 | 3 | 6 | yes |
+| pi-laguna-xs-mtmoon | pi | 18.9 | 352 | 4 | 21 | 5.25 | 32 | 37 | 68 | 3 | 1 | 1 | 1 | no |
+| pi-qwen38-27b-mtmoon | pi | 95.3 | 309 | 1 | 33 | 33.0 | 305 | 25 | 33 | 4 | 5 | 1 | 3 | no |
+| pi-qwen38-27b-r8 | pi | 17.5 | 88 | 5 | 0 | 0.0 | 18 | 8 | 35 | 1 | 1 | 0 | 2 | yes |
+| pi-qwen38-27b-r7 | pi | 84.1 | 193 | 6 | 2 | 0.33 | 9 | 18 | 51 | 1 | 1 | 3 | 3 | yes |
+| pi-laguna-xs-r2 | pi | 37.2 | 398 | 6 | 1 | 0.17 | 10 | 4 | 42 | 3 | 0 | 3 | 0 | yes |
+
+How to read it:
+- **probe/relay** is the Experimenter signal. Opus 9.0 and qwen38-mtmoon 33.0 are the two runs that
+  cleared or reached the furthest point on their wall (badge; Route 3). Haiku is **0.0 on both
+  missions** — nine relays, zero single-lane probes, twice. Earlier counts that said 11 and 5 were
+  counting `grep`s.
+- **calls→1st relay** is the "think before racing" signal. qwen38-mtmoon ran **305 tool calls** (33
+  probes, 25 code reads, five test files) before its one relay — and every lane reached map 14. Haiku
+  on Mt. Moon raced at call 11. laguna-xs r2 and mtmoon both read a lot (37 code reads before any
+  edit) and got nowhere — reading is not investigating without the edit and the probe.
+- **early exit** is harness-independent and model-independent: 5 of 8 rows. The two longest local
+  runs (qwen38 r7 84 m, mtmoon 95 m) are the exceptions, and both carried the most tests.
+- **commits** come from the worktree branch, not the transcript; 0 for Opus because it was killed
+  before it committed.
 
 ## The patterns worth designing around
 
