@@ -108,17 +108,26 @@ that becomes a rule the supervisor executes instead of a decision made per-wall:
 - Workhorse economics stay: qwen38 local ≈ $0.26 energy/2 h leg; Sonnet/Opus only via the
   escalation tier or explicit choice.
 
-## Phasing
+## Delivery — all components in this PR
 
-| phase | ships | why first |
-|---|---|---|
-| **P0** | `rom_truth.py` extract + route + WorldMap seeding + spring regression tests | Deletes the measured #1 wall class outright; pure code, no harness risk; testable offline |
-| **P1** | supervisor: continuation + wedge nudges, replay tests | Turns existing budgets into used budgets; needed before "unlimited" means anything |
-| **P2** | `expedition_run.sh`: auto-resume + leg chaining + tip promotion | The outer loop; depends on P1's termination logic |
-| **P3** | Opus escalation tier | Needs P2's fingerprint history to know when to fire |
+| ships | files |
+|---|---|
+| ROM truth: extract / route / seed-worldmap, sha-guarded | `scripts/rom_truth.py`, `references/rom_truth.json`, `tests/test_rom_truth.py` |
+| Supervisor: exit classification, spring/stall fingerprints, replay | `scripts/supervisor.py`, `tests/test_supervisor.py` |
+| Outer loop: resume / continue / retry / escalate, advisor hand-off | `scripts/expedition_run.sh` |
+| Expedition mode + supervisor prompt injection | `MODE` / `MISSION_EXTRA_FILE` in both launchers |
+| Fix-source mission for the escalation tier | `docs/prompts/operator_prompt_fixsource.md` |
 
-Each phase is one PR with tests (CI holds the 100 % gate). P0 alone is worth running the current
-2 h benchmarks against — "does ROM truth move an unassisted row?" is itself a bench question
+**First result, before any run:** `rom_truth.py route 54 59` answers the question three 2-hour
+runs could not — `54 --mat--> 2 --east edge--> 14 --NORTH edge--> 15 --warp (18,5)--> 59`.
+Route 3's exit is its **north** connection to Route 4; qwen38's marches were sweeping an east
+edge that ROM truth shows is interior. Validation: Pewter's seven warps match the live-measured
+table byte-for-byte, the gym mats read LAST_MAP at (4,13)/(5,13), Route 3's warp table is empty
+at 70x18 — and the derived collision grids agree with the learned `badge1_gym_hp6.worldmap` on
+**465/465 cells** of map 2. Supervisor replay on the real runs fingerprints Sonnet's Center
+bounce (`2<->58`, 617 round trips in probe13 alone) and qwen38 r2's gate-room spring (`2<->57`).
+
+"Does ROM truth move an unassisted row?" remains a bench question in its own right
 (`ASSIST` stays none; `rom_truth.json` is repo data like `routes.json`, not an assist).
 
 ## Risks

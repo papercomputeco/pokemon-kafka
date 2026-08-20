@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# The expedition outer loop (docs/expedition-spec.md): one leg attempted repeatedly under the
+# supervisor until its baton exists, with harness deaths resumed, early exits continued, and
+# walls that eat `ESCALATE_AFTER` attempts handed to the fix-source tier. This is the cross-run
+# loop — the only loop that has ever cleared a wall — with the human replaced by
+# scripts/supervisor.py for everything except merging to main.
+#
+#   scripts/expedition_run.sh <model> <segment> [base-commit]
+#     e.g. scripts/expedition_run.sh qwen38-27b badge_to_mtmoon main
+#
+# Env: HARNESS=claude|local (default: claude for claude-* models, local otherwise)
+#      LEG_BUDGET_S per attempt (default 7200); MAX_ATTEMPTS safety cap (default 12)
+#      ESCALATE_MODEL (default claude-opus-5) + ESCALATE_BUDGET_S (default 1800, Brock took 14 min)
+#      PROMPT_FILE mission override; EXPEDITION_TAG names worktree/branch/state
+#
+# Every attempt is a normal launcher run (MODE=expedition), so capture, guards, reaping and the
+# bench row all work unchanged; expedition rows are labelled by mode and never enter the
+# model-vs-model tables. Merging fixes to main stays a human-gated PR — the expedition carries
+# its own fixes forward on its worktree branch and does not wait.
+set -euo pipefail
+
+MODEL="${1:?usage: expedition_run.sh <model> <segment> [base-commit]}"
+SEGMENT="${2:?usage: expedition_run.sh <model> <segment> [base-commit]}"
+BASE="${3:-main}"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+case "$MODEL" in claude-*) HARNESS="${HARNESS:-claude}" ;; *) HARNESS="${HARNESS:-local}" ;; esac
+LEG_BUDGET_S="${LEG_BUDGET_S:-7200}"
+MAX_ATTEMPTS="${MAX_ATTEMPTS:-12}"
+ESCALATE_MODEL="${ESCALATE_MODEL:-claude-opus-5}"
+ESCALATE_BUDGET_S="${ESCALATE_BUDGET_S:-1800}"
+TAG="${EXPEDITION_TAG:-exp-$(printf '%s' "$MODEL" | sed -E 's/[^a-z0-9]+/-/g')-${SEGMENT//_/-}}"
+OUT="$REPO/data/local_runs"
+STATE="$OUT/${TAG}.supervisor.json"
+EXTRA="$OUT/${TAG}.mission-extra.md"
+WT="$(dirname "$REPO")/pokemon-kafka-speedrun-${TAG}"
+LOG="$OUT/${TAG}.expedition.log"
+mkdir -p "$OUT"
+: > "$EXTRA"
+
+say() { echo "[expedition] $*" | tee -a "$LOG"; }
+
+launch() { # $1=model $2=budget $3=prompt-file-or-empty
+  local start rc
+  start=$(date +%s)
+  set +e
+  if [ "$HARNESS" = "claude" ] || [ "$1" != "$MODEL" ]; then
+    MODE=expedition RUN_TAG="$TAG" BUDGET_S="$2" MISSION_EXTRA_FILE="$EXTRA" \
+      ${3:+PROMPT_FILE="$3"} "$REPO/scripts/claude_relay_run.sh" "$1" "$BASE" >>"$LOG" 2>&1
+  else
+    MODE=expedition RUN_TAG="$TAG" BUDGET_S="$2" MISSION_EXTRA_FILE="$EXTRA" \
+      ${3:+PROMPT_FILE="$3"} "$REPO/scripts/local_relay_run.sh" "$1" "$BASE" >>"$LOG" 2>&1
+  fi
+  rc=$?
+  set -e
+  USED_S=$(( $(date +%s) - start ))
+  return $rc
+}
+
+attempt=0
+while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
+  attempt=$((attempt + 1))
+  say "attempt $attempt/$MAX_ATTEMPTS: $MODEL on $SEGMENT (budget ${LEG_BUDGET_S}s, harness $HARNESS)"
+  rc=0; launch "$MODEL" "$LEG_BUDGET_S" "${PROMPT_FILE:-}" || rc=$?
+
+  BATON=0
+  [ -e "$WT/batons/${SEGMENT}.state" ] || ls "$WT"/data/relay/*/batons/*.state >/dev/null 2>&1 && BATON=1
+  # Harness death per the guard's definition: the operator died without spending its budget and
+  # without saying anything — a timeout kill (rc 124) is the budget, any other nonzero is the box.
+  DEATH=0
+  [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && DEATH=1
+  LOAD_OK=1
+  [ "$(cut -d. -f1 /proc/loadavg)" -gt 60 ] && LOAD_OK=0
+
+  LANE_ARGS=()
+  while IFS= read -r f; do LANE_ARGS+=(--lane-log "$f"); done \
+    < <(find "$WT/data/relay" -name 'agent.log' -newer "$STATE" 2>/dev/null | head -40; \
+        find "$WT/data/relay" -name 'agent.log' 2>/dev/null | head -40)
+  DECISION=$(uv run python "$REPO/scripts/supervisor.py" classify-exit \
+    --state "$STATE" --budget "$LEG_BUDGET_S" --used "$USED_S" \
+    --baton "$BATON" --harness-death "$DEATH" --load-ok "$LOAD_OK" "${LANE_ARGS[@]:-}")
+  ACTION=$(printf '%s' "$DECISION" | uv run python -c 'import json,sys; print(json.load(sys.stdin)["action"])')
+  say "decision: $DECISION"
+
+  case "$ACTION" in
+    next_leg)
+      # Feed the cleared leg into the advisor pipeline (investigate -> design -> gate -> promote):
+      # investigate extracts candidate tips now; gate/promote still require proven lift, by design.
+      SESSION="$OUT/${TAG}.claude.jsonl"
+      [ -s "$SESSION" ] || SESSION="$(ls -t "$HOME/.pi/agent/sessions/"*"${TAG}"*/*.jsonl 2>/dev/null | head -1)"
+      say "leg cleared — baton written; investigating session ${SESSION:-'(none found)'}"
+      [ -s "${SESSION:-}" ] && uv run python "$REPO/scripts/advisor.py" investigate "$SESSION" \
+        --worktree "$WT" --no-design >>"$LOG" 2>&1 || true
+      exit 0 ;;
+    continue|resume|retry_leg)
+      printf '%s' "$DECISION" | uv run python -c \
+        'import json,sys; print(json.load(sys.stdin).get("prompt",""))' > "$EXTRA"
+      "$REPO/scripts/reap_emulators.sh" "$WT" >>"$LOG" 2>&1 || true ;;
+    escalate)
+      WALL=$(printf '%s' "$DECISION" | uv run python -c 'import json,sys; print(json.load(sys.stdin)["wall"])')
+      say "escalating wall $WALL to $ESCALATE_MODEL (fix source, ${ESCALATE_BUDGET_S}s)"
+      { echo "## The wall"; echo "Fingerprint: $WALL, unresolved after repeated attempts."
+        echo "Evidence: docs/learnings/ in worktree $WT, supervisor state $STATE."
+        uv run python "$REPO/scripts/rom_truth.py" route "${WALL%%<->*}" "${WALL##*<->}" 2>/dev/null || true
+      } > "$EXTRA"
+      RUN_TAG="${TAG}-fixsource-$attempt" HARNESS=claude \
+        launch "$ESCALATE_MODEL" "$ESCALATE_BUDGET_S" "$REPO/docs/prompts/operator_prompt_fixsource.md" || true
+      : > "$EXTRA" ;;
+    stop_alert|*)
+      say "stopping: $ACTION — the box needs a human"; exit 3 ;;
+  esac
+done
+say "attempt cap ($MAX_ATTEMPTS) reached without a baton"; exit 4
