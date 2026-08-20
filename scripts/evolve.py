@@ -112,8 +112,8 @@ MAP_PROGRESS = {
     # picker was inverted exactly for the segment it was healing. Keep the ladder climbing past
     # the badge.
     54: 9,  # Pewter Gym (same tier as its city: the badge, not the door, is the progress)
-    14: 10, # Route 3
-    59: 11, # Mt. Moon 1F
+    14: 10,  # Route 3
+    59: 11,  # Mt. Moon 1F
 }
 
 

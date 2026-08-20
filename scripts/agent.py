@@ -1599,7 +1599,12 @@ class PokemonAgent:
         # march's state on 14 survives, so a re-entry resumes where the crossing left off.
         if prev is not None and prev.map_id == ROUTE_3_MAP:
             self._mtmoon_all_edges = None
-            self._mtmoon_edge[PEWTER_CITY_MAP] = {"i": 0, "stuck": 0, "tried": 0, "best": None}
+            edge_ph = getattr(self, "_mtmoon_edge", None)
+            if edge_ph is None:
+                # A lane can reach 14 without ever edge-hunting (a forward warp chain, or a
+                # --seed-worldmap baton) — indexing the dict unguarded was an AttributeError.
+                edge_ph = self._mtmoon_edge = {}
+            edge_ph[PEWTER_CITY_MAP] = {"i": 0, "stuck": 0, "tried": 0, "best": None}
         if state.map_id == PEWTER_GYM_MAP:
             candidates = [w for w in table if w[2] in (PEWTER_CITY_MAP, LAST_MAP)]  # the door mats
         elif state.map_id == PEWTER_CITY_MAP:
@@ -1622,9 +1627,7 @@ class PokemonAgent:
                         return d if d is not None else "down"
                     return "down"  # on the door mat: step in, the heal flow does the rest
             candidates = [
-                w
-                for w in table
-                if w[2] not in PEWTER_BUILDING_MAPS and w[2] != LAST_MAP and w[2] not in tried
+                w for w in table if w[2] not in PEWTER_BUILDING_MAPS and w[2] != LAST_MAP and w[2] not in tried
             ]
             # The image's world is a chain (Viridian -> Route 2 -> Forest -> Pewter,
             # references/routes.json "51") and the remaining links (Route 3, Mt. Moon) extend
@@ -1638,9 +1641,7 @@ class PokemonAgent:
                 # open-map warps — never a building, never the city (a backward hop), never this
                 # map's own floor mat (that is the 2<->55/57 bounce loop from the probes).
                 candidates = [
-                    w
-                    for w in table
-                    if w[2] not in PEWTER_BUILDING_MAPS and w[2] not in (state.map_id, LAST_MAP)
+                    w for w in table if w[2] not in PEWTER_BUILDING_MAPS and w[2] not in (state.map_id, LAST_MAP)
                 ]
             if not candidates:
                 # Dead-end interior (house/lobby: its only warps go LAST_MAP, back to the city).
@@ -1722,11 +1723,11 @@ class PokemonAgent:
         # eleven, so a wrong first guess there costs one wedge cycle). Route 3 never reaches
         # this hunter -- its exit is handled by the deterministic `_route_march` instead.
         edges = (
-                ("east", bw - 1, state.y, "right"),
-                ("south", state.x, bh - 1, "down"),
-                ("north", state.x, 0, "up"),
-                ("west", 0, state.y, "left"),
-            )
+            ("east", bw - 1, state.y, "right"),
+            ("south", state.x, bh - 1, "down"),
+            ("north", state.x, 0, "up"),
+            ("west", 0, state.y, "left"),
+        )
         states = getattr(self, "_mtmoon_edge", None)
         if states is None:
             states = self._mtmoon_edge = {}
@@ -1768,24 +1769,15 @@ class PokemonAgent:
             d = self._pilot_to(state, wx, wy)
             return d if d is not None else off
         if (state.x, state.y) == (wx, wy):
-            if off is None:  # pass-through station on an open route: on to the NEXT target, in order
-                ph["i"] = (ph["i"] + 1) % len(edges)
-                ph["stuck"] = 0
-                ph["best"] = None
-                ph["tried"] += 1
-                self.log(f"MTMOON-EDGE | map={state.map_id} station ({wx},{wy}) crossed; target phase {ph['i']}")
-                if ph["tried"] >= len(edges):
-                    return None
-                name, wx, wy, off = edges[ph["i"]]
-                wx, wy = min(wx, bw - 1), min(wy, bh - 1)
-                d = self._pilot_to(state, wx, wy)
-                return d if d is not None else off
+            # Every phase target is an edge tile with a press direction (`off` is never None here
+            # — the station variant of this hunter was dropped): standing on it, press off the map.
             if getattr(self, "_mtmoon_edge_logged", None) != (state.map_id, ph["i"]):
                 self._mtmoon_edge_logged = (state.map_id, ph["i"])
                 self.log(f"MTMOON-EDGE | map={state.map_id} ({name}) stepping off the edge at ({wx},{wy})")
             return off
         d = self._pilot_to(state, wx, wy)
         return d if d is not None else off
+
     # Stage plan for the Route 3 march: (press, bump_a, bump_b, bump axis). bump_a is the PREFERRED
     # escape (it is the side where the first corridor gap sits, probe fifteen/seventeen,
     # log45/47.md). The escape is a one-step rotation -- bump_a, bump_b, retreating one -- because
@@ -1818,8 +1810,12 @@ class PokemonAgent:
             # side of 14 solid (x>=23) and the west is the city door -- the road, if any, is
             # on the south or north edge.
             m = self._mtmoon_march = {
-                "x": None, "y": None, "last": None,
-                "stage": getattr(self, "_mtmoon_start_stage", 1), "t": 0, "scan": 0
+                "x": None,
+                "y": None,
+                "last": None,
+                "stage": getattr(self, "_mtmoon_start_stage", 1),
+                "t": 0,
+                "scan": 0,
             }
         sx, sy = state.x, state.y
         press, bump_a, bump_b, _axis, back = self._ROUTE_STAGES[m["stage"]]

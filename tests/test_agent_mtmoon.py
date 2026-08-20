@@ -135,14 +135,15 @@ def test_route3_march_scans_blocked_rows(tmp_path):
     def mk(x, y):
         return OverworldState(map_id=14, x=x, y=y, badges=1)
 
-    assert ag._route_march(mk(3, 8), 70, 18) == "right"   # open field: press east
-    assert ag._route_march(mk(13, 8), 70, 18) == "down"   # near the first wall: approach its row
+    assert ag._route_march(mk(3, 8), 70, 18) == "right"  # open field: press east
+    assert ag._route_march(mk(13, 8), 70, 18) == "down"  # near the first wall: approach its row
     assert ag._route_march(mk(13, 12), 70, 18) == "right"  # on the row: press east
     # a solid wall ahead: free press, then the row scan steps up and re-probes east
     assert ag._route_march(mk(5, 12), 70, 18) == "right"
-    assert ag._route_march(mk(5, 12), 70, 18) == "up"     # east blocked at this row
+    assert ag._route_march(mk(5, 12), 70, 18) == "up"  # east blocked at this row
     assert ag._route_march(mk(5, 11), 70, 18) == "right"  # re-probe at the next row
-    assert ag._route_march(mk(5, 11), 70, 18) == "up"     # still blocked: keep scanning
+    assert ag._route_march(mk(5, 11), 70, 18) == "up"  # still blocked: keep scanning
+
 
 def test_route3_march_sweeps_an_edge_then_works_the_next(tmp_path):
     """On an edge: press off, bump along the edge; a full sweep with no warp advances to the
@@ -152,16 +153,16 @@ def test_route3_march_sweeps_an_edge_then_works_the_next(tmp_path):
     ag.memory.read_warps = MagicMock(return_value=[])
     ag.memory.read_map_bounds = MagicMock(return_value=(70, 18))
     st = OverworldState(map_id=14, x=69, y=8, badges=1)  # east edge (bw-1 = 69)
-    assert ag._route_march(st, 70, 18) == "right"         # enter edge mode, probe the row
+    assert ag._route_march(st, 70, 18) == "right"  # enter edge mode, probe the row
     m = ag._mtmoon_march
-    m["x"], m["y"] = 68, 8                                # a free turn again (lane shifted)
-    m["t"] = 18 * 2 + 6                                   # a full sweep of the east edge...
-    assert ag._route_march(st, 70, 18) == "down"          # ...on to the south edge
+    m["x"], m["y"] = 68, 8  # a free turn again (lane shifted)
+    m["t"] = 18 * 2 + 6  # a full sweep of the east edge...
+    assert ag._route_march(st, 70, 18) == "down"  # ...on to the south edge
     st2 = OverworldState(map_id=14, x=30, y=0, badges=1)  # north edge (stage two)
     m["stage"] = 2
     m["x"], m["y"] = 30, 1
     m["t"] = 70 * 2 + 6
-    assert ag._route_march(st2, 70, 18) is None           # all three edges swept: hand over
+    assert ag._route_march(st2, 70, 18) is None  # all three edges swept: hand over
 
 
 def test_mtmoon_on_route3_prefers_the_march(tmp_path):
@@ -263,3 +264,197 @@ def test_pilot_none_fallback_still_yields_an_action(tmp_path):
     ag.memory.read_warps = MagicMock(return_value=GDOOR)
     ag._pilot_to = MagicMock(return_value=None)
     assert ag._mtmoon_action(OverworldState(map_id=PEWTER_GYM_MAP, x=5, y=1, badges=1)) == "down"
+
+
+# ---- the caller, the bounce reset, and the paths the 08-18 run never took ----------------------
+
+
+def test_choose_overworld_action_routes_through_the_mtmoon_leg(tmp_path):
+    """With the badge in hand the leg owns the turn before the pre-badge Pewter machinery."""
+    ag = _ag(tmp_path)
+    ag.memory.read_warps = MagicMock(return_value=GDOOR)
+    st = OverworldState(map_id=PEWTER_GYM_MAP, x=5, y=1, badges=1)
+    assert ag.choose_overworld_action(st) == "up"
+
+
+def test_route3_bounce_rearms_the_city_door_without_a_prior_hunt(tmp_path):
+    """A lane can reach 14 without ever edge-hunting (a forward warp chain, a --seed-worldmap
+    baton): the re-arm must bootstrap the hunter dict, not index it into an AttributeError."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    ag.memory.read_warps = MagicMock(return_value=[])
+    ag.memory.read_map_bounds = MagicMock(return_value=(70, 18))
+    ag.last_overworld_state = OverworldState(map_id=14, x=3, y=8, badges=1)
+    st = OverworldState(map_id=14, x=4, y=8, badges=1)
+    assert ag._mtmoon_action(st) == "right"  # the march proceeds; no crash
+    assert ag._mtmoon_edge[PEWTER_CITY_MAP] == {"i": 0, "stuck": 0, "tried": 0, "best": None}
+    assert ag._mtmoon_all_edges is None
+
+
+def test_route3_bounce_resets_an_exhausted_city_hunter(tmp_path):
+    """The city is a spring (log47.md): a bounce back from 14 re-arms its east road door."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    ag.memory.read_warps = MagicMock(return_value=[])
+    ag.memory.read_map_bounds = MagicMock(return_value=(70, 18))
+    ag._mtmoon_edge = {PEWTER_CITY_MAP: {"i": 2, "stuck": 5, "tried": 4, "best": 3}}
+    ag.last_overworld_state = OverworldState(map_id=14, x=3, y=8, badges=1)
+    ag._mtmoon_action(OverworldState(map_id=14, x=4, y=8, badges=1))
+    assert ag._mtmoon_edge[PEWTER_CITY_MAP]["tried"] == 0
+
+
+def test_city_heal_hop_steps_in_from_the_door_mat(tmp_path):
+    """Standing exactly on the Center's mat: step in without replanning; the heal flow takes over."""
+    ag = _ag(tmp_path)
+    ag.memory.read_warps = MagicMock(return_value=CITY_WARPS)
+    st = OverworldState(map_id=PEWTER_CITY_MAP, x=13, y=25, badges=1)
+    assert ag._mtmoon_action(st) == "down"
+    ag._pilot_to.assert_not_called()
+
+
+def test_dead_end_interior_walks_back_out_and_is_marked_tried(tmp_path):
+    """A house/lobby whose only warps go LAST_MAP: back to its door, and the city hop skips it."""
+    ag = _ag(tmp_path)
+    ag.memory.read_warps = MagicMock(return_value=[(5, 7, 0xFF)])
+    st = OverworldState(map_id=55, x=2, y=2, badges=1)
+    assert ag._mtmoon_action(st) == "up"
+    ag._pilot_to.assert_called_with(st, 5, 7)
+    assert 55 in ag._mtmoon_tried_exits
+
+
+def test_offmap_edge_hunt_bootstraps_its_own_phase_state(tmp_path):
+    """First edge hunt on a map that never went through the city path creates the dict itself."""
+    ag = _ag(tmp_path)
+    ag.memory.read_warps = MagicMock(return_value=[])
+    ag.memory.read_map_bounds = MagicMock(return_value=(20, 20))
+    ag._pilot_to = MagicMock(return_value="right")
+    st = OverworldState(map_id=55, x=5, y=5, badges=1)
+    assert ag._mtmoon_action(st) == "right"
+    assert 55 in ag._mtmoon_edge
+
+
+def test_edge_hunt_reports_exhaustion_once_and_defers(tmp_path):
+    """Every edge tried: hand the map back to normal nav, logging the miss once per map."""
+    ag = _ag(tmp_path)
+    ag.memory.read_map_bounds = MagicMock(return_value=(20, 20))
+    ag._mtmoon_edge = {55: {"i": 0, "stuck": 0, "tried": 4, "best": None}}
+    st = OverworldState(map_id=55, x=5, y=5, badges=1)
+    assert ag._mtmoon_edge_hunt(st) is None
+    assert ag._mtmoon_all_edges == 55
+    assert ag._mtmoon_edge_hunt(st) is None  # second call: same verdict, no re-log
+
+
+def test_edge_hunt_wedge_on_the_last_phase_exhausts(tmp_path):
+    """A wedge on the final (west) phase rolls the tried count past the edge list: hand over."""
+    ag = _ag(tmp_path)
+    ag.memory.read_map_bounds = MagicMock(return_value=(20, 20))
+    ag._mtmoon_edge = {55: {"i": 3, "stuck": 11, "tried": 3, "best": 0}}
+    st = OverworldState(map_id=55, x=5, y=5, badges=1)
+    assert ag._mtmoon_edge_hunt(st) is None
+    assert ag._mtmoon_edge[55]["tried"] == 4
+
+
+# ---- the Route 3 march: the south/north stages and the scan edge cases -------------------------
+
+
+def _mk14(x, y):
+    return OverworldState(map_id=14, x=x, y=y, badges=1)
+
+
+def test_route3_march_defaults_to_the_south_stage(tmp_path):
+    """No explicit start stage: probes 20/22/23 sealed the east side solid, so south goes first."""
+    ag = _ag(tmp_path)
+    assert ag._route_march(_mk14(5, 5), 70, 18) == "down"
+    assert ag._mtmoon_march["stage"] == 1
+
+
+def test_route3_march_presses_off_the_south_edge_within_the_sweep(tmp_path):
+    ag = _ag(tmp_path)
+    assert ag._route_march(_mk14(5, 17), 70, 18) == "down"
+    assert ag._mtmoon_march["t"] == 1
+
+
+def test_route3_march_bumps_along_a_blocked_south_edge(tmp_path):
+    """Stuck on the same tile in an edge stage: a short bump run sideways, re-pressing as it goes."""
+    ag = _ag(tmp_path)
+    st = _mk14(5, 17)
+    ag._route_march(st, 70, 18)  # arrive: press off the edge
+    assert ag._route_march(st, 70, 18) == "right"  # blocked: bump run starts (seg rotation)
+    assert ag._route_march(st, 70, 18) == "right"  # the run continues from the same tile
+    assert ag._mtmoon_march["run"] == 6
+
+
+def test_route3_march_bump_runs_flip_at_the_map_bounds(tmp_path):
+    """Each bump direction that would leave the map flips to the stage's other escape."""
+    # move "up" at the north bound (stage 1: bump_a=left, so up flips to left)
+    ag = _ag(tmp_path)
+    st = _mk14(5, 0)
+    ag._route_march(st, 70, 18)
+    ag._mtmoon_march["seg"] = 1  # next rotation lands on back="up"
+    assert ag._route_march(st, 70, 18) == "left"
+    # move "left" at the west bound (flips to bump_b="right")
+    ag2 = _ag(tmp_path)
+    st2 = _mk14(1, 5)
+    ag2._route_march(st2, 70, 18)
+    ag2._mtmoon_march["seg"] = 2  # next rotation lands on bump_a="left"
+    assert ag2._route_march(st2, 70, 18) == "right"
+    # move "right" at the east bound (flips to back="up")
+    ag3 = _ag(tmp_path)
+    st3 = _mk14(68, 5)
+    ag3._route_march(st3, 70, 18)
+    ag3._mtmoon_march["seg"] = 0  # next rotation lands on bump_b="right"
+    assert ag3._route_march(st3, 70, 18) == "up"
+    # move "down" at the south bound (stage 2: segs right/left/down; down flips to bump_a="right")
+    ag4 = _ag(tmp_path)
+    ag4._mtmoon_start_stage = 2
+    st4 = _mk14(5, 17)
+    ag4._route_march(st4, 70, 18)
+    ag4._mtmoon_march["seg"] = 1  # next rotation lands on back="down"
+    assert ag4._route_march(st4, 70, 18) == "right"
+
+
+def test_route3_scan_detects_the_wall_crossing(tmp_path):
+    """A row scan that actually gets past the wall logs the crossing row and resumes east."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    ag._route_march(_mk14(5, 12), 70, 18)  # free press east
+    ag._route_march(_mk14(5, 12), 70, 18)  # blocked: scan starts, step up
+    ag._route_march(_mk14(5, 11), 70, 18)  # new row: re-probe east
+    assert ag._route_march(_mk14(6, 11), 70, 18) == "right"  # it moved: wall crossed at y=11
+    assert ag._mtmoon_march["scan"] in (0, 1)  # scan survives; the march is eastbound again
+
+
+def test_route3_scan_tops_out_then_bottoms_out(tmp_path):
+    """Up sweep exhausted at y=0 flips to the down sweep; down sweep exhausted ends the scan and
+    charges the whole edge as swept (t past the sweep budget)."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    st_top = _mk14(5, 0)
+    ag._route_march(st_top, 70, 18)  # free press east
+    ag._route_march(st_top, 70, 18)  # blocked at the top row: scan starts
+    assert ag._route_march(st_top, 70, 18) == "down"  # up sweep can't go up: flip to down sweep
+    assert ag._mtmoon_march["scan"] == 2
+    st_bot = _mk14(5, 17)
+    ag._route_march(st_bot, 70, 18)  # moved rows: re-probe east
+    assert ag._route_march(st_bot, 70, 18) == "right"  # bottom row blocked too: scan closes
+    assert ag._mtmoon_march["scan"] == 0
+    assert ag._mtmoon_march["t"] == 18 * 2 + 6 + 1  # the edge is charged as fully swept
+
+
+def test_route3_march_realigns_the_approach_rows(tmp_path):
+    """The x=14/15 wall opens around row 12 (log50.md); past x=20 hug the mid-band."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    ag._route_march(_mk14(14, 14), 70, 18)  # free press east
+    assert ag._route_march(_mk14(15, 14), 70, 18) == "up"  # 13<=x<20, below row 12: climb to it
+    assert ag._route_march(_mk14(25, 16), 70, 18) == "up"  # x>=20, hugging the south bound: lift
+    assert ag._route_march(_mk14(25, 2), 70, 18) == "down"  # x>=20, hugging the north bound: drop
+
+
+def test_route3_march_east_stage_presses_off_its_edge_within_the_sweep(tmp_path):
+    """Stage zero at the east bound with sweep budget left: keep pressing east for the adjacency."""
+    ag = _ag(tmp_path)
+    ag._mtmoon_start_stage = 0
+    ag._route_march(_mk14(69, 8), 70, 18)  # arrive at the east bound
+    assert ag._route_march(_mk14(69, 9), 70, 18) == "right"  # moved a row: press off again
+    assert ag._mtmoon_march["t"] == 1
