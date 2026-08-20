@@ -60,6 +60,8 @@ write_briefing() {
   echo "uv run python scripts/rom_truth.py seed-worldmap 2 14 15 54 59 --out mtmoon.worldmap"
   echo "# then add:  --seed-worldmap mtmoon.worldmap  to the relay.py command"
   echo '```'
+  echo "Never print grid rows into your reasoning — the seeded worldmap already gives the pilot the"
+  echo "geometry; your job is dispatching lanes along the routed chain and fixing code that fights it."
 } > "$EXTRA"
 }
 write_briefing
