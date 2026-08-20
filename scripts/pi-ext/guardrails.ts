@@ -28,6 +28,12 @@ const MAX_RESULT_BYTES = Number(process.env.PI_GUARD_MAX_RESULT ?? 40_000);
 const READ_LIMIT_LINES = Number(process.env.PI_GUARD_READ_LIMIT ?? 200);
 const COMPACT_AT = Number(process.env.PI_GUARD_COMPACT_AT ?? 0.75);   // fraction of contextWindow
 const NUDGE_AT = Number(process.env.PI_GUARD_NUDGE_AT ?? 0.6);        // fraction of contextWindow
+// A turn that stops with neither text nor a tool call ends the -p loop as if it were a final
+// answer. Measured 2026-08-20 (expedition attempt 1): qwen38 emitted a 6.3k-char reasoning-only
+// block, stopReason "stop", no content — pi exited 0 at 105 s into a 2 h leg and the guard read
+// it as a dead stream. A followUp sent from turn_end starts a fresh turn (verified against this
+// pi build), so steer such turns back to work, a bounded number of times per session.
+const CONTINUE_MAX = Number(process.env.PI_GUARD_CONTINUE_MAX ?? 8);
 const NUDGE_TEXT =
   "[guardrails] context is {pct}% used ({n}/{m} tokens). If this run has uncommitted work under docs/learnings " +
   "or scripts, commit it now; older history will be summarised (compacted) at {cpct}%.";
@@ -132,11 +138,13 @@ export default async function (pi: ExtensionAPI) {
     console.error("[guardrails] compaction module not found; compaction guard disabled (set PI_GUARD_PI_DIST=<pi>/dist)");
   }
   let nudged = false;
+  let revived = 0; // reasoning-only continuations sent this session
   let compacting = false;
   let guardCompacted = false; // we appended a compaction the agent's own state does not know about
 
   pi.on("session_start", () => {
     nudged = false;
+    revived = 0;
     guardCompacted = false;
   });
   // pi's own compaction (agent_end / manual) rebuilds agent state from the session, so drop our overlay
@@ -182,7 +190,22 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // Deliverables nudge: once per session, delivered as a steering message before the next LLM call.
-  pi.on("turn_end", async (_event, ctx) => {
+  pi.on("turn_end", async (event, ctx) => {
+    // Reasoning-only stop: no text, no tool call — without this followUp, the loop ends here.
+    const msg = (event as any)?.message ?? {};
+    const parts = Array.isArray(msg.content) ? msg.content : [];
+    const hasText = parts.some((b: any) => b.type === "text" && b.text && b.text.trim());
+    const hasTool = parts.some((b: any) => b.type === "toolCall");
+    if (msg.role === "assistant" && !hasText && !hasTool && revived < CONTINUE_MAX) {
+      revived++;
+      const cont =
+        `[guardrails] your last turn produced no text and no tool call (reasoning only) — the harness ` +
+        `treats that as mission end. Continue the mission: state your next action as text and run it. ` +
+        `(continuation ${revived}/${CONTINUE_MAX})`;
+      console.error(cont);
+      pi.sendMessage({ customType: "guardrails-continue", content: cont, display: true }, { deliverAs: "followUp" });
+      return;
+    }
     if (nudged) return;
     const usage = ctx.getContextUsage();
     if (!usage || usage.tokens === null || usage.contextWindow <= 0) return;

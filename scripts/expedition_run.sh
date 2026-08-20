@@ -47,7 +47,9 @@ LEG_ROUTE="${LEG_ROUTE:-54 59}"
 {
   echo "ROM truth is available in this worktree: \`references/rom_truth.json\` (warps, edge"
   echo "connections, collision grids for every map) via \`scripts/rom_truth.py\`. Do NOT re-derive"
-  echo "topology by probing — look it up. The routed chain for this leg:"
+  echo "topology by probing — look it up. Never cat rom_truth.json raw (the grids are huge and will"
+  echo "drown your context); query it with \`rom_truth.py route\` or targeted python -c one-liners."
+  echo "The routed chain for this leg:"
   echo '```'
   # shellcheck disable=SC2086
   uv run python "$REPO/scripts/rom_truth.py" route $LEG_ROUTE 2>/dev/null || echo "(route unavailable)"
