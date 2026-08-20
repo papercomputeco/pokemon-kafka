@@ -111,6 +111,16 @@ PEWTER_GYM_RETREAT_GATE = 0.9
 # Cap the round trips so a Center that refuses to heal (no room, wedged menu) cannot livelock.
 PEWTER_MAX_HEAL_TRIPS = 6
 
+# The badge_to_mtmoon leg: Pewter Gym (54) -> Pewter (2) -> (Route 3) -> Mt. Moon 1F (59).
+# The 2026-08-18 MTMOON-MISS probe (pokedex/log17.md) read the CITY's live warp table: it holds
+# the buildings (52/54/56/58) plus two open-map warps (29,13)->55 and (7,29)->57 — the Route 3
+# exit is one of those, NOT under the doc's route-3 id. So the city's exit is defined as "a warp
+# to a non-building map" and the leg never assumes which id Route 3 has in this image; the road
+# hop is defined by "the warp to Mt. Moon 1F (59)".
+MT_MOON_1F_MAP = 59
+ROUTE_3_MAP = 14  # the road between Pewter and Mt. Moon (empty warp table: t14 probe, 2026-08-18)
+PEWTER_BUILDING_MAPS = (PEWTER_CITY_MAP, PEWTER_GYM_MAP, 52, 56, PEWTER_CENTER_MAP)
+
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
 # before it gives up and flees. Escapes livelocks where the only PP'd move can't end the fight
 # (e.g. a 0-power status move scored as "unknown") — the agent would otherwise loop forever.
@@ -1186,6 +1196,13 @@ class PokemonAgent:
         if heal is not None:
             return heal
 
+        # Badge 1 in hand: the way to Mt. Moon. Takes the exit of whichever map the lane is on —
+        # the only door on 54, the east edge on 2, the cave warps on 14 — before the pre-badge
+        # Pewter machinery or the waypoint navigator can steer it at the Gym door again.
+        mtmoon = self._mtmoon_action(state)
+        if mtmoon is not None:
+            return mtmoon
+
         # Inside the Gym the route is a six-waypoint walk across a 10x14 room: a backtrack restore
         # there teleports the agent back to the door mat (or out to Pewter) and undoes a correct
         # climb, which is exactly what probe E measured — it stood on Brock's face tile and was
@@ -1538,6 +1555,361 @@ class PokemonAgent:
                 f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
             )
         return d
+
+    def _mtmoon_action(self, state: OverworldState) -> str | None:
+        """With Badge 1 in hand, drive the current map's own exit toward Mt. Moon. ``None`` elsewhere.
+
+        The road is 54 (Pewter Gym) -> 2 (Pewter) -> (Route 3) -> 59 (Mt. Moon 1F). Every hop's
+        destination is read from the game's live warp table (``wWarps``, the same API the heal
+        leg uses) rather than baked in. Two ground truths from the 2026-08-18 probes (pokedex/log7.md,
+        log17.md): (1) the gym door's mats warp to LAST_MAP (0xFF, "back where we came from"), not
+        to map 2 — a strict ``dest == 2`` filter matched nothing and probe one wedged for 400 turns;
+        (2) the city's table holds the buildings (52/54/56/58) plus open-map warps to 55 and 57 —
+        so the city hop targets "a warp leaving to a non-building map" (whichever of 55/57 is the
+        road) and the road hop targets "the warp to Mt. Moon 1F (59)". On any other map, taking the
+        nearest warp to 59 is the whole leg. The route to the chosen tile is the accumulated
+        WorldMap A* (`_pilot_to`): unknown ground reads optimistically walkable so the pilot draws
+        straight for the exit, failed steps hard-block the wall, and the backtrack restore breaks
+        wedges — the same machinery that already crossed the city's fences and the forest maze.
+
+        Gated on the badge bit so the pre-badge Pewter segment (heal trip, Brock engage, gym
+        waypoints) is untouched, and never on the destination (59).
+        """
+        if not (state.badges & 0x01):
+            return None
+        prev = self.last_overworld_state
+        if prev is not None and prev.map_id != state.map_id:
+            # First turn after landing: wWarpEntries still holds the previous map's table until the
+            # transition settles — the probes that bounced 2<->55/57 (pokedex/log18.md, log19.md,
+            # log20.md) all read the CITY's table while standing on 57. One turn of settle is the
+            # difference between "the city's table" and "this map's table".
+            return None
+        LAST_MAP = 0xFF  # warp dest id for "back where we came from" (memory_reader passes it through raw)
+        if state.map_id == MT_MOON_1F_MAP:
+            return None
+        if state.map_id == PEWTER_CENTER_MAP:
+            # The Center: let the canonical Pewter heal flow serve it (counter -> heal -> walk out
+            # the door). The seed legs start at 6/48 HP; Route 3 is tall grass, and a KO
+            # mid-crossing fades the lane straight back to this same Center anyway. Deferring
+            # here means this branch never fights the counter for the door.
+            return None
+        table = self.memory.read_warps() or []
+        # A bounce back from Route 3 (its city return mat sits at (14,9), log47.md) re-arms the
+        # city's road door: the proven exit is east -> 14 (probes ten/twelve/seventeen), and the
+        # march's state on 14 survives, so a re-entry resumes where the crossing left off.
+        if prev is not None and prev.map_id == ROUTE_3_MAP:
+            self._mtmoon_all_edges = None
+            edge_ph = getattr(self, "_mtmoon_edge", None)
+            if edge_ph is None:
+                # A lane can reach 14 without ever edge-hunting (a forward warp chain, or a
+                # --seed-worldmap baton) — indexing the dict unguarded was an AttributeError.
+                edge_ph = self._mtmoon_edge = {}
+            edge_ph[PEWTER_CITY_MAP] = {"i": 0, "stuck": 0, "tried": 0, "best": None}
+        if state.map_id == PEWTER_GYM_MAP:
+            candidates = [w for w in table if w[2] in (PEWTER_CITY_MAP, LAST_MAP)]  # the door mats
+        elif state.map_id == PEWTER_CITY_MAP:
+            tried = getattr(self, "_mtmoon_tried_exits", None)
+            if tried is None:
+                tried = self._mtmoon_tried_exits = set()
+            # Heal first, cross next: the seed legs start at 6/48 HP, and a KO in Route 3's grass
+            # fades the lane straight back to this same Center mid-leg. One hop to the Center on
+            # the first city visit of the leg (flag-guarded, so a failed trip doesn't re-loop).
+            if not getattr(self, "_mtmoon_healed", False):
+                self._mtmoon_healed = True
+                heals = [w for w in table if w[2] == PEWTER_CENTER_MAP]
+                if heals:
+                    hx, hy = min(heals, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))[:2]
+                    if not (state.x == hx and state.y == hy):
+                        if getattr(self, "_mtmoon_logged", None) != (state.map_id, "heal"):
+                            self._mtmoon_logged = (state.map_id, "heal")
+                            self.log(f"MTMOON | map={state.map_id} pos=({state.x},{state.y}) -> heal ({hx},{hy})")
+                        d = self._pilot_to(state, hx, hy)
+                        return d if d is not None else "down"
+                    return "down"  # on the door mat: step in, the heal flow does the rest
+            candidates = [
+                w for w in table if w[2] not in PEWTER_BUILDING_MAPS and w[2] != LAST_MAP and w[2] not in tried
+            ]
+            # The image's world is a chain (Viridian -> Route 2 -> Forest -> Pewter,
+            # references/routes.json "51") and the remaining links (Route 3, Mt. Moon) extend
+            # along it — the exit is whatever open warp (or, failing those, map EDGE) the table
+            # offers; probe ten (log24.md) proved the city's EAST edge is the Route 3 door.
+            candidates.sort(key=lambda w: (w[0], abs(w[0] - state.x) + abs(w[1] - state.y)))
+        else:
+            candidates = [w for w in table if w[2] == MT_MOON_1F_MAP]  # the cave entrance
+            if not candidates:
+                # Forward corridor map with no cave warp in its own table: keep following
+                # open-map warps — never a building, never the city (a backward hop), never this
+                # map's own floor mat (that is the 2<->55/57 bounce loop from the probes).
+                candidates = [
+                    w for w in table if w[2] not in PEWTER_BUILDING_MAPS and w[2] not in (state.map_id, LAST_MAP)
+                ]
+            if not candidates:
+                # Dead-end interior (house/lobby: its only warps go LAST_MAP, back to the city).
+                # Walk back to its door; the city hop will then take the next untried exit.
+                doors = [w for w in table if w[2] == LAST_MAP]
+                if doors:
+                    tried = getattr(self, "_mtmoon_tried_exits", None)
+                    if tried is None:
+                        tried = self._mtmoon_tried_exits = set()
+                    tried.add(state.map_id)
+                    self.log(
+                        f"MTMOON-DEADEND | map={state.map_id} pos=({state.x},{state.y}) back to the door; "
+                        f"tried={sorted(tried)}"
+                    )
+                candidates = sorted(doors, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))
+        if not candidates:
+            # No warp-table exit from this map (Route 3 in this image has an EMPTY table —
+            # log24.md), or only dead-ends. Route 3 is special: a deterministic east MARCH
+            # (probe fourteen, log44.md: the A* pilot wedges in its mid-route walls every time),
+            # then a press-sweep of whatever edge it ends up on. Everywhere else the map-edge
+            # adjacency is the last door.
+            # The city is a spring: its hunter never stays exhausted -- the east road door (to 14)
+            # is a proven exit (probes ten/twelve/seventeen) and the 14 march's state survives the
+            # bounce, so a re-entry resumes the crossing.
+            if state.map_id == PEWTER_CITY_MAP:
+                edge_ph = getattr(self, "_mtmoon_edge", None)
+                if edge_ph is None:
+                    edge_ph = self._mtmoon_edge = {}
+                city_ph = edge_ph.get(PEWTER_CITY_MAP) or {"i": 0, "stuck": 0, "tried": 0, "best": None}
+                if city_ph["tried"] >= 4:
+                    self._mtmoon_edge[PEWTER_CITY_MAP] = {"i": 0, "stuck": 0, "tried": 0, "best": None}
+                    self._mtmoon_all_edges = None
+            if state.map_id == ROUTE_3_MAP:
+                # The march owns Route 3 entirely: the A* pilot wedges in its mid-route walls every
+                # attempt (log44.md) and the hunter's west phase presses back into the city
+                # (log46.md). Fall back to the probed bounds if a mid-transition read fails.
+                bounds = self.memory.read_map_bounds() or (70, 18)
+                return self._route_march(state, int(bounds[0]), int(bounds[1]))
+            action = self._mtmoon_edge_hunt(state)
+            if action is None:
+                if getattr(self, "_mtmoon_miss_logged", None) != state.map_id:
+                    self._mtmoon_miss_logged = state.map_id
+                    self.log(f"MTMOON-MISS | map={state.map_id} pos=({state.x},{state.y}) table={table[:14]}")
+            return action
+        if state.map_id == PEWTER_CITY_MAP:
+            wx, wy = candidates[0][0], candidates[0][1]
+        else:
+            wx, wy = min(candidates, key=lambda w: abs(w[0] - state.x) + abs(w[1] - state.y))[:2]
+        if state.x == wx and state.y == wy:
+            # Warps fire on the step that lands on them, so a state read on the tile is either
+            # mid-transition or stale; the map change happens on its own from here.
+            return "down"
+        if getattr(self, "_mtmoon_logged", None) != state.map_id:
+            self._mtmoon_logged = state.map_id
+            self.log(f"MTMOON | map={state.map_id} pos=({state.x},{state.y}) -> warp ({wx},{wy})")
+        d = self._pilot_to(state, wx, wy)
+        return d if d is not None else "down"
+
+    def _mtmoon_edge_hunt(self, state: OverworldState) -> str | None:
+        """Step OFF a map's edge until the engine's map-adjacency warp fires (or all edges fail).
+
+        The warp table can be the only door -- or no door at all: Route 3 in this image has an
+        EMPTY table (log24.md) and the city's exit is its EAST edge (2 -> 14 at (39,16) <->
+        (0,8), probe ten), so once the table yields nothing the map boundary itself is the last
+        exit to try. Bounds come from the live map header (``read_map_bounds``); phases run east,
+        south, north, west -- in that order on every map (the city's west is a wall anyway, and
+        probe eleven showed its west band is even walled off mid-city by a building, so a wrong
+        first guess just costs one wedge cycle). A wedged edge advances after 12 turns without
+        getting closer; phase progress is kept per map id because a wall on one map is a door on
+        the next (14's west edge is the city). Once every edge of a map is tried we hand control
+        back to normal navigation.
+        """
+        bounds = self.memory.read_map_bounds()
+        if bounds is None:  # mid-transition: let it settle
+            return None
+        bw, bh = int(bounds[0]), int(bounds[1])
+        # Phase targets: the four edges, east first on every map (the city's exit was its east
+        # edge, probe ten; the city's west band is walled off mid-city by a building, probe
+        # eleven, so a wrong first guess there costs one wedge cycle). Route 3 never reaches
+        # this hunter -- its exit is handled by the deterministic `_route_march` instead.
+        edges = (
+            ("east", bw - 1, state.y, "right"),
+            ("south", state.x, bh - 1, "down"),
+            ("north", state.x, 0, "up"),
+            ("west", 0, state.y, "left"),
+        )
+        states = getattr(self, "_mtmoon_edge", None)
+        if states is None:
+            states = self._mtmoon_edge = {}
+        ph = states.get(state.map_id)
+        if ph is None:
+            ph = states[state.map_id] = {"i": 0, "stuck": 0, "tried": 0, "best": None}
+        if ph["tried"] >= len(edges):
+            if getattr(self, "_mtmoon_all_edges", None) != state.map_id:
+                self._mtmoon_all_edges = state.map_id
+                self.log(f"MTMOON-MISS | all exits of map={state.map_id} failed from ({state.x},{state.y})")
+            return None
+        name, wx, wy, off = edges[ph["i"]]
+        wx, wy = min(wx, bw - 1), min(wy, bh - 1)
+        dist = abs(state.x - wx) + abs(state.y - wy)
+        # Wedge detector: 12 turns without getting CLOSER than the best distance seen this
+        # phase. A stationary counter never fires -- the lane oscillates up/down against the
+        # block (probe eleven, log27.md; probe twelve, log39.md: (0,10)<->(0,11) forever) -- so
+        # the threshold is a moving best, not the previous turn.
+        if ph["best"] is None or dist < ph["best"]:
+            ph["best"] = dist
+            ph["stuck"] = 0
+        else:
+            ph["stuck"] += 1
+        # Wedged (12 turns without beating the best distance): advance the phase before the
+        # target/press logic, so presses on a dead edge also eventually move on.
+        if ph["stuck"] >= 12:
+            ph["i"] = (ph["i"] + 1) % len(edges)
+            ph["stuck"] = 0
+            ph["best"] = None
+            ph["tried"] += 1
+            self.log(f"MTMOON-EDGE | map={state.map_id} ({name}) wedged at ({state.x},{state.y}); phase {ph['i']}")
+            if ph["tried"] >= len(edges):
+                if getattr(self, "_mtmoon_all_edges", None) != state.map_id:
+                    self._mtmoon_all_edges = state.map_id
+                    self.log(f"MTMOON-MISS | all edges of map={state.map_id} failed from ({state.x},{state.y})")
+                return None
+            name, wx, wy, off = edges[ph["i"]]
+            wx, wy = min(wx, bw - 1), min(wy, bh - 1)
+            d = self._pilot_to(state, wx, wy)
+            return d if d is not None else off
+        if (state.x, state.y) == (wx, wy):
+            # Every phase target is an edge tile with a press direction (`off` is never None here
+            # — the station variant of this hunter was dropped): standing on it, press off the map.
+            if getattr(self, "_mtmoon_edge_logged", None) != (state.map_id, ph["i"]):
+                self._mtmoon_edge_logged = (state.map_id, ph["i"])
+                self.log(f"MTMOON-EDGE | map={state.map_id} ({name}) stepping off the edge at ({wx},{wy})")
+            return off
+        d = self._pilot_to(state, wx, wy)
+        return d if d is not None else off
+
+    # Stage plan for the Route 3 march: (press, bump_a, bump_b, bump axis). bump_a is the PREFERRED
+    # escape (it is the side where the first corridor gap sits, probe fifteen/seventeen,
+    # log45/47.md). The escape is a one-step rotation -- bump_a, bump_b, retreating one -- because
+    # a multi-step run walks into trap mats (the (14,9) city mat, log47.md).
+    _ROUTE_STAGES = (
+        ("right", "down", "up", "y", "left"),
+        ("down", "left", "right", "x", "up"),
+        ("up", "right", "left", "x", "down"),
+    )
+
+    def _march_walk(self, m: dict, sx: int, sy: int, d: str) -> str:
+        """Bookkeep a free (moving) march step, then return the direction."""
+        m["x"], m["y"], m["last"] = sx, sy, d
+        return d
+
+    def _route_march(self, state: OverworldState, bw: int, bh: int) -> str | None:
+        """Deterministic crossing of Route 3 (map 14).
+
+        Stage zero walks east (the old run notes' waypoints go east: 21,8 -> 27,9 -> 34,14).
+        An east press that fails scans its wall column ROW BY ROW (up sweep then down sweep,
+        probing east at every row) -- a column wall with any gap is crossed, unlike blind
+        bumping (probes fourteen/nineteen/twenty-one, log44/49/51.md). If the whole edge
+        sweeps with no adjacency, stage one sweeps the south edge and two the north; a full
+        sweep of all three hands the map over to the engine's warps (the 2 <-> 14 door loop,
+        probes ten/twelve/seventeen).
+        """
+        m = getattr(self, "_mtmoon_march", None)
+        if m is None:
+            # South stage first: probes twenty/twenty-two/twenty-three (log50/51/52.md) sealed the east
+            # side of 14 solid (x>=23) and the west is the city door -- the road, if any, is
+            # on the south or north edge.
+            m = self._mtmoon_march = {
+                "x": None,
+                "y": None,
+                "last": None,
+                "stage": getattr(self, "_mtmoon_start_stage", 1),
+                "t": 0,
+                "scan": 0,
+            }
+        sx, sy = state.x, state.y
+        press, bump_a, bump_b, _axis, back = self._ROUTE_STAGES[m["stage"]]
+        if press == "right":
+            edge, sweep = sx >= bw - 1, bh * 2 + 6
+        elif press == "down":
+            edge, sweep = sy >= bh - 1, bw * 2 + 6
+        else:  # "up"
+            edge, sweep = sy <= 0, bw * 2 + 6
+        if press == "right":
+            # ---- Stage zero: the east march with row-by-row wall scanning. ----
+            if m["x"] is None:
+                return self._march_walk(m, sx, sy, "right")
+            same = (sx, sy) == (m["x"], m["y"])
+            if same and m.get("last") == "right" and not m["scan"]:
+                m["scan"] = 1
+                self.log(f"MTMOON-MARCH | 14 pos=({sx},{sy}) east blocked, scanning rows")
+            if m["scan"]:
+                if sx > m["x"]:
+                    self.log(f"MTMOON-MARCH | 14 pos=({sx},{sy}) wall crossed at y={sy}")
+                    return self._march_walk(m, sx, sy, "right")
+                if same:
+                    move = "up" if m["scan"] == 1 else "down"
+                    if (move == "up" and sy <= 0) or (move == "down" and sy >= bh - 1):
+                        if m["scan"] == 1:
+                            m["scan"] = 2
+                            return self._march_walk(m, sx, sy, "down")
+                        m["scan"] = 0
+                        m["t"] = sweep + 1
+                        m["x"], m["y"], m["last"] = sx, sy, "right"
+                    else:
+                        return self._march_walk(m, sx, sy, move)
+                return self._march_walk(m, sx, sy, "right")
+            if not edge:
+                # Approach realignment: the x=14/15 wall opens around row 12 (log50.md).
+                if 13 <= sx < 20:
+                    if sy < 12:
+                        return self._march_walk(m, sx, sy, "down")
+                    if sy > 12:
+                        return self._march_walk(m, sx, sy, "up")
+                elif sx >= 20:
+                    if sy > bh - 4:
+                        return self._march_walk(m, sx, sy, "up")
+                    if sy < 4:
+                        return self._march_walk(m, sx, sy, "down")
+                return self._march_walk(m, sx, sy, "right")
+            m["t"] += 1
+            if m["t"] <= sweep:
+                return self._march_walk(m, sx, sy, "right")
+        else:
+            # ---- Stages one/two: walk to the edge and probe rows by short bump runs. ----
+            if (m["x"], m["y"]) != (sx, sy):
+                m["x"], m["y"] = sx, sy
+                m["last"] = None
+            else:
+                m["run"] = m.get("run", 0) - 1
+                if m["run"] > 0:
+                    m["last"] = m["bump_dir"]
+                    return m["bump_dir"]
+                k = m.get("seg", 1 if sy < bh // 2 else 0)
+                segs = (bump_a, bump_b, back)
+                m["seg"] = (k + 1) % 3
+                move = segs[m["seg"]]
+                if move == "down" and sy >= bh - 1:
+                    move = bump_b if bump_a == "down" else bump_a
+                if move == "up" and sy <= 0:
+                    move = bump_b if bump_a == "up" else bump_a
+                if move == "left" and sx <= 1:
+                    move = bump_b
+                if move == "right" and sx >= bw - 2:
+                    move = back if back != "left" else "right"
+                m["bump_dir"] = move
+                m["run"] = 7
+                m["last"] = move
+                return move
+            m["last"] = press
+            if not edge:
+                return press
+            m["t"] += 1
+            if m["t"] <= sweep:
+                return press
+        # ---- A whole edge swept with no adjacency: advance the stage. ----
+        self.log(f"MTMOON-MARCH | 14 stage {m['stage']} ({press}) edge exhausted; next stage")
+        m["stage"] = (m["stage"] + 1) % 3
+        m["t"] = 0
+        m["x"] = m["y"] = m["last"] = None
+        m["scan"] = 0
+        m["seg"] = m.get("seg", 0)
+        if m["stage"] == 0:
+            self._mtmoon_all_edges = state.map_id
+            self.log("MTMOON-MARCH | all three edges swept with no adjacency; handing over")
+            m["seg"] = 0
+            return None
+        return self._ROUTE_STAGES[m["stage"]][0]
 
     def _building_exit(self, state: OverworldState) -> str | None:
         """Direction toward the nearest exit warp when standing inside a building nothing has a

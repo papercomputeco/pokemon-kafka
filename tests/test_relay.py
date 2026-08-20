@@ -346,6 +346,28 @@ def test_main_dry_run_applies_max_turns_scale(tmp_path, capsys):
     assert not (tmp_path / "r").exists()  # dry-run touches nothing
 
 
+def test_main_dry_run_accepts_seed_worldmap(tmp_path, capsys):
+    """The badge_to_mtmoon seed ships a .worldmap; the flag must be accepted without a dry-run touching it."""
+    wm = tmp_path / "seed.worldmap"
+    wm.write_text(json.dumps({"cells": {}, "blocked": {}, "encounters": {}, "bounds": {}}))
+    rc = main(
+        [
+            "rom.gb",
+            "--dry-run",
+            "--run-dir",
+            str(tmp_path / "r"),
+            "--seed-worldmap",
+            str(wm),
+            "--segments",
+            "badge_to_mtmoon",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "--stop-on-map 59" in out
+    assert not (tmp_path / "r").exists()  # dry-run touches nothing
+
+
 def test_main_rejects_unknown_segment(tmp_path, capsys):
     rc = main(["rom.gb", "--dry-run", "--run-dir", str(tmp_path / "r"), "--segments", "nope"])
     assert rc == 1

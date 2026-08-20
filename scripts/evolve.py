@@ -107,6 +107,13 @@ MAP_PROGRESS = {
     13: 7,  # Route 2
     51: 8,  # Viridian Forest
     2: 9,  # Pewter City
+    # The badge_to_mtmoon leg: the table used to stop at Pewter, so a lane that had ARRIVED at
+    # Mt. Moon 1F scored below one still standing in the city — the self-heal subloop's winner
+    # picker was inverted exactly for the segment it was healing. Keep the ladder climbing past
+    # the badge.
+    54: 9,  # Pewter Gym (same tier as its city: the badge, not the door, is the progress)
+    14: 10,  # Route 3
+    59: 11,  # Mt. Moon 1F
 }
 
 
