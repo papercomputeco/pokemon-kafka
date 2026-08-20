@@ -32,7 +32,13 @@ TAG="${EXPEDITION_TAG:-exp-$(printf '%s' "$MODEL" | sed -E 's/[^a-z0-9]+/-/g')-$
 OUT="$REPO/data/local_runs"
 STATE="$OUT/${TAG}.supervisor.json"
 EXTRA="$OUT/${TAG}.mission-extra.md"
-WT="$(dirname "$REPO")/pokemon-kafka-speedrun-${TAG}"
+# The local launcher prefixes its worktrees with `pi-`; the claude launcher does not. The
+# baton/lane-log checks below must look where the launcher actually put the worktree.
+if [ "$HARNESS" = "claude" ]; then
+  WT="$(dirname "$REPO")/pokemon-kafka-speedrun-${TAG}"
+else
+  WT="$(dirname "$REPO")/pokemon-kafka-speedrun-pi-${TAG}"
+fi
 LOG="$OUT/${TAG}.expedition.log"
 mkdir -p "$OUT"
 # Leg briefing (spec: mission integration) — the ROM-truth routed chain, so operator budget goes
