@@ -44,6 +44,7 @@ mkdir -p "$OUT"
 # Leg briefing (spec: mission integration) — the ROM-truth routed chain, so operator budget goes
 # to execution walls, not topology. LEG_ROUTE="<src> <dst>" (default: the badge_to_mtmoon leg).
 LEG_ROUTE="${LEG_ROUTE:-54 59}"
+write_briefing() {
 {
   echo "ROM truth is available in this worktree: \`references/rom_truth.json\` (warps, edge"
   echo "connections, collision grids for every map) via \`scripts/rom_truth.py\`. Do NOT re-derive"
@@ -60,6 +61,8 @@ LEG_ROUTE="${LEG_ROUTE:-54 59}"
   echo "# then add:  --seed-worldmap mtmoon.worldmap  to the relay.py command"
   echo '```'
 } > "$EXTRA"
+}
+write_briefing
 
 say() { echo "[expedition] $*" | tee -a "$LOG"; }
 
@@ -116,8 +119,10 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
         --worktree "$WT" --no-design >>"$LOG" 2>&1 || true
       exit 0 ;;
     continue|resume|retry_leg)
+      # The next attempt keeps the ROM-truth briefing; the supervisor's prompt and nudges append.
+      write_briefing
       printf '%s' "$DECISION" | uv run python -c \
-        'import json,sys; print(json.load(sys.stdin).get("prompt",""))' > "$EXTRA"
+        'import json,sys; d=json.load(sys.stdin); t=[d.get("prompt","")]+d.get("nudges",[]); print("\n".join(x for x in t if x))' >> "$EXTRA"
       "$REPO/scripts/reap_emulators.sh" "$WT" >>"$LOG" 2>&1 || true ;;
     escalate)
       WALL=$(printf '%s' "$DECISION" | uv run python -c 'import json,sys; print(json.load(sys.stdin)["wall"])')
