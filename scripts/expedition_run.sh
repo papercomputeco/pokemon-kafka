@@ -35,7 +35,23 @@ EXTRA="$OUT/${TAG}.mission-extra.md"
 WT="$(dirname "$REPO")/pokemon-kafka-speedrun-${TAG}"
 LOG="$OUT/${TAG}.expedition.log"
 mkdir -p "$OUT"
-: > "$EXTRA"
+# Leg briefing (spec: mission integration) — the ROM-truth routed chain, so operator budget goes
+# to execution walls, not topology. LEG_ROUTE="<src> <dst>" (default: the badge_to_mtmoon leg).
+LEG_ROUTE="${LEG_ROUTE:-54 59}"
+{
+  echo "ROM truth is available in this worktree: \`references/rom_truth.json\` (warps, edge"
+  echo "connections, collision grids for every map) via \`scripts/rom_truth.py\`. Do NOT re-derive"
+  echo "topology by probing — look it up. The routed chain for this leg:"
+  echo '```'
+  # shellcheck disable=SC2086
+  uv run python "$REPO/scripts/rom_truth.py" route $LEG_ROUTE 2>/dev/null || echo "(route unavailable)"
+  echo '```'
+  echo "Seed the pilot with the full grids before your first relay:"
+  echo '```'
+  echo "uv run python scripts/rom_truth.py seed-worldmap 2 14 15 54 59 --out mtmoon.worldmap"
+  echo "# then add:  --seed-worldmap mtmoon.worldmap  to the relay.py command"
+  echo '```'
+} > "$EXTRA"
 
 say() { echo "[expedition] $*" | tee -a "$LOG"; }
 
@@ -73,11 +89,10 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
 
   LANE_ARGS=()
   while IFS= read -r f; do LANE_ARGS+=(--lane-log "$f"); done \
-    < <(find "$WT/data/relay" -name 'agent.log' -newer "$STATE" 2>/dev/null | head -40; \
-        find "$WT/data/relay" -name 'agent.log' 2>/dev/null | head -40)
+    < <(find "$WT/data/relay" -name 'agent.log' 2>/dev/null | head -40)
   DECISION=$(uv run python "$REPO/scripts/supervisor.py" classify-exit \
     --state "$STATE" --budget "$LEG_BUDGET_S" --used "$USED_S" \
-    --baton "$BATON" --harness-death "$DEATH" --load-ok "$LOAD_OK" "${LANE_ARGS[@]:-}")
+    --baton "$BATON" --harness-death "$DEATH" --load-ok "$LOAD_OK" ${LANE_ARGS[@]+"${LANE_ARGS[@]}"})
   ACTION=$(printf '%s' "$DECISION" | uv run python -c 'import json,sys; print(json.load(sys.stdin)["action"])')
   say "decision: $DECISION"
 
