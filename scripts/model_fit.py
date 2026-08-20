@@ -64,7 +64,12 @@ def section(name: str, path: Path | None = None) -> str:
 
 
 def update(sessions: list[str], path: Path | None = None, repo: Path | None = None) -> dict:
-    """Fold role_metrics over the sessions into each model's `measured` block. Returns the new doc."""
+    """Fold role_metrics over the sessions into each model's `measured` block. Returns the new doc.
+
+    Pass the model's UNASSISTED sessions, and all of them: the block is replaced, not merged, so a
+    partial list silently shrinks the history — and an `assist=fit` session must never be included,
+    because `measured` is what generates the fit section; folding assisted rows in would make the
+    assist measure itself. (The first fit-row writeup hit both of these at once.)"""
     import role_metrics
 
     p = path or FIT_PATH
