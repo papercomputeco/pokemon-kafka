@@ -56,16 +56,17 @@ LEG_ROUTE="${LEG_ROUTE:-54 59}"
 say() { echo "[expedition] $*" | tee -a "$LOG"; }
 
 launch() { # $1=model $2=budget $3=prompt-file-or-empty
-  local start rc
+  local start rc launcher
+  local -a envs=(MODE=expedition RUN_TAG="$TAG" BUDGET_S="$2" MISSION_EXTRA_FILE="$EXTRA")
+  # NB: a var=val word produced by expansion is a command, not an assignment — hence `env`.
+  [ -n "${3:-}" ] && envs+=(PROMPT_FILE="$3")
+  launcher="$REPO/scripts/local_relay_run.sh"
+  if [ "$HARNESS" = "claude" ] || [ "$1" != "$MODEL" ]; then
+    launcher="$REPO/scripts/claude_relay_run.sh"
+  fi
   start=$(date +%s)
   set +e
-  if [ "$HARNESS" = "claude" ] || [ "$1" != "$MODEL" ]; then
-    MODE=expedition RUN_TAG="$TAG" BUDGET_S="$2" MISSION_EXTRA_FILE="$EXTRA" \
-      ${3:+PROMPT_FILE="$3"} "$REPO/scripts/claude_relay_run.sh" "$1" "$BASE" >>"$LOG" 2>&1
-  else
-    MODE=expedition RUN_TAG="$TAG" BUDGET_S="$2" MISSION_EXTRA_FILE="$EXTRA" \
-      ${3:+PROMPT_FILE="$3"} "$REPO/scripts/local_relay_run.sh" "$1" "$BASE" >>"$LOG" 2>&1
-  fi
+  env "${envs[@]}" "$launcher" "$1" "$BASE" >>"$LOG" 2>&1
   rc=$?
   set -e
   USED_S=$(( $(date +%s) - start ))
