@@ -1,5 +1,17 @@
 # 2026-08-20 — Mt. Moon clear, local-only 5-hour batch: nobody exits, one model impeaches the map
 
+> **CORRECTION (2026-08-21).** The headline finding below — that `rom_truth.json`'s cavern grid is
+> "wrong in 842 of 1,440 cells" and that the lanes navigated a poisoned map — **is false**, and the
+> follow-up run built on it replaced a correct collision rule with a broken one. The parser's
+> bottom-left rule was right; the missing mechanism was pokered's tile-pair collisions, an *edge*
+> constraint no per-cell grid can express. Mt. Moon is clearable from this seed. The 842 figure
+> counted 1,282 cells the sweep never measured.
+>
+> The measurements in this file stand; the interpretation does not. Full account, with the
+> falsifying evidence and the harness changes that follow from it:
+> [`docs/postmortems/2026-08-21-mtmoon-collision-rule.md`](../docs/postmortems/2026-08-21-mtmoon-collision-rule.md)
+> and [`docs/learnings/mtmoon-collision-rule-audit.md`](../docs/learnings/mtmoon-collision-rule-audit.md).
+
 The first multi-model run under the expedition loop (main @ 17b7031 + `bench/mtmoon2` mission/
 seed base). Question: with the mountain reached and ROM truth in hand, can **local models alone**
 — pi harness, full self-heal, supervisor loop, **no Claude anywhere** (escalation disabled) —
