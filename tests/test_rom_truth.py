@@ -205,3 +205,66 @@ def test_cli_extract_route_and_seed(rom, tmp_path, capsys):
     wm_path = tmp_path / "seed.worldmap"
     assert rom_truth.main(["seed-worldmap", "0", "1", "--out", str(wm_path), "--truth", str(out)]) == 0
     assert WorldMap.load(wm_path).bounds[0] == (4, 4)
+
+
+# ---- exit targets / on-map pathing ---------------------------------------------------------
+
+
+def test_exit_targets_warp_is_the_mat_and_edge_is_every_open_cell(rom):
+    """An edge hop has no tile in any warp table — the engine hands the player over when they walk
+    off that side — so its target is the whole open edge. Route 3 is the case that matters: its
+    only way to Route 4 is the NORTH edge, which is why an east march could never leave the map."""
+    p, data = rom
+    truth = parse_rom(p)
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 0, "via": "warp", "x": 0, "y": 0}) == {(0, 0)}
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "mat", "x": 2, "y": 3}) == {(2, 3)}
+    # Map 1's grid is 1100/1100/1111/1111 — the east column is open only on the bottom two rows.
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "east"}) == {(3, 2), (3, 3)}
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "north"}) == {(0, 0), (1, 0)}
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "nowhere"}) == set()
+
+
+def test_path_on_map_routes_to_the_nearest_target(rom):
+    p, data = rom
+    truth = parse_rom(p)
+    pairs = rom_truth.loaded_pairs(truth)
+    east = rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "east"})
+    path = rom_truth.path_on_map(truth, pairs, 1, (0, 0), east)
+    assert path[0] == (0, 0) and path[-1] in east
+    assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1 for a, b in zip(path, path[1:]))
+    assert rom_truth.path_on_map(truth, pairs, 1, (3, 2), east) == [(3, 2)]  # already standing on it
+    assert rom_truth.path_on_map(truth, pairs, 99, (0, 0), east) is None  # unknown map
+    assert rom_truth.path_on_map(truth, pairs, 1, (0, 0), set()) is None  # nothing to aim at
+
+
+def test_path_on_map_honours_blocked_tiles_and_tile_pairs(rom):
+    """``blocked`` is what the grid cannot say: a body standing on an open tile, or a wall this
+    lane has already met. Blocking one of two exits must divert to the other, not give up."""
+    p, data = rom
+    truth = parse_rom(p)
+    pairs = rom_truth.loaded_pairs(truth)
+    east = rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "east"})
+    assert rom_truth.path_on_map(truth, pairs, 1, (0, 0), east, blocked={(3, 2)})[-1] == (3, 3)
+    assert rom_truth.path_on_map(truth, pairs, 1, (0, 0), east, blocked=east) is None  # every exit gone
+    # A lane standing on a tile it has since learned is blocked must still route out of it.
+    assert rom_truth.path_on_map(truth, pairs, 1, (0, 0), east, blocked={(0, 0)})[0] == (0, 0)
+    # Map 2's lip block sits behind a tile-pair collision, so BFS must refuse that edge.
+    m2 = truth["maps"]["2"]
+    assert m2["grid"][0][2] == "1" and not rom_truth.passable(m2, pairs, 1, 0, 2, 0)
+
+
+def test_sprite_tiles_reports_bodies_the_grid_calls_walkable(rom):
+    """A defeated Gen 1 trainer keeps standing on its tile, so a route planned through one is
+    blocked for the rest of the run, not just until the battle ends."""
+    p, data = rom
+    truth = parse_rom(p)
+    assert {(1, 2), (0, 3)} <= rom_truth.sprite_tiles(truth, 0)
+    assert rom_truth.sprite_tiles(truth, 1) == set()
+    assert rom_truth.sprite_tiles(truth, 99) == set()
+
+
+def test_loaded_pairs_reads_the_extracted_list(rom):
+    p, data = rom
+    truth = parse_rom(p)
+    assert rom_truth.loaded_pairs(truth) == rom_truth.tile_pairs(data)
+    assert rom_truth.loaded_pairs({"maps": {}}) == set()
