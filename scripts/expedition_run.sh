@@ -93,7 +93,8 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
   rc=0; launch "$MODEL" "$LEG_BUDGET_S" "${PROMPT_FILE:-}" || rc=$?
 
   BATON=0
-  [ -e "$WT/batons/${SEGMENT}.state" ] || ls "$WT"/data/relay/*/batons/*.state >/dev/null 2>&1 && BATON=1
+  # Segment-exact: a seed that itself came from a baton means "any baton" would false-complete.
+  { [ -e "$WT/batons/${SEGMENT}.state" ] || ls "$WT"/data/relay/*/batons/"${SEGMENT}.state" >/dev/null 2>&1; } && BATON=1
   # Harness death per the guard's definition: the operator died without spending its budget and
   # without saying anything — a timeout kill (rc 124) is the budget, any other nonzero is the box.
   DEATH=0
