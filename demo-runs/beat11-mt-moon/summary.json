@@ -1,0 +1,28 @@
+{
+  "turns": 364,
+  "battles_won": 5,
+  "maps_visited": 6,
+  "final_map_id": 59,
+  "final_x": 18,
+  "final_y": 5,
+  "badges": 1,
+  "party_size": 1,
+  "lead_hp": 32,
+  "stuck_count": 20,
+  "max_stuck_streak": 27,
+  "backtrack_restores": 0,
+  "encounters": 5,
+  "level_ups": 2,
+  "evolutions": 0,
+  "battle_wedge_recoveries": 0,
+  "brock_turns": null,
+  "brock_won": null,
+  "brock_lead_species": null,
+  "brock_lead_level": null,
+  "params": {
+    "strategy": "medium",
+    "rom": "rom/pokemon_red.gb",
+    "label": "11 \u00b7 Mt. Moon \u2014 into the cave"
+  },
+  "run_id": "20260821-221809-1d48"
+}
