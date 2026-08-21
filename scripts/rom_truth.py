@@ -45,6 +45,11 @@ TILESETS = 0xC7BE  # bank 3 (3:47BE): 12-byte entries
 NUM_MAPS = 248
 LAST_MAP = 0xFF  # warp destination "back where we came from" (door mats)
 _CONN_BITS = (("north", 0x08), ("south", 0x04), ("west", 0x02), ("east", 0x01))
+# pokered's TilePairCollisionsLand: triples of (tileset, tile a, tile b) ending in 0xFF. Moving
+# BETWEEN these two tiles is refused even though each is individually walkable — the cave-wall
+# lips in the CAVERN tileset (17) and the forest edges in FOREST (3). This is an EDGE property:
+# no per-cell walkable/solid grid can express it, so ``grid`` alone over-reports connectivity.
+TILE_PAIR_COLLISIONS_LAND = 0x0C7E
 
 
 def _u16(rom: bytes, off: int) -> int:
@@ -63,6 +68,35 @@ def _walkable_tiles(rom: bytes, coll_ptr: int) -> set[int]:
         tiles.add(rom[i])
         i += 1
     return tiles
+
+
+def tile_pairs(rom: bytes) -> set[tuple[int, int, int]]:
+    """``{(tileset, tile_a, tile_b)}`` the engine refuses to walk between, both directions."""
+    pairs: set[tuple[int, int, int]] = set()
+    i = TILE_PAIR_COLLISIONS_LAND
+    while rom[i] != 0xFF:
+        ts, a, b = rom[i], rom[i + 1], rom[i + 2]
+        pairs.add((ts, a, b))
+        pairs.add((ts, b, a))
+        i += 3
+    return pairs
+
+
+def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: int, y1: int) -> bool:
+    """Can the player step from (x0,y0) to (x1,y1) on map ``m``? Both cells must be walkable
+    AND the move must not be a tile-pair collision. Checking ``grid`` alone is not enough: on
+    Mt. Moon B2F (map 61) the engine refuses (25,11)->(25,12) although both cells are open,
+    because the pair is CAVERN 0x20/0x05 — measured live, see
+    docs/learnings/mtmoon-collision-rule-audit.md."""
+    h, w = m["height"], m["width"]
+    if not (0 <= x0 < w and 0 <= y0 < h and 0 <= x1 < w and 0 <= y1 < h):
+        return False
+    if m["grid"][y0][x0] != "1" or m["grid"][y1][x1] != "1":
+        return False
+    tiles = m.get("tiles")
+    if not tiles:
+        return True
+    return (m["tileset"], int(tiles[y0][2 * x0 : 2 * x0 + 2], 16), int(tiles[y1][2 * x1 : 2 * x1 + 2], 16)) not in pairs
 
 
 def parse_map(rom: bytes, map_id: int) -> dict | None:
@@ -108,16 +142,18 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     walk = _walkable_tiles(rom, _u16(rom, te + 5))
     grass = rom[te + 10]
     w, h = 2 * w_blocks, 2 * h_blocks
-    grid, grass_tiles = [], []
+    grid, grass_tiles, tiles = [], [], []
     for y in range(h):
-        row = []
+        row, trow = [], []
         for x in range(w):
             block = rom[data + (y // 2) * w_blocks + (x // 2)]
             tile = rom[blocks + block * 16 + ((y % 2) * 2 + 1) * 4 + (x % 2) * 2]
             row.append("1" if tile in walk else "0")
+            trow.append(f"{tile:02x}")  # kept so ``passable`` can apply tile-pair collisions
             if tile == grass and grass != 0xFF:
                 grass_tiles.append([x, y])
         grid.append("".join(row))
+        tiles.append("".join(trow))
     return {
         "width": w,
         "height": h,
@@ -127,6 +163,7 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         "sprites": sprites,
         "grass": grass_tiles,
         "grid": grid,
+        "tiles": tiles,
     }
 
 
@@ -137,7 +174,11 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         m = parse_map(rom, mid)
         if m is not None:
             maps[str(mid)] = m
-    return {"rom_sha256": hashlib.sha256(rom).hexdigest(), "maps": maps}
+    return {
+        "rom_sha256": hashlib.sha256(rom).hexdigest(),
+        "tile_pairs": [list(t) for t in sorted(tile_pairs(rom))],
+        "maps": maps,
+    }
 
 
 def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict:
