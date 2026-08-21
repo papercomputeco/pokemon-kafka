@@ -24,7 +24,7 @@ from rom_truth import (
 )
 from world_map import WorldMap
 
-WALK, WALL, GRASS = 0x00, 0x01, 0x52
+WALK, WALL, GRASS, LIP = 0x00, 0x01, 0x52, 0x03
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -43,14 +43,17 @@ def build_rom() -> bytearray:
     rom = bytearray(0x18000)  # 6 banks
     # Tileset 0: bank 5 blockset (addr 0x4000), home-bank collision list, grass tile 0x52.
     rom[TILESETS : TILESETS + 12] = bytes([5, *_u16(0x4000), 0, 0, *_u16(COLL), 0, 0, 0, GRASS, 0])
-    rom[COLL : COLL + 3] = bytes([WALK, GRASS, 0xFF])
-    # Block 0: all walkable. Block 1: all wall. Block 2: bottom-left tiles grass.
+    rom[COLL : COLL + 4] = bytes([WALK, GRASS, LIP, 0xFF])
+    # Block 0: all walkable. Block 1: all wall. Block 2: bottom-left tiles grass. Block 3: lip.
     rom[BLOCKS : BLOCKS + 16] = bytes([WALK] * 16)
     rom[BLOCKS + 16 : BLOCKS + 32] = bytes([WALL] * 16)
     b2 = [WALK] * 16
     for idx in (4, 6, 12, 14):  # the bottom-left tile of each 2x2 quad
         b2[idx] = GRASS
     rom[BLOCKS + 32 : BLOCKS + 48] = bytes(b2)
+    rom[BLOCKS + 48 : BLOCKS + 64] = bytes([LIP] * 16)
+    # TilePairCollisionsLand: WALK <-> LIP is refused on tileset 0 even though both are walkable.
+    rom[rom_truth.TILE_PAIR_COLLISIONS_LAND : rom_truth.TILE_PAIR_COLLISIONS_LAND + 4] = bytes([0, WALK, LIP, 0xFF])
 
     for mid, hdr in ((0, HDR0), (1, HDR1), (2, HDR2), (3, HDR3)):
         rom[MAP_HEADER_BANKS + mid] = 0
@@ -83,7 +86,7 @@ def build_rom() -> bytearray:
     rom[HDR2 : HDR2 + 10] = bytes([0, 2, 2, *_u16(DATA2), 0, 0, 0, 0, 0x02])  # west
     rom[HDR2 + 10 : HDR2 + 21] = bytes([1] + [0] * 10)
     rom[HDR2 + 21 : HDR2 + 23] = bytes(_u16(OBJ2))
-    rom[DATA2 : DATA2 + 4] = bytes([0, 0, 0, 0])
+    rom[DATA2 : DATA2 + 4] = bytes([0, 3, 0, 0])  # lip blocks top-right: a walkable pair-collision
     rom[OBJ2 : OBJ2 + 2] = bytes([0, 1])
     rom[OBJ2 + 2 : OBJ2 + 6] = bytes([1, 1, 0, 200])  # dest map 200: not extracted
     rom[OBJ2 + 6] = 0
@@ -115,6 +118,31 @@ def test_parse_map_reads_dims_warps_connections_and_sprites(rom):
     assert m1["connections"] == {"east": 2}
     assert m1["grid"] == ["1100", "1100", "1111", "1111"]  # block 1 (wall) top-right
     assert [0, 2] in m1["grass"] and [1, 3] in m1["grass"]
+
+
+def test_tile_pair_collisions_block_moves_between_two_walkable_cells(rom):
+    """The engine refuses some moves between cells that are BOTH walkable — pokered's
+    TilePairCollisionsLand. On the real ROM this is what closes Mt. Moon B2F's row-11 -> row-12
+    boundary (CAVERN 0x20/0x05, measured live at (25,11)->(25,12)); a per-cell grid cannot say
+    it, so ``grid`` alone over-reports connectivity."""
+    _, data = rom
+    pairs = rom_truth.tile_pairs(data)
+    assert (0, WALK, LIP) in pairs and (0, LIP, WALK) in pairs  # recorded both directions
+    m2 = parse_map(data, 2)
+    assert m2["grid"][0][1] == "1" and m2["grid"][0][2] == "1"  # both cells walkable...
+    assert not rom_truth.passable(m2, pairs, 1, 0, 2, 0)  # ...but the move between them is not
+    assert not rom_truth.passable(m2, pairs, 2, 0, 1, 0)  # refused from the other side too
+    assert rom_truth.passable(m2, pairs, 0, 0, 1, 0)  # walk -> walk is fine
+    assert rom_truth.passable(m2, pairs, 2, 0, 3, 0)  # lip -> lip is fine
+    assert not rom_truth.passable(m2, pairs, 0, 0, -1, 0)  # off-map
+    assert not rom_truth.passable(parse_map(data, 1), pairs, 1, 0, 2, 0)  # into a wall cell
+    assert rom_truth.passable({**m2, "tiles": None}, pairs, 1, 0, 2, 0)  # no tiles: grid-only
+
+
+def test_extract_carries_the_tile_pair_table(rom):
+    truth = parse_rom(rom[0], map_ids=[2])
+    assert [0, WALK, LIP] in truth["tile_pairs"]
+    assert truth["maps"]["2"]["tiles"][0][:8] == f"{WALK:02x}{WALK:02x}{LIP:02x}{LIP:02x}"
 
 
 def test_degenerate_map_is_skipped(rom):
