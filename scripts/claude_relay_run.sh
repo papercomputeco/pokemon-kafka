@@ -26,6 +26,9 @@ trap '"$REPO/scripts/reap_emulators.sh" "$WT" || true' EXIT
 SVC="game-event-bridge-${TAG}"
 OUT="${OUT_DIR:-$REPO/data/local_runs}"; mkdir -p "$OUT"
 PROMPT="${PROMPT_FILE:-$REPO/docs/prompts/operator_prompt_v2.md}"
+# Expedition mode (docs/expedition-spec.md): assists on by default; the supervisor owns termination.
+MODE="${MODE:-bench}"
+[ "$MODE" = "expedition" ] && ASSIST="${ASSIST:-fit}"  # consult is a pi tool; fit is the cc assist
 ASSIST="${ASSIST:-none}"
 
 [ -f "$PROMPT" ] || { echo "missing mission prompt: $PROMPT" >&2; exit 2; }
@@ -53,6 +56,16 @@ case "$ASSIST" in
 $FIT"; else echo "   (ASSIST=fit: no fit entry for $MODEL — running unassisted)"; ASSIST="none"; fi ;;
 esac
 echo "== assist: $ASSIST"
+echo "== mode: $MODE"
+# Supervisor evidence: scripts/expedition_run.sh writes continuation prompts / wall nudges here
+# between attempts; a bench run never sets it, so rows stay unassisted by default.
+if [ -n "${MISSION_EXTRA_FILE:-}" ] && [ -s "$MISSION_EXTRA_FILE" ]; then
+  MISSION="$MISSION
+
+## Supervisor
+$(cat "$MISSION_EXTRA_FILE")"
+  echo "== mission extra: $MISSION_EXTRA_FILE"
+fi
 
 echo "== worktree $WT @ $BASE"
 if [ ! -d "$WT" ]; then

@@ -35,6 +35,9 @@ PI_CLI="${PI_CLI:-$(ls "$HOME"/.local/share/fnm/node-versions/*/installation/lib
 #   ASSIST=fit      append this model's measured operator character (references/model_fit.json, scripts/model_fit.py)
 #   ASSIST=both     tips + consult;  ASSIST=all  tips + consult + fit
 # The bench row label carries the assist mode; assisted rows are a separate comparison.
+# Expedition mode (docs/expedition-spec.md): assists on by default; the supervisor owns termination.
+MODE="${MODE:-bench}"
+[ "$MODE" = "expedition" ] && ASSIST="${ASSIST:-all}"
 ASSIST="${ASSIST:-none}"
 TIPS="$REPO/docs/prompts/tips.md"
 MISSION="$(cat "$PROMPT")"
@@ -55,6 +58,16 @@ case "$ASSIST" in
 $FIT"; else echo "   (ASSIST=fit: no fit entry for $ALIAS — running unassisted)"; ASSIST="none"; fi ;;
 esac
 echo "== assist: $ASSIST"
+echo "== mode: $MODE"
+# Supervisor evidence: scripts/expedition_run.sh writes continuation prompts / wall nudges here
+# between attempts; a bench run never sets it, so rows stay unassisted by default.
+if [ -n "${MISSION_EXTRA_FILE:-}" ] && [ -s "$MISSION_EXTRA_FILE" ]; then
+  MISSION="$MISSION
+
+## Supervisor
+$(cat "$MISSION_EXTRA_FILE")"
+  echo "== mission extra: $MISSION_EXTRA_FILE"
+fi
 curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }
 # Power preflight: a model whose Spec carries `power_w` has hung the eGPU at the stock 600 W limit
@@ -133,7 +146,7 @@ SESSION=$(ls -t "$HOME/.pi/agent/sessions/"*"speedrun-pi-${TAG}--"/*.jsonl 2>/de
 echo "== bench row (session $SESSION)"
 if [ -n "$SESSION" ]; then
   ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k, assist=${ASSIST})" \
-      --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price 0.30 \
+      --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price "${KWH_PRICE:-0.39}" \
       --kernel-log "$KERNEL_LOG" --ollama-log "$OLLAMA_LOG" ) \
     || echo "   ^ no row (rc=3: the run died on the harness) — write the attempt up, do not publish a row"
 fi
