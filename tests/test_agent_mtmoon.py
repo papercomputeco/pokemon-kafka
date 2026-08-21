@@ -458,3 +458,133 @@ def test_route3_march_east_stage_presses_off_its_edge_within_the_sweep(tmp_path)
     ag._route_march(_mk14(69, 8), 70, 18)  # arrive at the east bound
     assert ag._route_march(_mk14(69, 9), 70, 18) == "right"  # moved a row: press off again
     assert ag._mtmoon_march["t"] == 1
+
+
+# ---- ROM-truth navigation ----------------------------------------------------------------
+
+
+def _truth_agent(tmp_path):
+    """An agent wired to a 4x4 synthetic truth: map 14 open, north edge at x=1 leads to map 15."""
+    import rom_truth
+
+    ag = _make_agent(tmp_path)
+    grid = ["0100", "1111", "1111", "1111"]
+    truth = {
+        "tile_pairs": [],
+        "maps": {
+            "14": {
+                "width": 4,
+                "height": 4,
+                "tileset": 0,
+                "grid": grid,
+                "tiles": None,
+                "warps": [],
+                "sprites": [],
+                "grass": [],
+                "connections": {"north": 15},
+            },
+            "15": {
+                "width": 4,
+                "height": 4,
+                "tileset": 0,
+                "grid": ["1111"] * 4,
+                "tiles": None,
+                "warps": [[0, 0, MT_MOON_1F_MAP, 0]],
+                "sprites": [],
+                "grass": [],
+                "connections": {"south": 14},
+            },
+            str(MT_MOON_1F_MAP): {
+                "width": 4,
+                "height": 4,
+                "tileset": 0,
+                "grid": ["1111"] * 4,
+                "tiles": None,
+                "warps": [],
+                "sprites": [],
+                "grass": [],
+                "connections": {},
+            },
+        },
+    }
+    ag._truth, ag._truth_pairs, ag._truth_mod = truth, set(), rom_truth
+    return ag
+
+
+def _ow(map_id, x, y, **kw):
+    return OverworldState(map_id=map_id, x=x, y=y, badges=1, party_count=1, **kw)
+
+
+def test_truth_step_walks_toward_the_edge_that_leaves_the_map(tmp_path):
+    ag = _truth_agent(tmp_path)
+    # (1,3) -> the only open north-edge cell is (1,0), so the step is straight up.
+    assert ag._truth_step(_ow(14, 1, 3), MT_MOON_1F_MAP) == "up"
+    assert ag._truth_step(_ow(MT_MOON_1F_MAP, 0, 0), MT_MOON_1F_MAP) is None  # already there
+
+
+def test_truth_step_walks_off_the_edge_once_standing_on_it(tmp_path):
+    """An edge hop fires no warp: the engine hands the player over only when they walk off that
+    side. Arriving at the exit tile and planning again yields a one-cell path — the crossing that
+    ended on Route 3's (57,0) then stalled there for the rest of the run."""
+    ag = _truth_agent(tmp_path)
+    assert ag._truth_step(_ow(14, 1, 0), MT_MOON_1F_MAP) == "up"
+
+
+def test_truth_step_presses_a_to_clear_a_challenge_before_blaming_the_map(tmp_path):
+    """A stalled step is a wall or a trainer mid-challenge, and ``text_box_active`` reads False for
+    the latter. Pressing A on the odd misses clears the dialogue; only a step that still fails is
+    a wall. Scoring the freeze as a refusal sealed Route 3's crossing at (11,6)."""
+    ag = _truth_agent(tmp_path)
+    st = _ow(14, 1, 3)
+    assert ag._truth_step(st, MT_MOON_1F_MAP) == "up"
+    ag.turn_count += 1
+    assert ag._truth_step(st, MT_MOON_1F_MAP) == "a"  # did not move: dismiss, do not block
+    assert ag.world.blocked.get(14, {}) == {}
+
+
+def test_truth_step_blocks_a_tile_the_engine_keeps_refusing(tmp_path):
+    ag = _truth_agent(tmp_path)
+    st = _ow(14, 1, 3)
+    for _ in range(ag._TRUTH_REFUSE_STRIKES + 2):
+        ag._truth_step(st, MT_MOON_1F_MAP)
+        ag.turn_count += 1
+    assert (1, 2) in ag.world.blocked.get(14, {})  # the step it never completed
+
+
+def test_truth_step_forgets_misses_once_the_lane_moves(tmp_path):
+    ag = _truth_agent(tmp_path)
+    assert ag._truth_step(_ow(14, 1, 3), MT_MOON_1F_MAP) == "up"
+    ag.turn_count += 1
+    assert ag._truth_step(_ow(14, 1, 2), MT_MOON_1F_MAP) == "up"  # moved: progress, not a refusal
+    assert ag._truth_misses == {}
+
+
+def test_truth_refuse_strikes_is_evolvable(tmp_path, monkeypatch):
+    """The knob the ROM-truth legs actually turn. Route 3 reads no other navigation parameter, so
+    without this a NAV spread over stuck_threshold/waypoint_skip_distance returns six identical
+    lanes — six lanes' compute for one lane's information."""
+    import json as _json
+
+    from test_agent import _make_agent
+
+    monkeypatch.setenv("EVOLVE_PARAMS", _json.dumps({"truth_refuse_strikes": 3}))
+    assert _make_agent(tmp_path)._truth_refuse_strikes == 3
+    monkeypatch.delenv("EVOLVE_PARAMS")
+    ag = _make_agent(tmp_path)
+    assert ag._truth_refuse_strikes == ag._TRUTH_REFUSE_STRIKES
+
+
+def test_an_impatient_lane_calls_a_wall_sooner_than_a_patient_one(tmp_path):
+    """Same refused step, different genome, different turn at which the map is blamed."""
+    calls = {}
+    for label, strikes in (("impatient", 4), ("patient", 12)):
+        ag = _truth_agent(tmp_path)
+        ag._truth_refuse_strikes = strikes
+        st = _ow(14, 1, 3)
+        for turn in range(40):
+            ag._truth_step(st, MT_MOON_1F_MAP)
+            ag.turn_count += 1
+            if (1, 2) in ag.world.blocked.get(14, {}):
+                calls[label] = turn
+                break
+    assert calls["impatient"] < calls["patient"]
