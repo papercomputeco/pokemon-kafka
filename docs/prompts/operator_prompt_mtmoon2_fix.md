@@ -39,3 +39,17 @@ as an **uncommitted diff** in `../pokemon-kafka-speedrun-pi-exp-laguna-xs-mtmoon
 
 One relay at a time; `--sideloop-every 300` on; seed the (fixed) worldmap; probe before
 committing lanes; commit as you go; keep working after any summary while budget remains.
+
+## Amendment (2026-08-21) — the unreachable-proof's measured flaw
+
+A prior session in this worktree completed Job 1 (the ≥3-of-4 rule — it stands, keep it) and
+then ruled the goal unreachable from the seed. That ruling rests on a connectivity model where
+**warp cells are walls**: under the corrected grid, map 59's three ladder cells (5,5), (17,11),
+(25,15) all read WALL — yet the engine enters warp tiles regardless of collision (your own lanes
+stood on the (14,35) entrance mat, which also hosts a warp; every Gen 1 player has descended
+these exact ladders). A sub-tile majority does not close a cell that hosts a warp-table entry.
+
+So: skip Job 1 (done — do not redo it). Amend the model — any cell carrying a warp entry is
+enterable, in `seed_worldmap` and in any connectivity analysis, with a test. Verify live first:
+one probe stepping onto (5,5) from an adjacent walkable cell; the warp to 60 should fire. Then
+rebuild the component analysis and finish Job 2 — the route should be computable before you run it.
