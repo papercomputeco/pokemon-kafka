@@ -146,7 +146,7 @@ SESSION=$(ls -t "$HOME/.pi/agent/sessions/"*"speedrun-pi-${TAG}--"/*.jsonl 2>/de
 echo "== bench row (session $SESSION)"
 if [ -n "$SESSION" ]; then
   ( cd "$REPO" && uv run python scripts/bench_report.py "$SESSION" --label "${TAG} (local, ${CTX_K}k, assist=${ASSIST})" \
-      --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price 0.30 \
+      --rate-in "${RATE_IN:-0.14}" --rate-out "${RATE_OUT:-1.00}" --power-log "$POWER_CSV" --kwh-price "${KWH_PRICE:-0.39}" \
       --kernel-log "$KERNEL_LOG" --ollama-log "$OLLAMA_LOG" ) \
     || echo "   ^ no row (rc=3: the run died on the harness) — write the attempt up, do not publish a row"
 fi
