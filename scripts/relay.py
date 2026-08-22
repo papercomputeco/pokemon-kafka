@@ -49,14 +49,20 @@ BASE_GENOME = {
     "hp_heal_threshold": 0.25,
     "unknown_move_score": 10.0,
     "status_move_score": 1.0,
+    "truth_refuse_strikes": 40,
 }
 
+# Navigation levers. NOTE which legs read which: the waypoint Navigator owns stuck_threshold and
+# waypoint_skip_distance, and axis_preference_map_0 is map 0 only — so on a leg the ROM-truth
+# planner owns (Route 3 -> Mt. Moon) those four knobs are inert and every lane returns byte-
+# identical fitness, six lanes' compute for one lane's information. truth_refuse_strikes is the
+# knob that leg does read, so the spread varies it too rather than only the Navigator's.
 NAV_SPREAD = (
     {"label": "base"},
-    {"label": "fast_stuck", "stuck_threshold": 4},
-    {"label": "patient", "stuck_threshold": 16, "door_cooldown": 12},
+    {"label": "fast_stuck", "stuck_threshold": 4, "truth_refuse_strikes": 12},
+    {"label": "patient", "stuck_threshold": 16, "door_cooldown": 12, "truth_refuse_strikes": 90},
     {"label": "narrow", "waypoint_skip_distance": 1},
-    {"label": "wide_dc2", "waypoint_skip_distance": 8, "door_cooldown": 2},
+    {"label": "wide_dc2", "waypoint_skip_distance": 8, "door_cooldown": 2, "truth_refuse_strikes": 20},
     {"label": "x_axis", "axis_preference_map_0": "x"},
 )
 
@@ -412,7 +418,36 @@ def run_segment(
             lanes.clear()
             break
         sleep(2.0)
+    report_inert_spread(seg, results)
     return pick(results), results
+
+
+# Fitness keys that record what the lane DID, as opposed to how long the box let it run. Wall-clock
+# noise must not disguise a spread that explored nothing.
+_BEHAVIOUR_KEYS = ("turns", "final_map_id", "final_x", "final_y", "stuck_count", "battles_won", "maps_visited")
+
+
+def report_inert_spread(seg, results):
+    """Say so when every lane of a spread came back byte-identical.
+
+    Genome variants only diverge on legs that read the knobs they set: the ROM-truth planner that
+    owns Route 3 ignores stuck_threshold, waypoint_skip_distance and axis_preference_map_0
+    entirely, so a NAV spread over those returns one lane's information for six lanes' compute —
+    and the report looks like six independent confirmations rather than one result copied six
+    times. Cheap to detect, and silence here is what made it cost 12,000 turns x 6 to notice.
+    """
+    scored = [r for r in results if r.get("fitness") and not r.get("killed")]
+    if len(scored) < 2:
+        return False
+    signature = {tuple(r["fitness"].get(k) for k in _BEHAVIOUR_KEYS) for r in scored}
+    if len(signature) > 1:
+        return False
+    print(
+        f"[relay] NOTE {seg.name}: all {len(scored)} lanes returned identical fitness — the genome "
+        f"knobs this spread varies are not read by this segment. Treat it as ONE sample, and see "
+        f"NAV_SPREAD's note on which leg reads which knob."
+    )
+    return True
 
 
 DEFAULT_ROM = WORKSPACE / "rom" / "Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb"

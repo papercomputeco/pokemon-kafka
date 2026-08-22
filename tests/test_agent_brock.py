@@ -222,3 +222,57 @@ def test_battle_backfills_the_species_when_the_first_snapshot_named_none(tmp_pat
         ag.run(max_turns=6)
     assert ag._battle_opponent_level == 14
     assert ag._battle_opponent_species == "Onix"
+
+
+# ---- Brock identification after the badge --------------------------------------------------
+
+
+def _run_one_trainer_fight(tmp_path, map_id, pre_badges, enemy_level=14):
+    """Drive run() through a single trainer battle on ``map_id`` with ``pre_badges`` already held."""
+    from unittest.mock import patch
+
+    import agent as agent_mod
+    from memory_reader import BattleState
+    from test_agent_quest_coverage import TestRunLoopHooks, _wild
+
+    ag = _make_agent(tmp_path)
+    TestRunLoopHooks()._battle_helpers(ag)
+    reads = {"n": 0}
+
+    def battle_state():
+        reads["n"] += 1
+        return _wild(battle_type=2, enemy_level=enemy_level, enemy_species=0x22) if reads["n"] < 12 else BattleState(0)
+
+    def mem_read(addr):
+        if addr == ag.memory.ADDR_BADGES:
+            return pre_badges
+        if addr == ag.memory.ADDR_MAP_ID:
+            return map_id
+        return 0
+
+    ag.memory.read_battle_state = MagicMock(side_effect=battle_state)
+    ag.memory._read = MagicMock(side_effect=mem_read)
+    ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=map_id, x=5, y=1, badges=pre_badges))
+    with patch.object(agent_mod, "Image", None):
+        ag.run(max_turns=6)
+    return ag
+
+
+def test_a_trainer_fought_with_the_badge_already_in_hand_is_not_brock(tmp_path):
+    """Brock is the fight that *earns* the Boulder Badge, so holding it first disqualifies the
+    fight. Without this gate a seeded post-badge leg matched the ">= 12 is the gym leader"
+    fallback on the first Route 3 trainer, and `_resolve_brock_badge` read the bit that was
+    already set — so the run claimed a win it never fought. Beat 11 recorded `brock_turns: 4`
+    exactly this way, on a seed whose badge came from a different run entirely."""
+    from agent import ROUTE_3_MAP
+
+    ag = _run_one_trainer_fight(tmp_path, ROUTE_3_MAP, pre_badges=0x01)
+    assert ag.brock_turns is None and ag.brock_won is None
+    assert ag.brock_lead_species is None and ag.brock_lead_level is None
+
+
+def test_the_badgeless_gym_fight_is_still_recorded(tmp_path):
+    """The gate must not cost the real detection: same fight, no badge yet, still Brock."""
+    ag = _run_one_trainer_fight(tmp_path, PEWTER_GYM_MAP, pre_badges=0x00)
+    assert ag.brock_turns is not None
+    assert ag.brock_lead_level is not None

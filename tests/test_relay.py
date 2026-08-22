@@ -865,3 +865,57 @@ def test_acquire_relay_lock_reports_holder_zero_when_the_lock_file_is_unreadable
     assert (ok, who) == (False, 0)
     (tmp_path / "release").write_text("")
     holder.join(timeout=60)
+
+
+# ---- inert spread detection -----------------------------------------------------------------
+
+
+def _fit(**kw):
+    base = {"turns": 364, "final_map_id": 59, "final_x": 18, "final_y": 5, "stuck_count": 20}
+    base.update(kw)
+    return base
+
+
+def _lane(label, fitness, **kw):
+    return {"label": label, "fitness": fitness, "success": True, **kw}
+
+
+def _seg_named(name="badge_to_mtmoon"):
+    return Segment(name, stop_on_map=59, stop_on_badge=None, max_turns=10, variants=())
+
+
+def test_identical_lanes_are_called_out_as_one_sample(capsys):
+    """Six lanes that agree byte-for-byte are one result copied six times, not six confirmations.
+    The NAV spread varies knobs the ROM-truth leg never reads, so it produced exactly this — and
+    the silence is what made it cost six lanes x 12,000 turns to notice."""
+    results = [_lane(str(i), _fit()) for i in range(6)]
+    assert relay.report_inert_spread(_seg_named(), results) is True
+    out = capsys.readouterr().out
+    assert "identical fitness" in out and "ONE sample" in out
+
+
+def test_a_spread_that_actually_diverged_is_not_flagged(capsys):
+    results = [_lane("a", _fit()), _lane("b", _fit(turns=901, final_map_id=14))]
+    assert relay.report_inert_spread(_seg_named(), results) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_wall_clock_noise_alone_does_not_count_as_divergence(capsys):
+    """Only what the lane DID is compared. A key the lanes happen to differ on for reasons other
+    than behaviour must not disguise a spread that explored nothing."""
+    results = [_lane("a", _fit(lead_hp=32)), _lane("b", _fit(lead_hp=31))]
+    assert relay.report_inert_spread(_seg_named(), results) is True
+
+
+def test_killed_and_empty_lanes_are_not_evidence(capsys):
+    assert relay.report_inert_spread(_seg_named(), [_lane("a", _fit())]) is False  # one lane proves nothing
+    assert relay.report_inert_spread(_seg_named(), [_lane("a", _fit()), _lane("b", {}, killed=True)]) is False
+    assert relay.report_inert_spread(_seg_named(), []) is False
+
+
+def test_nav_spread_varies_a_knob_the_truth_leg_reads():
+    """Regression guard for the inert spread itself: the NAV variants must differ on something
+    the ROM-truth planner consults, not only on the waypoint Navigator's knobs."""
+    assert "truth_refuse_strikes" in relay.BASE_GENOME
+    varied = {v.get("truth_refuse_strikes") for v in relay.NAV_SPREAD if "truth_refuse_strikes" in v}
+    assert len(varied) >= 2, "the spread must explore more than one value"

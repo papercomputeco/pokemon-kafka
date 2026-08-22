@@ -254,6 +254,93 @@ def describe_route(chain: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def loaded_pairs(truth: dict) -> set[tuple[int, int, int]]:
+    """The tile-pair collision set as stored in an extracted truth file (``tile_pairs`` parses the
+    ROM; this reads the already-parsed list, which is what every consumer of the JSON has)."""
+    return {tuple(t) for t in truth.get("tile_pairs", ())}
+
+
+def exit_targets(truth: dict, hop: dict) -> set[tuple[int, int]]:
+    """The tiles on ``hop['from']`` that carry you to ``hop['to']``.
+
+    A warp/mat hop is a single mat tile. An *edge* hop has no tile in any table — the engine hands
+    the player to the neighbour when they step off that side — so the target is every walkable cell
+    on that edge. Route 3's north edge (x 57..63 of 70) is the only way to Route 4, and it is why a
+    blind east march can never leave the map: its east edge is solid for all 18 rows.
+    """
+    m = truth["maps"][str(hop["from"])]
+    if hop["via"] in ("warp", "mat"):
+        return {(hop["x"], hop["y"])}
+    grid, w, h = m["grid"], m["width"], m["height"]
+    edge = hop.get("edge")
+    if edge == "north":
+        return {(x, 0) for x in range(w) if grid[0][x] == "1"}
+    if edge == "south":
+        return {(x, h - 1) for x in range(w) if grid[h - 1][x] == "1"}
+    if edge == "west":
+        return {(0, y) for y in range(h) if grid[y][0] == "1"}
+    if edge == "east":
+        return {(w - 1, y) for y in range(h) if grid[y][w - 1] == "1"}
+    return set()
+
+
+def sprite_tiles(truth: dict, map_id: int) -> set[tuple[int, int]]:
+    """Tiles held by NPCs/trainers on ``map_id``.
+
+    The collision grid says walkable — the ROM's object data puts a body there. A *defeated* Gen 1
+    trainer keeps standing on its tile, so a route planned through one is blocked forever, not
+    merely until the battle ends. Route 3 has nine, and the 08-21 lanes' first truth path ran
+    straight through the one at (19,5)."""
+    m = truth["maps"].get(str(map_id))
+    if m is None:
+        return set()
+    return {(s["x"], s["y"]) for s in m.get("sprites", ())}
+
+
+def path_on_map(
+    truth: dict,
+    pairs: set[tuple[int, int, int]],
+    map_id: int,
+    start: tuple[int, int],
+    targets: set[tuple[int, int]],
+    blocked: set[tuple[int, int]] | None = None,
+) -> list[tuple[int, int]] | None:
+    """Shortest tile path from ``start`` to the nearest of ``targets``, or ``None``.
+
+    BFS over :func:`passable`, so it honours tile-pair collisions as well as the walkable grid.
+    ``blocked`` adds tiles the grid calls walkable but a caller knows are not (sprites, and cells a
+    lane has learned are solid). ``start`` is never treated as blocked — a lane standing on a tile
+    that later reads blocked must still be able to route out of it.
+    Returns the full path including ``start``; ``[start]`` when already on a target.
+    """
+    m = truth["maps"].get(str(map_id))
+    if m is None or not targets:
+        return None
+    if start in targets:
+        return [start]
+    blocked = (blocked or set()) - {start}
+    targets = targets - blocked
+    if not targets:
+        return None
+    prev: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+    queue = [start]
+    while queue:
+        nxt = []
+        for x, y in queue:
+            for step in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if step in prev or step in blocked or not passable(m, pairs, x, y, *step):
+                    continue
+                prev[step] = (x, y)
+                if step in targets:
+                    path = [step]
+                    while path[-1] is not None:
+                        path.append(prev[path[-1]])
+                    return list(reversed(path[:-1]))
+                nxt.append(step)
+        queue = nxt
+    return None
+
+
 def seed_worldmap(truth: dict, map_ids: list[int]) -> WorldMap:
     """A WorldMap with the listed maps fully known (grid + bounds), ready for
     ``relay.py --seed-worldmap``. Sprites are stamped as hard-blocked tiles — the collision grid
