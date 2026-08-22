@@ -25,6 +25,12 @@ leg() { # $1=model $2=segment $3=mission $4=slot_s $5=leg_budget_s $6=leg_route
   [ "$remain" -le 300 ] && { say "SKIP $model/$segment — under 5 min to deadline"; return; }
   [ "$slot" -gt "$remain" ] && slot="$remain"
   tag="skl-$(printf '%s' "$model" | sed -E 's/[^a-z0-9]+/-/g')-${segment//_/-}"
+  # Already cleared (a prior chain run, or a hand-run leg with the same tag): keep the result.
+  local wt="$(dirname "$REPO")/pokemon-kafka-speedrun-pi-${tag}"
+  if [ -e "$wt/batons/${segment}.state" ] || ls "$wt"/data/relay/*/batons/"${segment}.state" >/dev/null 2>&1; then
+    say "SKIP $model / $segment — baton already written ($tag)"
+    return
+  fi
   state="$OUT/${tag}.supervisor.json"
   printf '{"escalate_after": 99, "max_continuations": 2, "max_resumes": 3}' > "$state"
   say "START $model / $segment — slot $((slot/60))m, leg $((legb/60))m, tag $tag"
