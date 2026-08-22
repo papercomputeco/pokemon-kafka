@@ -1,0 +1,64 @@
+{
+  "name": "mtmoon-hp-budget",
+  "learning": "benchmarks/2026-08-20-mtmoon2-local-batch.md",
+  "category": "battle",
+  "prompt": "A lane enters Mt. Moon 1F with lead Charmeleon L19 at 42/55 HP. The cave has a wild encounter roughly every 15-25 steps (mostly Zubat with Supersonic confusion, some Geodude, rock type, which resists fire), no healing anywhere inside, and the traversal ahead is several hundred steps across three floors. The agent's battle behaviour is controlled by an evolvable genome including hp_run_threshold (flee wild battles below this HP fraction) and hp_heal_threshold (use a potion below this fraction).\n\nHow should this leg budget HP, and which genome knobs would you set differently from an overworld crossing? Explain the reasoning.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "flee-dont-fight",
+      "weight": 3,
+      "any": [
+        "flee",
+        "run (from|away)",
+        "avoid(ing)? (wild )?(battles|fights|encounters)",
+        "don.?t fight"
+      ]
+    },
+    {
+      "id": "raise-thresholds",
+      "weight": 3,
+      "any": [
+        "raise",
+        "higher",
+        "increase",
+        "0\\.[3-9]"
+      ]
+    },
+    {
+      "id": "no-heal-inside",
+      "weight": 2,
+      "any": [
+        "no (healing|center|pok.?mon center)",
+        "can.?t heal",
+        "potion",
+        "attrition",
+        "war of attrition",
+        "hp is the budget",
+        "resource"
+      ]
+    },
+    {
+      "id": "geodude-resists",
+      "weight": 1,
+      "any": [
+        "resist",
+        "rock",
+        "not very effective",
+        "ember is weak"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "grind-levels",
+      "weight": 2,
+      "any": [
+        "grind",
+        "level up (first|before)",
+        "fight every",
+        "xp farm"
+      ]
+    }
+  ]
+}

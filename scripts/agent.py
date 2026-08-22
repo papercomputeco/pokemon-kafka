@@ -2835,9 +2835,15 @@ class PokemonAgent:
         }
 
     @staticmethod
-    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None) -> bool:
-        """True once the overworld state satisfies a --stop-on-* condition."""
-        if stop_on_map is not None and ow.map_id == stop_on_map:
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None) -> bool:
+        """True once the overworld state satisfies a --stop-on-* condition.
+
+        ``stop_min_x`` narrows a map condition to x >= that column. Needed when arriving on the
+        target map is not the goal: Mt. Moon's clear ends on Route 4 (15), but the WEST side of 15
+        is where the lane entered the cave from — its entrance mat is (18,5), the dungeon's east
+        exit lands at (24,5), and the surface between them is one-way. Plain --stop-on-map 15
+        would call the first bounce back out of the entrance a clear."""
+        if stop_on_map is not None and ow.map_id == stop_on_map and (stop_min_x is None or ow.x >= stop_min_x):
             return True
         if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
             return True
@@ -2956,6 +2962,7 @@ class PokemonAgent:
         save_state_every=None,
         stop_on_map=None,
         stop_on_badge=None,
+        stop_min_x=None,
         stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
@@ -3201,7 +3208,7 @@ class PokemonAgent:
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
                 if stop_on_map is not None or stop_on_badge is not None:
                     ow = self.memory.read_overworld_state()
-                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge):
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x):
                         if stop_state:
                             self._save_settled_stop_state(stop_state)
                         else:
@@ -3455,6 +3462,12 @@ def main():
         help="End the run once this map id is reached (state dumped to --stop-state first)",
     )
     parser.add_argument(
+        "--stop-min-x",
+        type=int,
+        default=None,
+        help="With --stop-on-map: only stop when x >= this column (east-exit vs west-entrance disambiguation)",
+    )
+    parser.add_argument(
         "--stop-on-badge",
         type=int,
         default=None,
@@ -3620,6 +3633,7 @@ def main():
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
             stop_on_map=args.stop_on_map,
+            stop_min_x=args.stop_min_x,
             stop_on_badge=args.stop_on_badge,
             stop_state=args.stop_state,
             fitness_every=args.fitness_every,

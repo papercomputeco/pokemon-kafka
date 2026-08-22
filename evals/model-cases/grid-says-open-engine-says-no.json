@@ -1,0 +1,55 @@
+{
+  "name": "grid-says-open-engine-says-no",
+  "learning": "docs/learnings/mtmoon-collision-rule-audit.md",
+  "category": "puzzle",
+  "prompt": "On Mt. Moon B2F (map 61, CAVERN tileset) the live engine refuses the step (25,11) -> (25,12) every single time, in both directions, yet the extracted per-cell collision grid marks BOTH tiles walkable, and the lane can stand on each tile individually. A previous operator concluded from symptoms like this that 'the collision grid is wrong in 842 of 1,440 cells' and rewrote the grid parser - which made navigation worse.\n\nWhat game mechanism actually explains a refused step between two individually-walkable tiles, why can no per-cell grid ever express it, and which source of truth should the lane trust when the reference and the engine disagree?",
+  "context": [],
+  "rubric": [
+    {
+      "id": "tile-pair-mechanism",
+      "weight": 4,
+      "any": [
+        "tile.?pair",
+        "pair collision",
+        "TilePairCollisions",
+        "pair of tiles",
+        "between (the )?two tiles",
+        "edge (constraint|property|rule)"
+      ]
+    },
+    {
+      "id": "why-grid-cant-say-it",
+      "weight": 3,
+      "any": [
+        "per.?cell.{0,60}(cannot|can.?t|never)",
+        "property of the (move|edge|transition)",
+        "not a property of (a|the) (cell|tile)",
+        "edge, not"
+      ]
+    },
+    {
+      "id": "engine-authoritative",
+      "weight": 3,
+      "any": [
+        "engine is authoritative",
+        "trust the (live )?engine",
+        "live engine",
+        "measure.{0,30}live",
+        "probe the engine",
+        "ground truth is the (game|engine)"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "rewrite-the-parser",
+      "weight": 3,
+      "any": [
+        "grid is wrong",
+        "rewrite the parser",
+        "fix the (grid|parser) first",
+        "842"
+      ]
+    }
+  ]
+}

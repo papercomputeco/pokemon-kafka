@@ -1,0 +1,59 @@
+{
+  "name": "route3-exit-edge",
+  "learning": "docs/learnings/mtmoon-collision-rule-audit.md",
+  "category": "navigation",
+  "prompt": "Six relay lanes each spent 12,000 turns on Route 3 (map 14, 70x18 tiles) trying to reach Mt. Moon, and every one ended wedged at tile (3,10) with the same fitness. The navigation heuristic in play marches EAST and sweeps walls when blocked. ROM-extracted facts about map 14: its warp table is EMPTY; its 'connections' are {north: 15, west: 2}; the walkable grid's east column (x=69) contains no open cells in any of the 18 rows; the north edge (y=0) is open only at x=57..63.\n\nWhy can these lanes never finish, and what is the actual way off this map toward Mt. Moon?",
+  "context": [],
+  "rubric": [
+    {
+      "id": "east-is-sealed",
+      "weight": 3,
+      "any": [
+        "east (edge|column|side).{0,40}(solid|sealed|closed|no open|blocked|never)",
+        "cannot exit east",
+        "no east exit",
+        "east.{0,30}wall"
+      ]
+    },
+    {
+      "id": "north-edge-exit",
+      "weight": 3,
+      "any": [
+        "north edge",
+        "north.{0,20}(exit|connection|15)",
+        "walk (off|over) the north",
+        "y\\s*=\\s*0"
+      ]
+    },
+    {
+      "id": "the-open-cells",
+      "weight": 2,
+      "any": [
+        "57",
+        "x\\s*=?\\s*57.{0,6}63"
+      ]
+    },
+    {
+      "id": "edge-not-warp",
+      "weight": 2,
+      "any": [
+        "no warp",
+        "empty warp",
+        "edge connection",
+        "map connection",
+        "walk off"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "keep-marching",
+      "weight": 3,
+      "any": [
+        "keep (pressing|marching|going) east",
+        "try harder east",
+        "more turns"
+      ]
+    }
+  ]
+}

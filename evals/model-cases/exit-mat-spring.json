@@ -1,0 +1,51 @@
+{
+  "name": "exit-mat-spring",
+  "learning": "demo-runs/README.md",
+  "category": "navigation",
+  "prompt": "A recording seeded inside Mt. Moon 1F (map 59) at tile (14,35) produced this in 150 turns: 50 map_change events alternating 59 -> 15 -> 59 at the same coordinates, zero encounters, stuck_count 0, and the run ended on exactly the tile it started on. ROM fact: map 59's warp table includes warps at (14,35) and (15,35) whose destination byte is 0xFF (LAST_MAP, i.e. 'back where you came from').\n\nDiagnose what happened, explain why the stuck detector never fired, and say what the lane must do differently.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "standing-on-exit-warp",
+      "weight": 3,
+      "any": [
+        "(standing|starts?|seeded) on (the )?(exit )?(warp|mat)",
+        "spawn.{0,20}warp",
+        "(14,\\s*35).{0,40}warp",
+        "warp.{0,40}(14,\\s*35)"
+      ]
+    },
+    {
+      "id": "why-stuck-blind",
+      "weight": 3,
+      "any": [
+        "map (keeps? )?chang",
+        "position (looks|reads|counts) (like )?(progress|new)",
+        "stuck.{0,60}(never|not|zero|reset)",
+        "oscillat"
+      ]
+    },
+    {
+      "id": "the-fix",
+      "weight": 2,
+      "any": [
+        "step off",
+        "move (away|off|inland|interior)",
+        "ladder",
+        "target.{0,30}(interior|B1F|60)",
+        "away from the (mat|warp)"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "blames-map-data",
+      "weight": 2,
+      "any": [
+        "grid is wrong",
+        "collision (grid|map) is (wrong|corrupt)",
+        "bad map data"
+      ]
+    }
+  ]
+}

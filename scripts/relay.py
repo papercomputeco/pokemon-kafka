@@ -33,7 +33,7 @@ SCRIPT_DIR = Path(__file__).parent
 WORKSPACE = SCRIPT_DIR.parent
 
 # Pokemon Red internal map ids (pret/pokered), as used across the repo.
-MAPS = {"PEWTER_CITY": 2, "VIRIDIAN_FOREST": 51, "PEWTER_GYM": 54, "MT_MOON_1F": 59}
+MAPS = {"PEWTER_CITY": 2, "VIRIDIAN_FOREST": 51, "PEWTER_GYM": 54, "MT_MOON_1F": 59, "MT_MOON_B1F": 60, "ROUTE_4": 15}
 
 # The live-tuned genome from notes.md is the base; variants override single decisions.
 BASE_GENOME = {
@@ -85,6 +85,11 @@ class Segment:
     max_turns: int
     variants: tuple[dict, ...]
     extra_args: tuple[str, ...] = ()
+    # With stop_on_map: only x >= this column counts. Mt. Moon's clear ends on Route 4 (15), but
+    # the lane ENTERED from 15's west side — its entrance mat is (18,5) and the dungeon's east
+    # exit lands at (24,5), so without the column check the first bounce back out of the west
+    # entrance would score as a clear (the 59<->15 spring, demo-runs/README.md).
+    stop_min_x: int | None = None
 
 
 @dataclass
@@ -106,6 +111,12 @@ SEGMENTS = (
         extra_args=("--save-state-on-trainer", "54:{run_dir}/batons/pre_brock.state"),
     ),
     Segment("badge_to_mtmoon", MAPS["MT_MOON_1F"], None, 6000, NAV_SPREAD),
+    # The two skill legs past the mountain door. 1F -> B1F is cave navigation on a correct grid
+    # (tile-pair collisions included); the clear is the puzzle leg — ladders, the exit chain, and
+    # whatever anomalies the live engine holds that the reference does not. Neither has a
+    # deterministic solver in agent.py: _mtmoon_action returns None inside 59, on purpose.
+    Segment("mtmoon_1f_to_b1f", MAPS["MT_MOON_B1F"], None, 3000, NAV_SPREAD),
+    Segment("mtmoon_clear", MAPS["ROUTE_4"], None, 8000, NAV_SPREAD, stop_min_x=22),
 )
 
 
@@ -224,6 +235,8 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0, s
         cmd += ["--sideloop-every", str(sideloop_every)]
     if seg.stop_on_map is not None:
         cmd += ["--stop-on-map", str(seg.stop_on_map)]
+        if seg.stop_min_x is not None:
+            cmd += ["--stop-min-x", str(seg.stop_min_x)]
     if seg.stop_on_badge is not None:
         cmd += ["--stop-on-badge", str(seg.stop_on_badge)]
     cmd += [a.format(run_dir=run_dir) for a in seg.extra_args]
@@ -247,7 +260,9 @@ def segment_success(fitness, seg):
     if not fitness:
         return False
     if seg.stop_on_map is not None:
-        return fitness.get("final_map_id") == seg.stop_on_map
+        if fitness.get("final_map_id") != seg.stop_on_map:
+            return False
+        return seg.stop_min_x is None or fitness.get("final_x", -1) >= seg.stop_min_x
     if seg.stop_on_badge is not None:
         return bin(int(fitness.get("badges", 0))).count("1") >= seg.stop_on_badge
     return False
