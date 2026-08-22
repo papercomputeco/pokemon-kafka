@@ -221,6 +221,18 @@ def test_exit_targets_warp_is_the_mat_and_edge_is_every_open_cell(rom):
     # Map 1's grid is 1100/1100/1111/1111 — the east column is open only on the bottom two rows.
     assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "east"}) == {(3, 2), (3, 3)}
     assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "north"}) == {(0, 0), (1, 0)}
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "south"}) == {
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+    }
+    assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "west"}) == {
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+    }
     assert rom_truth.exit_targets(truth, {"from": 1, "to": 2, "via": "edge", "edge": "nowhere"}) == set()
 
 

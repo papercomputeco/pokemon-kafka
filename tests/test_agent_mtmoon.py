@@ -588,3 +588,33 @@ def test_an_impatient_lane_calls_a_wall_sooner_than_a_patient_one(tmp_path):
                 calls[label] = turn
                 break
     assert calls["impatient"] < calls["patient"]
+
+
+def test_truth_step_degrades_once_when_the_truth_file_is_unavailable(tmp_path, monkeypatch):
+    """A missing or sha-mismatched truth file must cost one log line, not a working leg: the first
+    call falls back to the march, and the failure is remembered so the load is never retried."""
+    import rom_truth
+    from test_agent import _make_agent
+
+    loader = MagicMock(side_effect=ValueError("extracted from a different ROM"))
+    monkeypatch.setattr(rom_truth, "load_truth", loader)
+    ag = _make_agent(tmp_path)
+    assert ag._truth_step(_ow(14, 1, 3), MT_MOON_1F_MAP) is None
+    assert ag._truth_step(_ow(14, 1, 3), MT_MOON_1F_MAP) is None
+    assert loader.call_count == 1
+
+
+def test_truth_step_declines_a_map_the_truth_does_not_know(tmp_path):
+    """No hop chain, no opinion — the caller keeps its previous fallback."""
+    ag = _truth_agent(tmp_path)
+    assert ag._truth_step(_ow(99, 0, 0), MT_MOON_1F_MAP) is None
+
+
+def test_truth_step_emits_left_and_down(tmp_path):
+    """The step translator's other two arms: right/up are exercised by the crossing tests above."""
+    ag = _truth_agent(tmp_path)
+    # (2,1) -> the only open north-edge cell (1,0): (2,0) is walled, so the first step is left.
+    assert ag._truth_step(_ow(14, 2, 1), MT_MOON_1F_MAP) == "left"
+    ag2 = _truth_agent(tmp_path)
+    ag2._truth["maps"]["14"]["connections"] = {"south": 15}  # exit flips to the open south edge
+    assert ag2._truth_step(_ow(14, 1, 1), MT_MOON_1F_MAP) == "down"
