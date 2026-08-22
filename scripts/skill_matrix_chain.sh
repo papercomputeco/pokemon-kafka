@@ -53,7 +53,11 @@ model_row() { # all three legs for one model
 say "=== skill matrix start; deadline $(date -u -d "@$DEADLINE" +%H:%M:%SZ); base $BASE @ $(git -C "$REPO" rev-parse --short "$BASE") ==="
 model_row "kimi-k2.6:cloud"
 model_row "qwen3.5:397b-cloud"
-model_row "laguna-xs"
-model_row "qwen3-coder-30b"
+# Locals picked by the 2026-08-22 screen (evals/results/models-2026-08-22.md), not by seniority:
+# muse-glimmer and nemotron35-lightning outrank the 08-20 pair (laguna-xs bottomed the puzzle
+# column at 0.00 — it proposed the exact anti-pattern answers), and qwen38-27b keeps its slot as
+# the best local operator score and the roster's proven investigator. Still last and alone: 600 W.
+model_row "muse-glimmer"
+model_row "nemotron35-lightning"
 model_row "qwen38-27b"
 say "=== skill matrix done ==="
