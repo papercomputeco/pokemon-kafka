@@ -25,10 +25,16 @@ leg() { # $1=model $2=segment $3=mission $4=slot_s $5=leg_budget_s $6=leg_route
   [ "$remain" -le 300 ] && { say "SKIP $model/$segment — under 5 min to deadline"; return; }
   [ "$slot" -gt "$remain" ] && slot="$remain"
   tag="skl-$(printf '%s' "$model" | sed -E 's/[^a-z0-9]+/-/g')-${segment//_/-}"
-  # Already cleared (a prior chain run, or a hand-run leg with the same tag): keep the result.
+  # One slot per model per leg, cleared or not: a baton means the leg is won; a slot-used marker
+  # means the model already spent its budget and failed — re-running would hand it more attempts
+  # than the models that follow it (kimi got exactly this after the deadlocked relaunch).
   local wt="$(dirname "$REPO")/pokemon-kafka-speedrun-pi-${tag}"
   if [ -e "$wt/batons/${segment}.state" ] || ls "$wt"/data/relay/*/batons/"${segment}.state" >/dev/null 2>&1; then
     say "SKIP $model / $segment — baton already written ($tag)"
+    return
+  fi
+  if [ -e "$OUT/${tag}.slot-used" ]; then
+    say "SKIP $model / $segment — slot already spent, no clear ($tag)"
     return
   fi
   state="$OUT/${tag}.supervisor.json"
@@ -38,6 +44,7 @@ leg() { # $1=model $2=segment $3=mission $4=slot_s $5=leg_budget_s $6=leg_route
     LEG_ROUTE="$route" LEG_BUDGET_S="$legb" MAX_ATTEMPTS=4 \
     "$REPO/scripts/expedition_run.sh" "$model" "$segment" "$BASE" >>"$LOG" 2>&1
   say "END $model / $segment rc=$? — reaping"
+  touch "$OUT/${tag}.slot-used"
   "$REPO/scripts/reap_emulators.sh" "$(dirname "$REPO")/pokemon-kafka-speedrun-pi-${tag}" >>"$LOG" 2>&1 || true
   pkill -f "pokemon-kafka-speedrun-pi-${tag}" 2>/dev/null
   sleep 5
