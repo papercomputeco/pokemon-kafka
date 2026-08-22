@@ -59,5 +59,9 @@ model_row "qwen3.5:397b-cloud"
 # the best local operator score and the roster's proven investigator. Still last and alone: 600 W.
 model_row "muse-glimmer"
 model_row "nemotron35-lightning"
+# gemma4-31b: the best local puzzle screen score (0.50, tied with qwen397-cloud) — and the puzzle
+# column is the open frontier. qwen3-coder-30b is dropped outright (operator's call, 2026-08-22;
+# screen agreed: 8th overall, 0.20 puzzle).
+model_row "gemma4-31b"
 model_row "qwen38-27b"
 say "=== skill matrix done ==="
