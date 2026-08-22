@@ -14,7 +14,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$REPO/data/local_runs"
 DEADLINE=$(( $(date +%s) + 8 * 3600 ))
-BASE="${SKILL_BASE:-bench/mtmoon2}"
+BASE="${SKILL_BASE:-bench/skill-matrix}"
 LOG="$OUT/skill-matrix-chain.log"
 mkdir -p "$OUT"
 say() { echo "[skill-matrix $(date -u +%H:%M:%SZ)] $*" | tee -a "$LOG"; }

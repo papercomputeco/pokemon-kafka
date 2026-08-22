@@ -88,6 +88,8 @@ fi
 mkdir -p "$WT/rom" "$WT/demo-runs/states" "$WT/data/telemetry/game" "$WT/data/power"
 ln -sf "$REPO/rom/pokemon_red.gb" "$WT/rom/pokemon_red.gb"
 cp -n "$REPO/demo-runs/states/route1.state" "$WT/demo-runs/states/" 2>/dev/null || true
+# The skill-matrix battle leg seeds from the pre-Brock baton (gitignored, like every state).
+cp -n "$REPO/demo-runs/states/pre-brock.state" "$WT/demo-runs/states/" 2>/dev/null || true
 [ -d "$REPO/demo-runs/states/mtmoon_seeds" ] && cp -rn "$REPO/demo-runs/states/mtmoon_seeds" "$WT/demo-runs/states/" 2>/dev/null || true
 ( cd "$WT" && uv sync --group dev >/dev/null 2>&1 )
 
