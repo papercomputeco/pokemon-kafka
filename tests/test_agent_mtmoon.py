@@ -618,3 +618,161 @@ def test_truth_step_emits_left_and_down(tmp_path):
     ag2 = _truth_agent(tmp_path)
     ag2._truth["maps"]["14"]["connections"] = {"south": 15}  # exit flips to the open south edge
     assert ag2._truth_step(_ow(14, 1, 1), MT_MOON_1F_MAP) == "down"
+
+
+# ---- the dungeon drive: 59 -> 60 <-> 61 pockets -> the Route 4 east exit -------------------
+
+
+def _dungeon_agent(tmp_path):
+    """Synthetic three-map dungeon in the real shape: 1F with an entrance mat + a down ladder,
+    B1F with the arrival ladder, a B2F ladder and a LAST_MAP exit door, B2F as a dead end."""
+    import rom_truth
+    from agent import MT_MOON_1F_MAP, MT_MOON_B1F_MAP, MT_MOON_B2F_MAP
+
+    ag = _make_agent(tmp_path)
+    open_grid = ["1111"] * 4
+    ag._truth = {
+        "tile_pairs": [],
+        "maps": {
+            str(MT_MOON_1F_MAP): {
+                "width": 4,
+                "height": 4,
+                "tileset": 17,
+                "grid": open_grid,
+                "tiles": None,
+                "warps": [[0, 3, 255, 1], [3, 0, MT_MOON_B1F_MAP, 0]],
+                "sprites": [],
+                "grass": [],
+                "connections": {},
+            },
+            str(MT_MOON_B1F_MAP): {
+                "width": 4,
+                "height": 4,
+                "tileset": 17,
+                "grid": open_grid,
+                "tiles": None,
+                "warps": [[0, 0, MT_MOON_1F_MAP, 1], [3, 3, MT_MOON_B2F_MAP, 0], [3, 0, 255, 2]],
+                "sprites": [],
+                "grass": [],
+                "connections": {},
+            },
+            str(MT_MOON_B2F_MAP): {
+                "width": 4,
+                "height": 4,
+                "tileset": 17,
+                "grid": open_grid,
+                "tiles": None,
+                "warps": [[0, 0, MT_MOON_B1F_MAP, 1]],
+                "sprites": [{"kind": "npc", "x": 1, "y": 1, "pic": 1}],
+                "grass": [],
+                "connections": {},
+            },
+        },
+    }
+    ag._truth_pairs, ag._truth_mod = set(), rom_truth
+    return ag
+
+
+def test_dungeon_step_never_targets_the_entrance_mat(tmp_path):
+    """The spring that ate four expedition slots: the 1F entrance mats are LAST_MAP warps and
+    must never be a target — the only 1F objective is a down ladder."""
+    from agent import MT_MOON_1F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    st = _ow(MT_MOON_1F_MAP, 0, 3)  # standing ON the entrance mat, like the seed
+    d = ag._mtmoon_dungeon_step(st)
+    assert d in ("up", "right")  # toward the (3,0) ladder, never a wiggle back onto the mat
+    assert ag._dungeon_pending is None or ag._dungeon_pending[1:] != (0, 3)
+
+
+def test_dungeon_step_prefers_the_exit_door_over_everything(tmp_path):
+    """B1F's LAST_MAP door is the fossil doorway: dungeons never update wLastMap, so it resolves
+    to the last outdoor map — Route 4's east side. It outranks every ladder."""
+    from agent import MT_MOON_B1F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 1, 1))  # arrival bookkeeping
+    d = ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 1, 1))
+    assert d in ("up", "right")  # toward (3,0), the exit door — not the (3,3) B2F ladder
+
+
+def test_dungeon_step_dead_end_goes_back_up_the_arrival_ladder(tmp_path):
+    """A B2F pocket whose only warp is the arrival ladder (two of the real ones are): step off
+    the mat to re-arm it, then walk back on — the DFS escape, not a wedge."""
+    from agent import MT_MOON_B2F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    st = _ow(MT_MOON_B2F_MAP, 0, 0)  # landed on the arrival ladder, a dead-end pocket
+    first = ag._mtmoon_dungeon_step(st)
+    assert first in ("down", "right")  # steps OFF the mat (never through the (1,1) body's tile is fine either way)
+    st2 = _ow(MT_MOON_B2F_MAP, 0, 1) if first == "down" else _ow(MT_MOON_B2F_MAP, 1, 0)
+    ag.turn_count += 1
+    assert ag._mtmoon_dungeon_step(st2) in ("up", "left")  # walks back onto it
+
+
+def test_dungeon_walk_ignores_learned_zeros_and_sprites(tmp_path):
+    """Bodies are the engine's to adjudicate down here: B2F's only corridor runs through the
+    fossil tiles, which the live game clears after the Super Nerd event. A viewport-observed
+    wandering Rocket must not sever a one-wide corridor forever either."""
+    from agent import MT_MOON_B1F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    ag.world.cells.setdefault(MT_MOON_B1F_MAP, {})[(2, 0)] = 0  # learned zero on the door path
+    ag._truth["maps"][str(MT_MOON_B1F_MAP)]["sprites"] = [{"kind": "npc", "x": 1, "y": 0, "pic": 1}]
+    ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 1, 1))
+    d = ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 1, 1))
+    assert d is not None  # still plans to the exit door straight through both
+
+
+def test_dungeon_step_declines_unknown_maps_and_missing_truth(tmp_path, monkeypatch):
+    import rom_truth
+    from agent import MT_MOON_1F_MAP
+    from test_agent import _make_agent
+
+    ag = _dungeon_agent(tmp_path)
+    del ag._truth["maps"][str(MT_MOON_1F_MAP)]
+    assert ag._mtmoon_dungeon_step(_ow(MT_MOON_1F_MAP, 1, 1)) is None
+    monkeypatch.setattr(rom_truth, "load_truth", MagicMock(side_effect=ValueError("no file")))
+    ag2 = _make_agent(tmp_path)
+    assert ag2._mtmoon_dungeon_step(_ow(MT_MOON_1F_MAP, 1, 1)) is None
+
+
+def test_taken_ladders_rank_below_untaken(tmp_path):
+    """DFS ordering: the pocket maze terminates because a ladder already ridden is only retried
+    once everything fresh is exhausted."""
+    from agent import MT_MOON_B1F_MAP, MT_MOON_B2F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    ag._truth["maps"][str(MT_MOON_B1F_MAP)]["warps"] = [
+        [0, 0, 62, 1],  # not the 1F map id: no 'back' tier interference
+        [3, 3, MT_MOON_B2F_MAP, 0],
+        [0, 3, MT_MOON_B2F_MAP, 1],
+    ]
+    ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 0, 0))
+    ag._dungeon_taken.add((MT_MOON_B1F_MAP, 3, 3))
+    ag.turn_count += 1
+    d = ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 1, 2))
+    assert d in ("down", "left")  # heads for the untaken (0,3), not the closer-taken (3,3)
+
+
+def test_dungeon_marks_the_ridden_ladder_taken_on_arrival(tmp_path):
+    """The pending warp is consumed by the map change that it caused — that is what 'taken'
+    means, and it is what makes the DFS ordering terminate."""
+    from agent import MT_MOON_1F_MAP, MT_MOON_B1F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    ag._mtmoon_dungeon_step(_ow(MT_MOON_1F_MAP, 2, 0))  # plans (3,0), one step away
+    assert ag._dungeon_pending == (MT_MOON_1F_MAP, 3, 0)
+    ag.turn_count += 1
+    ag._mtmoon_dungeon_step(_ow(MT_MOON_B1F_MAP, 3, 3))  # the warp fired; new map
+    assert (MT_MOON_1F_MAP, 3, 0) in ag._dungeon_taken and ag._dungeon_pending is None
+
+
+def test_dungeon_wiggle_with_no_way_off_falls_through_to_the_next_tier(tmp_path):
+    """Standing on a target whose every neighbour is impassable: the tier is skipped, not wedged."""
+    from agent import MT_MOON_B2F_MAP
+
+    ag = _dungeon_agent(tmp_path)
+    m = ag._truth["maps"][str(MT_MOON_B2F_MAP)]
+    m["grid"] = ["1000", "0000", "0000", "0000"]  # only the arrival mat itself is walkable
+    assert ag._mtmoon_dungeon_step(_ow(MT_MOON_B2F_MAP, 0, 0)) is None

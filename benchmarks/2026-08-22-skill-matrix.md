@@ -65,3 +65,27 @@ Step off the landing mat after every warp (kills both springs) + truth-step targ
   (process-name self-matching in the waiters; fixed).
 - Cloud legs initially died to the launcher's `-128k` suffix; aliases containing `:` now pass
   through verbatim.
+
+## Postscript, same day: the mountain falls
+
+The composite fix — implemented after the batch, exactly as the spec above prescribed — clears
+Mt. Moon deterministically: **all six relay lanes CONQUERED `mtmoon_clear`, winner 880 turns,
+seed to Route 4 (27,3) at 25 HP.** The baton (`route4_east_hp25`) faces Cerulean. Two more
+engine-authority lessons surfaced during implementation, both now in the code:
+
+- **A viewport observation can sever a one-wide corridor forever.** A wandering B2F Rocket,
+  observed once beside a ladder mat, persists as a learned wall until re-observed — which never
+  happens once the planner routes around it. The dungeon walk ignores learned zeros
+  (`use_learned=False`); transient bodies are the refusal machinery's job.
+- **The fossil doorway is a body, not a wall.** B2F's only corridor runs through the fossil
+  tiles (12,6)/(13,6); pre-blocking ROM sprites plans around a passage the live game opens
+  after the Super Nerd event, and no plan remains. The dungeon walk blocks nothing but
+  engine-discovered, expiring walls (`use_sprites=False`) and presses into bodies — the A-press
+  clears dialogs, battles get fought, real walls hard-block and expire.
+
+The `truth_refuse_strikes` spread is genuinely live on this leg (`fast_stuck` 944 t / 12 HP,
+`wide_dc2` 913 t vs the 880 t / 25 HP majority) — the first segment where the NAV spread
+differentiates end-to-end.
+
+The benchmark verdict above is unchanged: no model cleared it unaided in a 50-minute slot; the
+models collectively wrote the spec, and the harness executed it.
