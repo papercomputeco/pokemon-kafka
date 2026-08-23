@@ -1,0 +1,28 @@
+{
+  "turns": 880,
+  "battles_won": 28,
+  "maps_visited": 8,
+  "final_map_id": 15,
+  "final_x": 27,
+  "final_y": 3,
+  "badges": 1,
+  "party_size": 1,
+  "lead_hp": 25,
+  "stuck_count": 32,
+  "max_stuck_streak": 25,
+  "backtrack_restores": 0,
+  "encounters": 28,
+  "level_ups": 3,
+  "evolutions": 0,
+  "battle_wedge_recoveries": 0,
+  "brock_turns": null,
+  "brock_won": null,
+  "brock_lead_species": null,
+  "brock_lead_level": null,
+  "params": {
+    "strategy": "medium",
+    "rom": "rom/pokemon_red.gb",
+    "label": "12 \u00b7 Mt. Moon \u2014 the clear"
+  },
+  "run_id": "20260823-135448-044f"
+}
