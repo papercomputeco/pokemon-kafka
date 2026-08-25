@@ -20,8 +20,8 @@ CTX_K="${CTX_K:-128}"
 # ship 262k context natively and have no local variant to build; suffixing them made every
 # skill-matrix cloud leg die in seconds with "model kimi-k2.6:cloud-128k not in Ollama".
 case "$ALIAS" in
-  *:*) MODEL="$ALIAS" ;;
-  *)   MODEL="${ALIAS}-${CTX_K}k" ;;
+  *:*|*/*) MODEL="$ALIAS" ;;   # '/' covers the semantic router's virtual model, vllm-sr/auto
+  *)       MODEL="${ALIAS}-${CTX_K}k" ;;
 esac
 BUDGET_S="${BUDGET_S:-10800}"                      # hard kill; the mission text says 2.5 h
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -75,7 +75,13 @@ if [ -n "${MISSION_EXTRA_FILE:-}" ] && [ -s "$MISSION_EXTRA_FILE" ]; then
 $(cat "$MISSION_EXTRA_FILE")"
   echo "== mission extra: $MISSION_EXTRA_FILE"
 fi
-curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
+# The router's virtual model lives on the semantic router, not in Ollama (docs/semantic-router.md).
+if [ "$MODEL" = "vllm-sr/auto" ]; then
+  curl -sf "${SEMANTIC_ROUTER_URL:-http://127.0.0.1:8999}/v1/models" | grep -q '"vllm-sr/auto"' \
+    || { echo "semantic router is down — VLLM_SR_PORT_OFFSET=100 vllm-sr serve --config references/semantic_router.yaml" >&2; exit 2; }
+else
+  curl -sf "http://127.0.0.1:11434/api/tags" | grep -q "\"${MODEL}" || { echo "model ${MODEL} not in Ollama — run local_models.py create ${ALIAS}" >&2; exit 2; }
+fi
 nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serve" >&2; exit 2; }
 # Power preflight: a model whose Spec carries `power_w` has hung the eGPU at the stock 600 W limit
 # (qwen38-27b, four Xid 8s on 2026-08-15/16) and may only run once `nvidia-smi` reports the card
@@ -83,7 +89,12 @@ nc -z 127.0.0.1 42345 || { echo "tapes proxy :42345 is down — start tapes serv
 # trusted from the last time it was set (scripts/nvidia-power-cap.service makes it persistent).
 # POWER_OVERRIDE=1 skips the check — the row it produces is then not a model verdict.
 echo "== power preflight"
-if ! ( cd "$REPO" && uv run python scripts/local_models.py power "$ALIAS" ); then
+# A routed run can land on any model in references/semantic_router.yaml, so the check covers
+# the routed local roster — qwen38-27b's 600 W pin is the one that has hung the card.
+POWER_ALIASES="$ALIAS"
+[ "$MODEL" = "vllm-sr/auto" ] && POWER_ALIASES="laguna-xs qwen38-27b"
+# shellcheck disable=SC2086
+if ! ( cd "$REPO" && uv run python scripts/local_models.py power $POWER_ALIASES ); then
   if [ "${POWER_OVERRIDE:-0}" = "1" ]; then echo "   POWER_OVERRIDE=1 — running uncapped; do not publish this row as a verdict"
   else echo "   refusing to start: cap the card first (see above), or POWER_OVERRIDE=1" >&2; exit 2; fi
 fi

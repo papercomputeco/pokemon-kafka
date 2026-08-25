@@ -33,7 +33,15 @@ SCRIPT_DIR = Path(__file__).parent
 WORKSPACE = SCRIPT_DIR.parent
 
 # Pokemon Red internal map ids (pret/pokered), as used across the repo.
-MAPS = {"PEWTER_CITY": 2, "VIRIDIAN_FOREST": 51, "PEWTER_GYM": 54, "MT_MOON_1F": 59, "MT_MOON_B1F": 60, "ROUTE_4": 15}
+MAPS = {
+    "PEWTER_CITY": 2,
+    "CERULEAN_CITY": 3,
+    "VIRIDIAN_FOREST": 51,
+    "PEWTER_GYM": 54,
+    "MT_MOON_1F": 59,
+    "MT_MOON_B1F": 60,
+    "ROUTE_4": 15,
+}
 
 # The live-tuned genome from notes.md is the base; variants override single decisions.
 BASE_GENOME = {
@@ -117,6 +125,11 @@ SEGMENTS = (
     # deterministic solver in agent.py: _mtmoon_action returns None inside 59, on purpose.
     Segment("mtmoon_1f_to_b1f", MAPS["MT_MOON_B1F"], None, 3000, NAV_SPREAD),
     Segment("mtmoon_clear", MAPS["ROUTE_4"], None, 8000, NAV_SPREAD, stop_min_x=22),
+    # The road past the mountain (seeded from the mtmoon_clear baton, route4_east_hp25):
+    # Route 4's east side down into Cerulean is open-path navigation; the badge leg counts
+    # the Cascade Badge however the lane earns it — Nugget Bridge detours included.
+    Segment("route4_to_cerulean", MAPS["CERULEAN_CITY"], None, 4000, NAV_SPREAD),
+    Segment("cerulean_to_badge2", None, 2, 6000, BATTLE_SPREAD),
 )
 
 
