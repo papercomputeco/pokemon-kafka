@@ -297,6 +297,43 @@ When the run's own fitness trips a rule — `navigation-thrash` (`stuck_count �
 
 The loop also closes **inside** a run: when the live agent's stuck streak crosses the terminal-wedge threshold (50), it saves its own wedged state, launches `healer.py check --rule terminal-wedge --load-state <wedge.state>` in the background, and keeps playing while the race runs candidates *from the wedge itself* — so the score directly measures escaping it. An accepted genome is hot-applied mid-run (navigator, backtracking, and door-cooldown knobs) and surfaces in the viewer feed as a milestone, with no operator involvement at all. One race per run; `--no-in-run-heal` opts out (race children always do), and `--in-run-heal-streak` moves the trigger. **The relay runs with it on**, one heal per lane: `healer.py` appends its winner to a notes file and the agent loads its baseline from one, so six parallel lanes pointed at the repo's `notes.md` would race each other for the shared genome — `--in-run-heal-notes` gives each lane a `genome.md` in its own variant dir, seeded with that lane's knobs, so a heal stays inside the lane that wedged. The relay keeps `--no-self-heal`: the *end-of-run* healer writes the shared `notes.md`, which a relay must not do once per lane. `run_evals.py` disables both — an eval's contract is determinism per (state, genome), and a hot-applied genome would break it. Cost of a heal, measured: a race candidate is 800 turns ≈ 4.4 s at 67 MB peak RSS, so one race (control + 6 variants, sequential) is ~31 s, and six lanes wedging at once peak at ~400 MB for half a minute — small next to the six lane processes the relay already runs. `--parallel` remains the knob that sizes a relay to the machine.
 
+### Fanning a race out (optional)
+
+A parameter race is N independent short runs, and `run_race` executes them serially on one machine. `scripts/fanout/` adds an optional backend seam so the same work list can run somewhere with more parallelism. **Local is the default and nothing above changes** — the serial loop is still what every existing caller gets.
+
+```bash
+# default: serial, on this machine, no account needed
+uv run scripts/fanout/cli.py --rom rom/pokemon_red.gb --variants 3
+
+# opt-in: one Daytona sandbox per arm
+uv sync --group fanout
+bash scripts/fanout/build_snapshot.sh --push
+uv run scripts/fanout/cli.py --rom rom/pokemon_red.gb --variants 3 \
+  --backend daytona --snapshot pokemon-fanout-<sha>
+```
+
+The snapshot is the Daytona equivalent of the stereOS image: repo, deps, headless PyBoy, and the `tapes` capture sidecar. It contains **no ROM and no credentials** — the ROM is uploaded per sandbox (it is not ours to redistribute) and the DSN, capture URL, and API keys are injected at launch, so a rotated key never forces a rebuild. `build_snapshot.sh` fails the build if a ROM is found in the image.
+
+The heuristic tier (`--strategy low`, the default) makes zero LLM calls, so racing costs only sandbox-seconds — an 8-arm 1000-turn race measured 57s wall, ~2¢. At `--strategy medium|high` each arm proves its capture path with one real per-arm heartbeat call routed through the central proxy (`agent.py` has no in-process LLM client yet — `should_call_llm` has no caller — so the heartbeat is what lands in the store until that path exists). Those runs cost money, which the runner warns about before starting. GPU sandboxes exist too (an H100 80GB via the `daytona-gpu` snapshot); the race arms don't need one, but the [bench host](#daytona-gpu-bench-host) does.
+
+Two operational notes, both measured: org accounts default to a **5-sandbox concurrency ceiling** (wider races run in waves; `--concurrency 5` matches it), and when the `daytona` CLI is absent, `build_snapshot.sh` builds server-side through the SDK from a git-clean staged context instead.
+
+Teardown has three layers because a leaked sandbox bills silently: every arm deletes in a `finally`, the batch sweeps stragglers on interrupt, and `ephemeral=True` plus `ttl_minutes` let the server reap on its own if the driver is killed outright.
+
+`bash scripts/fanout/prove.sh --rom <rom> --snapshot <name>` runs a bounded 3-arm proof and checks that fitness came back for every arm, that all three heartbeats landed in the central tapes store as one queryable cohort, that zero sandboxes survive, and what a 20-arm race would cost from measured usage. Capture prerequisites, all defaulted from the machine's own setup: the DSN comes from `~/.tapes/config.toml`, and the capture URL derives from an active Tailscale funnel fronting a `tapes serve proxy --provider anthropic` on `:8093` (Postgres itself never leaves loopback).
+
+### Daytona GPU bench host
+
+`scripts/fanout/ollama_host.py` is the cloud arm of the model bench — a fourth `OLLAMA_HOST_URL` alongside pi, claude, and local/cloud ollama, with nothing downstream changing:
+
+```bash
+uv run --group fanout scripts/fanout/ollama_host.py up --models gpt-oss-120b   # H100 80GB, prints URL
+OLLAMA_HOST_URL=<url> uv run python scripts/run_model_evals.py --models gpt-oss-120b
+uv run --group fanout scripts/fanout/ollama_host.py down                       # or the TTL reaps it
+```
+
+Models are roster aliases: everything in `local_models.py` `ROSTER`, plus the H100-only `DAYTONA_ROSTER` tier for what the local 32 GB card can't hold (currently `gpt-oss-120b`, 65 GB — benched at ~70 tok/s across the full case suite). Measured session shape: sandbox in ~1s, ollama install ~6s, the pull dominates (~11 min for 65 GB at ~100 MB/s), evals in minutes. A persistent weights volume exists (`--volume fanout-ollama-models`) but is **off by default** on measured evidence — the FUSE mount reads 75–78 MB/s regardless of parallelism, slower than re-pulling — so it only earns its keep when the registry is down or rate-limiting. The preview URL is public while the host is up; the TTL bounds the exposure.
+
 ### Discovery engine (capability healing)
 
 Parameter tuning only tunes the knobs that exist. When tuning is exhausted — the same rule re-fires after an accepted fix, or the last two races both rejected — the healer escalates to `data/discovery_queue.json`, and the discovery engine turns the evidence into a **code change proposal**:

@@ -1,0 +1,43 @@
+# Build context filter for the fan-out snapshot.
+#
+# Named `Dockerfile.dockerignore`, not `.dockerignore`: Docker only reads
+# `.dockerignore` from the build context root, and this build's context is the
+# repo root. BuildKit reads `<dockerfile>.dockerignore` next to the Dockerfile,
+# which is what keeps this filter with the image that needs it.
+#
+# Every pattern is `**/`-prefixed on purpose. A bare `rom/` matches only the
+# repo-root copy, and this repo carries git worktrees under .worktrees/ that
+# each hold their own rom/ and .venv/ — without `**/`, a 3.2 GB image with
+# three ROMs in it is the result.
+
+# ROMs are never redistributed. This is the load-bearing rule.
+**/rom/
+**/*.gb
+**/*.gbc
+**/*.ram
+**/*.sav
+**/*.state
+
+# Git worktrees: whole extra checkouts, each with deps and ROMs of its own.
+**/.worktrees/
+
+# Credentials — the image is built once and reused by every arm.
+**/.env
+**/*.key
+**/api-key-*.txt
+
+# Local run output, caches, and virtualenvs.
+**/frames/
+**/runs/
+**/demo-runs/
+**/pokedex/memory/
+**/notes.md
+**/notes.md.bak
+**/.tapes/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.coverage
+**/.git/
+**/.DS_Store

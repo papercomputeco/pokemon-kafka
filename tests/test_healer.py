@@ -490,3 +490,22 @@ def test_check_passes_load_state_to_race(check_env):
         with patch("sys.argv", argv + ["--load-state", "wedge.state"]):
             assert healer.main() == 0
     assert rr.call_args.kwargs["load_state"] == "wedge.state"
+
+
+def test_run_race_delegates_to_a_backend_when_given():
+    """Opt-in fan-out: a backend replaces the serial loop but not the scoring."""
+
+    class FakeBackend:
+        def __init__(self):
+            self.calls = []
+
+        def run_batch(self, rom, turns, candidates, load_state=None, strategy="low"):
+            self.calls.append((rom, turns, len(candidates), load_state, strategy))
+            return [{"party_size": i} for i, _ in enumerate(candidates)]
+
+    backend = FakeBackend()
+    results = healer.run_race("rom.gb", 50, [{"a": 1}, {"a": 2}], backend=backend, strategy="medium")
+
+    assert backend.calls == [("rom.gb", 50, 2, None, "medium")]
+    assert [r.params["a"] for r in results] == [1, 2]
+    assert all(isinstance(r.score, (int, float)) for r in results)

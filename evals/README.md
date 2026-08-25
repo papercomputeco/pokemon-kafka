@@ -71,6 +71,12 @@ Answers are saved under `data/evals/model/<date>/`; the table is appended to
 `evals/results/models-<YYYY-MM-DD>.md`. Runs at temperature 0 with a fixed seed, so a rerun on the
 same model reproduces.
 
+`--models` accepts roster aliases (`local_models.py` `ROSTER` and `DAYTONA_ROSTER`) or raw ollama
+tags; aliases resolve to their tags before the API sees them. The eval host is whatever
+`OLLAMA_HOST_URL` names — local card, cloud ollama, or an on-demand Daytona H100 via
+`scripts/fanout/ollama_host.py up` (see the README's "Daytona GPU bench host"). Against a remote
+host the local `GPU_BUSY` relay lock is skipped: those evals never touch the local card.
+
 | case | from | asks |
 |---|---|---|
 | flee-loop-cap | route1-navigation-flee-loop | given the real `choose_action` excerpt, why does the wild battle loop forever? |

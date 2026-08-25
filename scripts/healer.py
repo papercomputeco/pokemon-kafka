@@ -165,8 +165,27 @@ def default_seed(fitness_path) -> int:
     return int(digest[:16], 16)
 
 
-def run_race(rom: str, turns: int, candidates: list[dict], load_state: str | None = None) -> list[RaceResult]:
-    """Run every candidate through evolve.run_agent; the only impure racing code."""
+def run_race(
+    rom: str,
+    turns: int,
+    candidates: list[dict],
+    load_state: str | None = None,
+    backend=None,
+    strategy: str = "low",
+) -> list[RaceResult]:
+    """Run every candidate through a backend; the only impure racing code.
+
+    With no backend — every existing caller — this is the untouched serial
+    loop over `evolve.run_agent`. A backend is strictly opt-in: pass one and
+    the same candidates race elsewhere, with scoring and the accept/reject
+    decision unchanged either way.
+    """
+    if backend is not None:
+        fitnesses = backend.run_batch(rom, turns, candidates, load_state=load_state, strategy=strategy)
+        return [
+            RaceResult(params=params, fitness=fitness, score=score(fitness))
+            for params, fitness in zip(candidates, fitnesses)
+        ]
     results = []
     for params in candidates:
         fitness = run_agent(rom, turns, params, load_state=load_state)
