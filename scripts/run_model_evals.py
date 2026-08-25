@@ -49,6 +49,11 @@ def check_gpu_free(force: bool = False) -> None:
     looks like the model quitting. Override with --force-gpu / ADVISOR_FORCE_GPU=1 only if you know."""
     if force or os.environ.get("ADVISOR_FORCE_GPU") == "1" or not GPU_LOCK.exists():
         return
+    if "127.0.0.1" not in OLLAMA_URL and "localhost" not in OLLAMA_URL:
+        # Remote host (cloud Ollama, or a Daytona bench host via
+        # scripts/fanout/ollama_host.py): these evals never touch the local
+        # card, so the relay's lock on it is irrelevant.
+        return
     raise SystemExit(
         f"GPU busy — a relay run owns the card ({GPU_LOCK.read_text().strip()}); wait for it or --force-gpu"
     )
@@ -213,6 +218,15 @@ def main(argv=None) -> int:
         print("no cases found", file=sys.stderr)
         return 2
     models = args.models.split(",") if args.models else local_variants(args.ctx)
+    # Roster aliases resolve to their ollama tags, so the same name works here,
+    # in local_models.py, and on the Daytona bench host. Non-alias names pass
+    # through verbatim — pointing at any raw ollama tag still works.
+    from local_models import BY_ALIAS, DAYTONA_BY_ALIAS
+
+    models = [
+        (BY_ALIAS.get(m) or DAYTONA_BY_ALIAS.get(m)).tag if (BY_ALIAS.get(m) or DAYTONA_BY_ALIAS.get(m)) else m
+        for m in models
+    ]
     if not models:
         print("no models found — run `local_models.py create` first", file=sys.stderr)
         return 2

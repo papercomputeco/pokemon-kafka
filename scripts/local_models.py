@@ -61,6 +61,7 @@ GROUPS: dict[str, str] = {
     "moe-30b": "sparse MoE, ~30B total / ~3B active — the fast lane: dense-model knowledge, small-model decode",
     "dense-27b": "dense 27-35B — slower per token, stronger single-pass reasoning; the honest 'big local model' test",
     "baseline": "already benched on 2026-08-15 at 64k ctx; kept so `bench` can rebaseline them at 128k",
+    "h100-large": "Daytona-only, 65 GB — too big for the local card; one model by decision (qwen stays local via 27b)",
 }
 
 # Every entry must run on this box: Blackwell (RTX 5090, 32 GB), CUDA, Linux, fully GPU-resident at
@@ -106,7 +107,6 @@ ROSTER: tuple[Spec, ...] = (
         # refuses the row, which is the backstop — set power_w again only on new evidence.
         params={"num_batch": 256, "draft_num_predict": 0},
     ),
-    Spec("qwen36-35b", "qwen3.6:35b", "dense-27b", "Qwen3.6 35B, 24 GB — the previous generation at full size"),
     Spec(
         "muse-glimmer",
         "muse-glimmer:30b",
@@ -117,16 +117,33 @@ ROSTER: tuple[Spec, ...] = (
         "gemma4-31b", "gemma4:31b", "dense-27b", "Gemma 4 31B, 20 GB — the big sibling of the E4B baseline", vision=True
     ),
     # --- baseline: the 2026-08-15 rows ----------------------------------------------------------
-    Spec(
-        "qwen35b", "qwen3.5:35b", "baseline", "35B-A3B MoE Q4_K_M, 23 GB — 2026-08-15 row (20 tok/s, truncated at 64k)"
-    ),
     Spec("gemma4", "gemma4:latest", "baseline", "Gemma 4 E4B, 9.6 GB — 2026-08-15 row (143 tok/s, tiny)"),
 )
 BY_ALIAS = {s.alias: s for s in ROSTER}
 
+# --- Daytona-only tier ---------------------------------------------------------------------------
+# Models that do NOT fit the local 5090 (32 GB) and run only on the on-demand
+# GPU bench host (scripts/fanout/ollama_host.py — an H100 80GB as probed
+# 2026-08-24). Deliberately a separate tuple: ROSTER's contract is "runs on
+# this box", and `bench`/local_variants iterate ROSTER, so putting a 65 GB
+# model there would send it to the local card. Fit math is weights + KV
+# headroom on 80 GB; qwen3.5:122b (81 GB) misses by one and needs the
+# 96 GB RTX PRO 6000 tier.
+DAYTONA_ROSTER: tuple[Spec, ...] = (
+    Spec(
+        "gpt-oss-120b",
+        "gpt-oss:120b",
+        "h100-large",
+        "OpenAI gpt-oss 120B MoE MXFP4, 65 GB — 'fits on a single 80GB GPU' per ollama.com",
+    ),
+)
+DAYTONA_BY_ALIAS = {s.alias: s for s in DAYTONA_ROSTER}
+
 # Removed from the roster on purpose; alias -> reason. Their benchmark rows stay in benchmarks/.
 RETIRED: dict[str, str] = {
     "qwen3-coder-30b": "0/4 relay in 12 min: fabricated learnings, no investigation (2026-08-16)",
+    "qwen36-35b": "dropped for H100-class large models on the Daytona bench host (2026-08-25)",
+    "qwen35b": "dropped with qwen36-35b; superseded by qwen3.8 dense and the Daytona tier (2026-08-25)",
 }
 
 
