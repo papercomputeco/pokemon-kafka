@@ -21,6 +21,12 @@ dev = [
     "dlt[duckdb]>=1.0.0",
     "httpx>=0.27",
 ]
+# Opt-in: only the machine driving a Daytona fan-out needs the SDK. It is not a
+# default dependency, and the sandbox image does not install this group either —
+# the SDK runs driver-side, not inside the arms.
+fanout = [
+    "daytona>=0.100.0",
+]
 
 [project.scripts]
 viewer = "viewer.__main__:main"

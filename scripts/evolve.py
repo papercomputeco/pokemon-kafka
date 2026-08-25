@@ -137,12 +137,23 @@ def score(fitness: dict) -> float:
 # ---------------------------------------------------------------------------
 
 
-def run_agent(rom_path: str, max_turns: int, params: dict, load_state: str | None = None) -> dict:
+def run_agent(
+    rom_path: str,
+    max_turns: int,
+    params: dict,
+    load_state: str | None = None,
+    strategy: str | None = None,
+) -> dict:
     """Run the agent in a subprocess and return fitness metrics.
 
     Passes params as the EVOLVE_PARAMS env var (JSON). The agent reads
     this to override navigator defaults. load_state starts the child from
     a savestate (the healer's in-run wedge races use the wedged state).
+
+    strategy selects the agent's decision tier. None omits the flag, leaving
+    agent.py's own default ("low", the heuristic tier that makes no LLM
+    calls) — so existing callers are unaffected. Fan-out callers pass it
+    explicitly when a race needs LLM traffic to capture.
     """
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
         output_path = f.name
@@ -163,6 +174,8 @@ def run_agent(rom_path: str, max_turns: int, params: dict, load_state: str | Non
     ]
     if load_state:
         cmd += ["--load-state", str(load_state)]
+    if strategy:
+        cmd += ["--strategy", strategy]
 
     try:
         subprocess.run(cmd, env=env, capture_output=True, timeout=600)

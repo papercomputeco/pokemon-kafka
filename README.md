@@ -297,6 +297,29 @@ When the run's own fitness trips a rule — `navigation-thrash` (`stuck_count �
 
 The loop also closes **inside** a run: when the live agent's stuck streak crosses the terminal-wedge threshold (50), it saves its own wedged state, launches `healer.py check --rule terminal-wedge --load-state <wedge.state>` in the background, and keeps playing while the race runs candidates *from the wedge itself* — so the score directly measures escaping it. An accepted genome is hot-applied mid-run (navigator, backtracking, and door-cooldown knobs) and surfaces in the viewer feed as a milestone, with no operator involvement at all. One race per run; `--no-in-run-heal` opts out (race children always do), and `--in-run-heal-streak` moves the trigger. **The relay runs with it on**, one heal per lane: `healer.py` appends its winner to a notes file and the agent loads its baseline from one, so six parallel lanes pointed at the repo's `notes.md` would race each other for the shared genome — `--in-run-heal-notes` gives each lane a `genome.md` in its own variant dir, seeded with that lane's knobs, so a heal stays inside the lane that wedged. The relay keeps `--no-self-heal`: the *end-of-run* healer writes the shared `notes.md`, which a relay must not do once per lane. `run_evals.py` disables both — an eval's contract is determinism per (state, genome), and a hot-applied genome would break it. Cost of a heal, measured: a race candidate is 800 turns ≈ 4.4 s at 67 MB peak RSS, so one race (control + 6 variants, sequential) is ~31 s, and six lanes wedging at once peak at ~400 MB for half a minute — small next to the six lane processes the relay already runs. `--parallel` remains the knob that sizes a relay to the machine.
 
+### Fanning a race out (optional)
+
+A parameter race is N independent short runs, and `run_race` executes them serially on one machine. `scripts/fanout/` adds an optional backend seam so the same work list can run somewhere with more parallelism. **Local is the default and nothing above changes** — the serial loop is still what every existing caller gets.
+
+```bash
+# default: serial, on this machine, no account needed
+uv run scripts/fanout/cli.py --rom rom/pokemon_red.gb --variants 3
+
+# opt-in: one Daytona sandbox per arm
+uv sync --group fanout
+bash scripts/fanout/build_snapshot.sh --push
+uv run scripts/fanout/cli.py --rom rom/pokemon_red.gb --variants 3 \
+  --backend daytona --snapshot pokemon-fanout-<sha>
+```
+
+The snapshot is the Daytona equivalent of the stereOS image: repo, deps, headless PyBoy, and the `tapes` capture sidecar. It contains **no ROM and no credentials** — the ROM is uploaded per sandbox (it is not ours to redistribute) and the DSN, capture URL, and API keys are injected at launch, so a rotated key never forces a rebuild. `build_snapshot.sh` fails the build if a ROM is found in the image.
+
+Sandboxes are CPU-only, so the heuristic tier (`--strategy low`, the default) runs fine in-sandbox and makes zero LLM calls. `--strategy medium|high` sends inference to an upstream *through* the capture sidecar, so those runs are recorded centrally rather than lost — and they cost money, which the runner warns about before starting.
+
+Teardown has three layers because a leaked sandbox bills silently: every arm deletes in a `finally`, the batch sweeps stragglers on interrupt, and `ephemeral=True` plus `ttl_minutes` let the server reap on its own if the driver is killed outright.
+
+`bash scripts/fanout/prove.sh --rom <rom> --snapshot <name>` runs a bounded 3-arm proof and checks that fitness came back for every arm, that all three appear in the central store as one cohort, that zero sandboxes survive, and what a 20-arm race would cost from measured usage.
+
 ### Discovery engine (capability healing)
 
 Parameter tuning only tunes the knobs that exist. When tuning is exhausted — the same rule re-fires after an accepted fix, or the last two races both rejected — the healer escalates to `data/discovery_queue.json`, and the discovery engine turns the evidence into a **code change proposal**:

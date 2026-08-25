@@ -1041,3 +1041,20 @@ def test_run_agent_omits_load_state_by_default():
         evolve_mod.run_agent("rom.gb", 10, {})
     assert "--load-state" not in captured["cmd"]
     assert "--no-in-run-heal" in captured["cmd"]
+
+
+def test_run_agent_passes_strategy_when_given():
+    """Fan-out arms select an LLM tier; existing callers must not be affected."""
+    captured = {}
+    with patch("evolve.subprocess.run", side_effect=_capture_run(captured)):
+        evolve_mod.run_agent("rom.gb", 10, {}, strategy="medium")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--strategy") + 1] == "medium"
+
+
+def test_run_agent_omits_strategy_by_default():
+    """Omitting the flag leaves agent.py's own default (low, zero LLM calls)."""
+    captured = {}
+    with patch("evolve.subprocess.run", side_effect=_capture_run(captured)):
+        evolve_mod.run_agent("rom.gb", 10, {})
+    assert "--strategy" not in captured["cmd"]
