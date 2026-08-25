@@ -1,0 +1,192 @@
+# Semantic router config — the right bot for the right situation (issue #103).
+#
+# Consumed by `vllm-sr serve --config references/semantic_router.yaml`
+# (vllm-project/semantic-router, unified config contract v0.3). The router listens on
+# :8899 as an OpenAI-compatible endpoint; a request with model "vllm-sr/auto" is
+# classified by the keyword signals below and forwarded to the model the matching
+# decision names. Backends go through the tapes proxy (:42345), the same hop pi uses,
+# so routed sessions stay captured.
+#
+# Every model choice cites a measured row — this file is the skill matrix
+# (benchmarks/2026-08-22-skill-matrix.md) and docs/model-fit.md rendered as routing:
+#
+#   battle     -> laguna-xs-128k    battle was 6/6 with near-identical rows (an execution
+#                                   baseline, not a discriminator), so the leg goes to the
+#                                   measured Driver: Haiku's cadence (3.3-4.0 s/turn),
+#                                   reached the Gym first (model-fit.md, r1/r2).
+#   navigation -> qwen38-27b-128k   49 t / 36 HP on mtmoon_1f_to_b1f — dominates the nav
+#                                   column on both axes (skill matrix).
+#   puzzle     -> kimi-k2.6:cloud   0/6 leg, but kimi went deepest (B2F, 18 tiles) and
+#                                   topped the puzzle screen (0.55); the screen ordered the
+#                                   expedition exactly (skill matrix).
+#   default    -> qwen38-27b-128k   best local operator score and the roster's proven
+#                                   investigator (skill_matrix_chain.sh roster note).
+#
+# scripts/semantic_router.py validates this file, mirrors the classification offline for
+# tests, and registers the router as a pi provider. Change a route only with a run to
+# point at — a verdict without a run behind it is an opinion.
+
+version: v0.3
+
+listeners:
+  - name: http-8899
+    address: 0.0.0.0
+    port: 8899
+    timeout: 300s
+
+providers:
+  defaults:
+    default_model: qwen38-27b-128k
+  models:
+    - name: laguna-xs-128k
+      provider_model_id: laguna-xs-128k
+      api_format: openai
+      backend_refs:
+        - name: tapes-proxy
+          base_url: http://host.docker.internal:42345
+          provider: openai
+          # Full path here on purpose: the extproc sets the request path to chat_path
+          # verbatim, bypassing the base_url path prefix (it is only applied to paths
+          # still starting with /v1). Verified against a capture server, 2026-08-25.
+          chat_path: /agents/pi/v1/chat/completions
+          weight: 100
+    - name: qwen38-27b-128k
+      provider_model_id: qwen38-27b-128k
+      api_format: openai
+      backend_refs:
+        - name: tapes-proxy
+          base_url: http://host.docker.internal:42345
+          provider: openai
+          # Full path here on purpose: the extproc sets the request path to chat_path
+          # verbatim, bypassing the base_url path prefix (it is only applied to paths
+          # still starting with /v1). Verified against a capture server, 2026-08-25.
+          chat_path: /agents/pi/v1/chat/completions
+          weight: 100
+    - name: "kimi-k2.6:cloud"
+      provider_model_id: "kimi-k2.6:cloud"
+      api_format: openai
+      backend_refs:
+        - name: tapes-proxy
+          base_url: http://host.docker.internal:42345
+          provider: openai
+          # Full path here on purpose: the extproc sets the request path to chat_path
+          # verbatim, bypassing the base_url path prefix (it is only applied to paths
+          # still starting with /v1). Verified against a capture server, 2026-08-25.
+          chat_path: /agents/pi/v1/chat/completions
+          weight: 100
+
+routing:
+  strategy: priority
+
+  modelCards:
+    - name: laguna-xs-128k
+      context_window_size: 131072
+      description: >-
+        The Driver. Strong on an open path: Haiku's cadence, reached the Gym first
+        (docs/model-fit.md). Wrong model for a wall — bottomed the puzzle screen.
+      capabilities: [chat]
+      tags: [driver, battle, local]
+    - name: qwen38-27b-128k
+      context_window_size: 131072
+      description: >-
+        The Investigator, and the nav column's best line (49 t / 36 HP,
+        mtmoon_1f_to_b1f). Slow per turn; reads before it edits; committed the
+        Mt. Moon root-cause diagnosis.
+      capabilities: [chat, reasoning]
+      tags: [investigator, navigation, default, local]
+    - name: "kimi-k2.6:cloud"
+      context_window_size: 262144
+      description: >-
+        Deepest on the puzzle leg (B2F, 18 tiles) and top puzzle screen score (0.55).
+        The screen predicted the expedition ordering.
+      capabilities: [chat, reasoning]
+      tags: [puzzle, cloud]
+
+  signals:
+    keywords:
+      # Puzzle-leg vocabulary must not appear in the battle/nav missions (guarded by
+      # tests/test_semantic_router.py) — puzzle outranks both, so a stray hit here
+      # would steal their traffic.
+      - name: puzzle_keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - mtmoon_clear
+          - anomalies
+          - anomaly
+          - diagnosing
+          - diagnose
+          - doorway
+          - refuses
+          - springs
+          - spring
+        case_sensitive: false
+        bm25_threshold: 0.1
+      # Nav vocabulary must not appear in the battle mission (same guard). Bare
+      # "navigation" is deliberately absent: the battle mission says "navigation is
+      # deliberately trivial here".
+      - name: navigation_keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - mtmoon_1f_to_b1f
+          - route-finding
+          - collision
+          - overworld
+          - warp
+          - ladder
+          - stuck
+        case_sensitive: false
+        bm25_threshold: 0.1
+      # Lowest priority, so battle words may legitimately appear in the harder legs'
+      # missions (Mt. Moon has battles) without stealing their traffic.
+      - name: battle_keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - pewter_to_badge
+          - brock
+          - battle
+          - badge
+          - gym
+          - trainer
+        case_sensitive: false
+        bm25_threshold: 0.1
+
+  decisions:
+    - name: puzzle-to-deepest
+      description: >-
+        Anomaly work — observation over confident theory. kimi went deepest of six
+        (skill matrix, puzzle column).
+      priority: 300
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: puzzle_keywords
+      modelRefs:
+        - model: "kimi-k2.6:cloud"
+    - name: navigation-to-best-line
+      description: >-
+        Route-finding. qwen38-27b's 49 t / 36 HP dominates the nav column on both axes
+        (skill matrix).
+      priority: 200
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: navigation_keywords
+      modelRefs:
+        - model: qwen38-27b-128k
+    - name: battle-to-driver
+      description: >-
+        Execution baseline — 6/6, near-identical rows. Send the fast Driver
+        (docs/model-fit.md: laguna-xs).
+      priority: 100
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: battle_keywords
+      modelRefs:
+        - model: laguna-xs-128k

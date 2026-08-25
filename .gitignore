@@ -90,3 +90,5 @@ docker-compose.override.yml
 !demo-runs/**
 demo-runs/states/
 benchmarks/artifact/local-vs-haiku.html
+references/.vllm-sr/
+references/models/
