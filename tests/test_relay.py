@@ -29,7 +29,14 @@ def _baton(tmp_path, genome=None):
 
 def test_segments_cover_the_road_to_mt_moon():
     names = [s.name for s in SEGMENTS]
-    assert names == ["route1_to_forest", "forest_to_pewter", "pewter_to_badge", "badge_to_mtmoon"]
+    assert names == [
+        "route1_to_forest",
+        "forest_to_pewter",
+        "pewter_to_badge",
+        "badge_to_mtmoon",
+        "mtmoon_1f_to_b1f",
+        "mtmoon_clear",
+    ]
     assert SEGMENTS[0].stop_on_map == 51
     assert SEGMENTS[1].stop_on_map == 2
     assert SEGMENTS[2].stop_on_badge == 1
@@ -919,3 +926,30 @@ def test_nav_spread_varies_a_knob_the_truth_leg_reads():
     assert "truth_refuse_strikes" in relay.BASE_GENOME
     varied = {v.get("truth_refuse_strikes") for v in relay.NAV_SPREAD if "truth_refuse_strikes" in v}
     assert len(varied) >= 2, "the spread must explore more than one value"
+
+
+# ---- stop_min_x: the east-exit vs west-entrance disambiguation ------------------------------
+
+
+def test_mtmoon_clear_requires_the_east_side_of_route_4():
+    """Route 4's west side is where the lane ENTERED the cave — its entrance mat is (18,5), the
+    dungeon's east exit lands at (24,5). Without the column check the 59<->15 entrance spring
+    scores as a clear on its first bounce."""
+    seg = next(s for s in SEGMENTS if s.name == "mtmoon_clear")
+    assert (seg.stop_on_map, seg.stop_min_x) == (15, 22)
+    bounce = {"final_map_id": 15, "final_x": 18, "final_y": 5}
+    cleared = {"final_map_id": 15, "final_x": 24, "final_y": 5}
+    assert not relay.segment_success(bounce, seg)
+    assert relay.segment_success(cleared, seg)
+    assert not relay.segment_success({"final_map_id": 59, "final_x": 30}, seg)
+
+
+def test_stop_min_x_reaches_the_lane_command_line():
+    seg = next(s for s in SEGMENTS if s.name == "mtmoon_clear")
+    baton = Baton(state_path=Path("s.state"), worldmap_path=None, genome={})
+    cmd, _env = relay.build_agent_cmd("rom.gb", seg, {"label": "v"}, Path("v"), baton, Path("run"))
+    joined = " ".join(cmd)
+    assert "--stop-on-map 15" in joined and "--stop-min-x 22" in joined
+    nav = next(s for s in SEGMENTS if s.name == "mtmoon_1f_to_b1f")
+    cmd2, _ = relay.build_agent_cmd("rom.gb", nav, {"label": "v"}, Path("v"), baton, Path("run"))
+    assert "--stop-min-x" not in " ".join(cmd2)  # a plain map stop stays plain

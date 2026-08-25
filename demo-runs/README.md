@@ -1,6 +1,6 @@
 # Demo runs
 
-Curated, replayable agent runs for the 11-beat talk demo. Committed so a fresh
+Curated, replayable agent runs for the 12-beat talk demo. Committed so a fresh
 clone can replay them without an emulator, ROM, or API key.
 
 ## Replay
@@ -9,7 +9,7 @@ clone can replay them without an emulator, ROM, or API key.
 uv run python -m viewer --runs-dir demo-runs   # http://localhost:8200
 ```
 
-Each beat has a stable folder (`beat1-…` … `beat11-…`) and a label starting with
+Each beat has a stable folder (`beat1-…` … `beat12-…`) and a label starting with
 its beat number, so the viewer's beat routes resolve: open `/3` to jump straight
 to beat 3.
 
@@ -30,6 +30,13 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   badge, across Pewter, over all 70 tiles of Route 3, and into Mt. Moon 1F (map 59)
   in 364 turns. Recorded from `data/relay/gym-beat/batons/pewter_to_badge.state`
   with `--stop-on-map 59`.
+
+- `beat12-mt-moon-clear` — **the first Mt. Moon clear**: 880 turns from the 1F entrance seed
+  through all three floors — both springs defused, the fossil doorway opened by fighting the
+  Super Nerd (turn 823), out the wLastMap exit door to Route 4's east side at 25 HP. Recorded
+  from `states/mtmoon_seeds/mtmoon1f_entrance_hp42.state`; deterministic (re-running reproduces
+  the same 880 turns). See `benchmarks/2026-08-22-skill-matrix.md` for how six models failed
+  this leg and collectively wrote the fix.
 
 ### Why beat 11 needed a fix first
 
@@ -73,12 +80,12 @@ Two things this leg exposed, both now fixed:
 `viewer/store.py` sorts run folders reverse-alphabetically, so `beat10`/`beat11`
 land between `beat2` and `beat1` in the grid. The deep links `/10` and `/11` —
 which is how the talk actually navigates — are unaffected. Zero-padding every
-folder to `beat01…beat11` would fix the order but churns all 11 folders plus the
+folder to `beat01…beat12` would fix the order but churns all 12 folders plus the
 skills that reference them by name.
 
 ## Not committed
 
-`demo-runs/states/` holds the PyBoy savestates used to record beats 3–11. They
+`demo-runs/states/` holds the PyBoy savestates used to record beats 3–12. They
 are gitignored (binary, regenerable) — recording is a local/presenter step, the
 frames are the shipped artifact. `states/mtmoon_seeds/MANIFEST.md` records where
 each seed came from.

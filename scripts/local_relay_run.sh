@@ -15,7 +15,14 @@ ALIAS="${1:?usage: local_relay_run.sh <alias> [base-commit]}"
 BASE="${2:-2cd9240}"
 TAG="${RUN_TAG:-$ALIAS}"                            # worktree/branch/bridge name; set RUN_TAG for a rerun
 CTX_K="${CTX_K:-128}"
-MODEL="${ALIAS}-${CTX_K}k"
+# A bare alias names a roster model and resolves to its -<ctx>k Modelfile variant. An alias with
+# a ':' is already a full Ollama tag — the cloud models (kimi-k2.6:cloud, qwen3.5:397b-cloud)
+# ship 262k context natively and have no local variant to build; suffixing them made every
+# skill-matrix cloud leg die in seconds with "model kimi-k2.6:cloud-128k not in Ollama".
+case "$ALIAS" in
+  *:*) MODEL="$ALIAS" ;;
+  *)   MODEL="${ALIAS}-${CTX_K}k" ;;
+esac
 BUDGET_S="${BUDGET_S:-10800}"                      # hard kill; the mission text says 2.5 h
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PARENT="$(dirname "$REPO")"
@@ -88,6 +95,8 @@ fi
 mkdir -p "$WT/rom" "$WT/demo-runs/states" "$WT/data/telemetry/game" "$WT/data/power"
 ln -sf "$REPO/rom/pokemon_red.gb" "$WT/rom/pokemon_red.gb"
 cp -n "$REPO/demo-runs/states/route1.state" "$WT/demo-runs/states/" 2>/dev/null || true
+# The skill-matrix battle leg seeds from the pre-Brock baton (gitignored, like every state).
+cp -n "$REPO/demo-runs/states/pre-brock.state" "$WT/demo-runs/states/" 2>/dev/null || true
 [ -d "$REPO/demo-runs/states/mtmoon_seeds" ] && cp -rn "$REPO/demo-runs/states/mtmoon_seeds" "$WT/demo-runs/states/" 2>/dev/null || true
 ( cd "$WT" && uv sync --group dev >/dev/null 2>&1 )
 

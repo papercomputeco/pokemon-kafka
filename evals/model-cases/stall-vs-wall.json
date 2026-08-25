@@ -1,0 +1,61 @@
+{
+  "name": "stall-vs-wall",
+  "learning": "docs/postmortems/2026-08-21-mtmoon-collision-rule.md",
+  "category": "puzzle",
+  "prompt": "A lane on Route 3 presses RIGHT from (11,6) toward (12,6) and does not move, turn after turn. Facts observed live: text_box_active reads False the whole time; the dialogue buffer contains 'Hey! I met you in VIRIDIAN FOREST!'; the SAME lane successfully walked (11,6) -> (12,6) earlier in this run; there is a trainer sprite at (10,6), one tile away. When a previous version of the navigator scored this as a wall and hard-blocked (12,6) plus the only detour tile, the lane lost the whole crossing.\n\nWhat is actually holding the lane in place, why is text_box_active useless as evidence here, and what single input un-sticks it?",
+  "context": [],
+  "rubric": [
+    {
+      "id": "trainer-engagement",
+      "weight": 4,
+      "any": [
+        "trainer",
+        "challenge",
+        "line of sight",
+        "spotted",
+        "engagement",
+        "exclamation"
+      ]
+    },
+    {
+      "id": "not-a-wall",
+      "weight": 3,
+      "any": [
+        "not a wall",
+        "isn.?t a wall",
+        "no wall",
+        "walked (it|that step|through) (before|earlier)",
+        "already walked",
+        "not terrain",
+        "temporary",
+        "not (a )?(permanent|real) (block|wall)",
+        "trigger freeze",
+        "freeze,? not"
+      ]
+    },
+    {
+      "id": "press-a",
+      "weight": 3,
+      "any": [
+        "press(ing)? a\\b",
+        "\\ba button",
+        "advance (the )?(dialog|dialogue|text)",
+        "dismiss (the )?(dialog|dialogue|text)",
+        "input.{0,30}\\*?\\*?A\\*?\\*?\\s*(\\(|\\.|,|$)",
+        "acknowledg.{0,30}(sighting|trainer|challenge)"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "block-the-tile",
+      "weight": 3,
+      "any": [
+        "mark (it|the tile) (as )?(blocked|a wall)",
+        "hard.?block",
+        "route around",
+        "replan around (12,\\s*6)"
+      ]
+    }
+  ]
+}

@@ -121,14 +121,23 @@ def ask_ollama(
     seed: int,
     timeout: float = 900.0,
     system: str = SYSTEM,
+    think: str | None = None,
 ) -> dict:
-    """One chat completion. ``system`` is overridable so the advisor's gate can inject a tip."""
+    """One chat completion. ``system`` is overridable so the advisor's gate can inject a tip.
+
+    ``think`` maps to Ollama's chat-level thinking control: "off" disables the thinking phase,
+    "low"/"medium"/"high" set effort on models that grade it. Some thinkers at temperature 0
+    ruminate past ANY output budget without ever surfacing a visible answer (kimi-k2.6 spent 72 KB
+    re-deriving Gen 1 trainer mechanics on a case whose answer sat in its first paragraph); "off"
+    is the fair second chance before scoring that silence as the 0 it otherwise is."""
     payload = {
         "model": model,
         "stream": False,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         "options": {"temperature": 0, "seed": seed, "num_ctx": ctx, "num_predict": num_predict},
     }
+    if think is not None:
+        payload["think"] = False if think == "off" else think
     req = urllib.request.Request(
         OLLAMA_URL + "/api/chat",
         data=json.dumps(payload).encode(),
@@ -205,6 +214,12 @@ def main(argv=None) -> int:
     p.add_argument("--results-dir", default=str(DEFAULT_RESULTS))
     p.add_argument("--show", action="store_true", help="print each answer as it arrives")
     p.add_argument("--force-gpu", action="store_true", help="run even if a relay run owns the GPU")
+    p.add_argument(
+        "--think",
+        default=None,
+        choices=("off", "low", "medium", "high"),
+        help="thinking control for models that support it; 'off' rescues thinkers that ruminate past the budget",
+    )
     args = p.parse_args(argv)
     check_gpu_free(args.force_gpu)
 
@@ -234,6 +249,7 @@ def main(argv=None) -> int:
                     # long cases can declare their own budget; thinking eats the default
                     num_predict=int(case.get("num_predict", args.num_predict)),
                     seed=args.seed,
+                    think=args.think,
                 )
             except OSError as e:
                 print(f"[eval] {model} {case['name']}: ERROR {str(e)[:120]}", flush=True)

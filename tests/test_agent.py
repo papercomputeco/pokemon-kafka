@@ -2837,6 +2837,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,
             fitness_every=0,
@@ -2876,6 +2877,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,
             fitness_every=0,
@@ -2904,6 +2906,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,
             fitness_every=0,
@@ -5146,3 +5149,18 @@ def test_tick_in_run_heal_reads_the_verdict_from_the_same_file_it_raced(tmp_path
     monkeypatch.setattr(agent, "finish_in_run_heal", fake_finish)
     ag._tick_in_run_heal()
     assert seen["notes_path"] == str(lane_notes)
+
+
+def test_stop_condition_min_x_narrows_a_map_stop():
+    """Mt. Moon's clear ends on Route 4 (15) EAST of the mountain: the west side is where the
+    lane entered, so map id alone would call the entrance spring's first bounce a clear."""
+    from agent import PokemonAgent
+    from memory_reader import OverworldState
+
+    met = PokemonAgent._stop_condition_met
+    west_bounce = OverworldState(map_id=15, x=18, y=5)
+    east_exit = OverworldState(map_id=15, x=24, y=5)
+    assert not met(west_bounce, stop_on_map=15, stop_min_x=22)
+    assert met(east_exit, stop_on_map=15, stop_min_x=22)
+    assert met(west_bounce, stop_on_map=15)  # without the column, old behaviour is unchanged
+    assert not met(OverworldState(map_id=59, x=30, y=5), stop_on_map=15, stop_min_x=22)

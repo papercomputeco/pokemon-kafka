@@ -1,0 +1,67 @@
+{
+  "name": "brock-cost-heal-plan",
+  "learning": "demo-runs/states/mtmoon_seeds/MANIFEST.md",
+  "category": "battle",
+  "prompt": "A lane has just beaten Brock in Pewter Gym: badges=1, lead Charmeleon L17 at 6/48 HP, standing on map 54 tile (5,1). The mission is to reach Mt. Moon via Route 3, which is lined with trainer battles and tall grass. Known harness fact: the agent's automatic Pewter heal loop (_pewter_heal_action) is gated on NOT having the badge, by design, so it will not fire now.\n\nWhat is the immediate risk, and what should the lane do FIRST before crossing Route 3? Be concrete about where.",
+  "context": [],
+  "rubric": [
+    {
+      "id": "names-the-risk",
+      "weight": 2,
+      "any": [
+        "KO",
+        "faint",
+        "white.?out",
+        "die",
+        "one hit",
+        "lose the (fight|battle)",
+        "6/48"
+      ]
+    },
+    {
+      "id": "heal-first",
+      "weight": 3,
+      "any": [
+        "heal",
+        "pok.?mon center",
+        "pokecenter",
+        "nurse"
+      ]
+    },
+    {
+      "id": "knows-where",
+      "weight": 2,
+      "any": [
+        "pewter",
+        "map 58",
+        "map 2",
+        "(13,\\s*25)"
+      ]
+    },
+    {
+      "id": "knows-gate-wont-save-it",
+      "weight": 2,
+      "any": [
+        "gate",
+        "won.?t fire",
+        "not fire",
+        "manual",
+        "itself",
+        "explicit",
+        "badge"
+      ]
+    }
+  ],
+  "anti": [
+    {
+      "id": "presses-on",
+      "weight": 3,
+      "any": [
+        "cross(ing)? route 3 (first|now|immediately)",
+        "heal later",
+        "no need to heal",
+        "risk it"
+      ]
+    }
+  ]
+}

@@ -118,6 +118,9 @@ PEWTER_MAX_HEAL_TRIPS = 6
 # to a non-building map" and the leg never assumes which id Route 3 has in this image; the road
 # hop is defined by "the warp to Mt. Moon 1F (59)".
 MT_MOON_1F_MAP = 59
+MT_MOON_B1F_MAP = 60
+MT_MOON_B2F_MAP = 61
+MT_MOON_DUNGEON_MAPS = (MT_MOON_1F_MAP, MT_MOON_B1F_MAP, MT_MOON_B2F_MAP)
 ROUTE_3_MAP = 14  # the road between Pewter and Mt. Moon (empty warp table: t14 probe, 2026-08-18)
 PEWTER_BUILDING_MAPS = (PEWTER_CITY_MAP, PEWTER_GYM_MAP, 52, 56, PEWTER_CENTER_MAP)
 
@@ -1593,8 +1596,8 @@ class PokemonAgent:
             # difference between "the city's table" and "this map's table".
             return None
         LAST_MAP = 0xFF  # warp dest id for "back where we came from" (memory_reader passes it through raw)
-        if state.map_id == MT_MOON_1F_MAP:
-            return None
+        if state.map_id in MT_MOON_DUNGEON_MAPS:
+            return self._mtmoon_dungeon_step(state)
         if state.map_id == PEWTER_CENTER_MAP:
             # The Center: let the canonical Pewter heal flow serve it (counter -> heal -> walk out
             # the door). The seed legs start at 6/48 HP; Route 3 is tall grass, and a KO
@@ -1980,56 +1983,47 @@ class PokemonAgent:
     # tens of consecutive turns frozen on one tile. Override per-lane via EVOLVE_PARAMS.
     _TRUTH_REFUSE_STRIKES = 40
 
-    def _truth_step(self, state: OverworldState, dest_map: int) -> str | None:
-        """One step along the ROM-truth path from here toward ``dest_map``, or ``None``.
-
-        ``_pilot_to`` plans over the *learned* WorldMap, which on a first crossing is mostly
-        unknown ground; on Route 3 that left the march bumping walls for 12,000 turns without
-        leaving the map. The ROM already knows the answer: the hop chain names the next map and the
-        tiles that reach it, and a tile-pair-aware BFS over the extracted collision grid turns that
-        into an exact route (83 steps from the tile every lane wedged on). Truth is only consulted
-        for the *direction of the next step* — the caller still owns pressing it, so battles,
-        dialogue and the stuck detector behave exactly as before.
-
-        Returns ``None`` when the truth file is missing, the map is unknown, or no path exists, so
-        every caller keeps its previous fallback.
-        """
+    def _truth_ready(self) -> bool:
+        """Load the extracted ROM truth once; False (with one log line) if it is unusable."""
         if not hasattr(self, "_truth_misses"):
             self._truth_misses: dict[tuple[int, int], int] = {}
-        if getattr(self, "_truth", None) is None:
-            if getattr(self, "_truth_failed", False):
-                return None
-            try:
-                import rom_truth
+        if getattr(self, "_truth", None) is not None:
+            return True
+        if getattr(self, "_truth_failed", False):
+            return False
+        try:
+            import rom_truth
 
-                self._truth = rom_truth.load_truth()
-                self._truth_pairs = rom_truth.loaded_pairs(self._truth)
-                self._truth_mod = rom_truth
-            except Exception as exc:  # missing/mismatched file: stay on the old behaviour
-                self._truth_failed = True
-                self.log(f"TRUTH | unavailable ({exc}); falling back to learned-map navigation")
-                return None
+            self._truth = rom_truth.load_truth()
+            self._truth_pairs = rom_truth.loaded_pairs(self._truth)
+            self._truth_mod = rom_truth
+        except Exception as exc:  # missing/mismatched file: stay on the old behaviour
+            self._truth_failed = True
+            self.log(f"TRUTH | unavailable ({exc}); falling back to learned-map navigation")
+            return False
+        return True
+
+    def _truth_walk(
+        self, state: OverworldState, targets: set, goal: str, use_learned: bool = True, use_sprites: bool = True
+    ) -> str | None:
+        """One step toward the nearest of ``targets`` on the current map, ROM-truth planned.
+
+        A step that leaves the lane where it started is ambiguous, and the ambiguity is the whole
+        difficulty of these legs. On Route 3 it is almost never a wall: walking into a trainer's
+        line of sight freezes the player through the challenge ("Hey! I met you in VIRIDIAN
+        FOREST!"), and ``text_box_active`` reads False the entire time, so that flag cannot tell
+        a challenge from a collision. Clearing the dialogue can — press A on the odd misses, and
+        treat only a step that still fails, with nothing left to dismiss, as a wall. Blaming the
+        freeze on the map blocked (11,6)->(12,6) and its only detour, sealed the crossing, and
+        sent the lane back to the city — 12,000 turns of "navigation is broken" from a dialogue
+        box. Hence a strike count that outlasts an engagement rather than a tidy two. Real walls
+        go to the hard-block machinery a failed pilot step uses, so they expire on re-observation.
+
+        Returns ``None`` when no target is reachable (the caller keeps its fallback) — including
+        when the lane already STANDS on a target, which for a warp tile means the warp has to be
+        re-armed by stepping off; that case is the caller's to handle.
+        """
         rt = self._truth_mod
-        if state.map_id == dest_map:
-            return None
-        chain = rt.route(self._truth, state.map_id, dest_map)
-        if not chain:
-            return None
-        targets = rt.exit_targets(self._truth, chain[0])
-        # A step that leaves the lane where it started is ambiguous, and the ambiguity is the whole
-        # difficulty of this leg. On Route 3 it is almost never a wall: walking into a trainer's
-        # line of sight freezes the player through the challenge ("Hey! I met you in VIRIDIAN
-        # FOREST!"), and ``text_box_active`` reads False the entire time, so that flag cannot tell
-        # a challenge from a collision. Clearing the dialogue can — press A on the odd misses, and
-        # treat only a step that still fails, with nothing left to dismiss, as a wall.
-        #
-        # Getting this wrong is expensive in a way that reads as a map bug: blaming the freeze on
-        # the map blocked (11,6)->(12,6) and its only detour (11,5), sealed the crossing, and sent
-        # the lane back to the city — 12,000 turns of "navigation is broken" from a dialogue box.
-        # Hence a strike count that outlasts an engagement rather than a tidy two.
-        #
-        # Real walls go to the same hard-block machinery a failed pilot step uses, so they expire
-        # on re-observation instead of sealing a corridor for the rest of the run.
         last = getattr(self, "_truth_last", None)
         if last is not None:
             lmap, lfrom, lto, lturn = last
@@ -2049,28 +2043,27 @@ class PokemonAgent:
         # whatever this lane has already learned is solid (an NPC that moved, a wall the quad rule
         # over-reported, a step the engine refused above) is layered on top, so a route is never
         # replanned through a wall this lane has already met.
-        blocked = rt.sprite_tiles(self._truth, state.map_id)
-        learned = self.world.cells.get(state.map_id) or {}
-        blocked |= {xy for xy, v in learned.items() if not v}
+        blocked = rt.sprite_tiles(self._truth, state.map_id) if use_sprites else set()
+        if use_learned:
+            # Observed zeros help on the overworld — but a viewport observation of a WANDERING
+            # body (a B2F Rocket beside the ladder mat) persists as a wall until re-observed, and
+            # in a one-wide cave corridor a single such zero severs the route for the rest of the
+            # run. The dungeon walk passes False: the ROM grid is truth there, transient bodies
+            # are the refusal machinery's job, and real walls still arrive via world.blocked
+            # (which expires on re-observation).
+            learned = self.world.cells.get(state.map_id) or {}
+            blocked |= {xy for xy, v in learned.items() if not v}
         blocked |= set(self.world.blocked.get(state.map_id, {}))
-        # Standing on the exit already: an edge hop has no warp to fire, the engine hands the
-        # player over only when they walk *off* that side. Route 3's crossing ended at (57,0) — on
-        # a north-edge exit tile — and stalled there for the rest of the run because the planner
-        # had arrived and there was no next tile to step to.
-        if (state.x, state.y) in targets and chain[0]["via"] == "edge":
-            return {"north": "up", "south": "down", "west": "left", "east": "right"}[chain[0]["edge"]]
         path = rt.path_on_map(
             self._truth, self._truth_pairs, state.map_id, (state.x, state.y), targets, blocked=blocked
         )
         if not path or len(path) < 2:
             return None
-        if getattr(self, "_truth_logged", None) != (state.map_id, chain[0]["to"]):
-            self._truth_logged = (state.map_id, chain[0]["to"])
-            self.log(
-                f"TRUTH | map={state.map_id} ({state.x},{state.y}) -> {chain[0]['to']} "
-                f"via {chain[0]['via']}, {len(path) - 1} steps"
-            )
+        if getattr(self, "_truth_logged", None) != (state.map_id, goal):
+            self._truth_logged = (state.map_id, goal)
+            self.log(f"TRUTH | map={state.map_id} ({state.x},{state.y}) -> {goal}, {len(path) - 1} steps")
         (x0, y0), (x1, y1) = path[0], path[1]
+        self._truth_next = (state.map_id, x1, y1)
         self._truth_last = (state.map_id, (x0, y0), (x1, y1), self.turn_count)
         if x1 > x0:
             return "right"
@@ -2079,6 +2072,112 @@ class PokemonAgent:
         if y1 > y0:
             return "down"
         return "up"
+
+    def _truth_step(self, state: OverworldState, dest_map: int) -> str | None:
+        """One step along the ROM-truth path from here toward ``dest_map``, or ``None``.
+
+        ``_pilot_to`` plans over the *learned* WorldMap, which on a first crossing is mostly
+        unknown ground; on Route 3 that left the march bumping walls for 12,000 turns without
+        leaving the map. The ROM already knows the answer: the hop chain names the next map and the
+        tiles that reach it, and a tile-pair-aware BFS over the extracted collision grid turns that
+        into an exact route (83 steps from the tile every lane wedged on). Truth is only consulted
+        for the *direction of the next step* — the caller still owns pressing it, so battles,
+        dialogue and the stuck detector behave exactly as before.
+
+        Returns ``None`` when the truth file is missing, the map is unknown, or no path exists, so
+        every caller keeps its previous fallback.
+        """
+        if not self._truth_ready():
+            return None
+        rt = self._truth_mod
+        if state.map_id == dest_map:
+            return None
+        chain = rt.route(self._truth, state.map_id, dest_map)
+        if not chain:
+            return None
+        targets = rt.exit_targets(self._truth, chain[0])
+        # Standing on the exit already: an edge hop has no warp to fire, the engine hands the
+        # player over only when they walk *off* that side. Route 3's crossing ended at (57,0) — on
+        # a north-edge exit tile — and stalled there for the rest of the run because the planner
+        # had arrived and there was no next tile to step to.
+        if (state.x, state.y) in targets and chain[0]["via"] == "edge":
+            return {"north": "up", "south": "down", "west": "left", "east": "right"}[chain[0]["edge"]]
+        return self._truth_walk(state, targets, f"{chain[0]['to']} via {chain[0]['via']}")
+
+    def _mtmoon_dungeon_step(self, state: OverworldState) -> str | None:
+        """Drive the Mt. Moon floors (59 -> 60 <-> 61 pockets -> the Route 4 east exit).
+
+        What six models' slots taught (benchmarks/2026-08-22-skill-matrix.md): the mountain's
+        defense is two SPRINGS of one mechanism — a warp lands the lane on the destination mat,
+        a step back re-triggers, and stuck detection never fires because the map keeps changing —
+        plus a pocket maze: B1F is four disconnected pockets stitched together THROUGH B2F, so
+        two of B2F's ladder arrivals are genuine dead ends and blind bouncing cannot terminate.
+        qwen38's committed obstacles.md named the root cause: nothing owned these maps
+        (`return None` here), so lanes fell to blind direction cycling straight into the mats.
+
+        The drive: per visit, walk to the nearest warp by tier — B1F's LAST_MAP door first (the
+        "fossil doorway": dungeons never update wLastMap, so it resolves to the last outdoor map,
+        Route 4, landing at its (24,5) east mat), then untaken descending ladders, then taken
+        ones, then ladders back up (escape from a dead-end pocket chain), and only ever the
+        ARRIVAL mat last — which both kills the springs and DFS-orders the pocket maze. Taking
+        the arrival warp means re-arming it: one step off, and the next plan walks back on.
+        """
+        if not self._truth_ready():
+            return None
+        m = self._truth["maps"].get(str(state.map_id))
+        if m is None:
+            return None
+        if not hasattr(self, "_dungeon_taken"):
+            self._dungeon_taken: set[tuple[int, int, int]] = set()
+            self._dungeon_pending: tuple[int, int, int] | None = None
+            self._dungeon_map: int | None = None
+        if self._dungeon_map != state.map_id:
+            self._dungeon_map = state.map_id
+            self._dungeon_arrival = (state.x, state.y)
+            if self._dungeon_pending is not None:
+                self._dungeon_taken.add(self._dungeon_pending)
+                self._dungeon_pending = None
+        LAST_MAP = 0xFF
+        warps = [(w[0], w[1], w[2]) for w in m["warps"]]
+        arrival = self._dungeon_arrival
+        down = {MT_MOON_1F_MAP: MT_MOON_B1F_MAP, MT_MOON_B1F_MAP: MT_MOON_B2F_MAP, MT_MOON_B2F_MAP: MT_MOON_B1F_MAP}
+        fwd = {(x, y) for x, y, d in warps if d == down[state.map_id]}
+        exit_door = {(x, y) for x, y, d in warps if d == LAST_MAP} if state.map_id == MT_MOON_B1F_MAP else set()
+        back = {(x, y) for x, y, d in warps if d == MT_MOON_1F_MAP} if state.map_id == MT_MOON_B1F_MAP else set()
+        taken = {(x, y) for mp, x, y in self._dungeon_taken if mp == state.map_id}
+        tiers = (
+            exit_door,
+            (fwd - taken) - {arrival},
+            fwd - {arrival},
+            (back - taken) - {arrival},
+            back - {arrival},
+            {arrival} & (fwd | back | exit_door),
+        )
+        for targets in tiers:
+            if not targets:
+                continue
+            if (state.x, state.y) in targets:
+                # Standing on the warp we mean to take: it fired on arrival and must be re-armed.
+                # One step off (any passable neighbour off the mat); the next plan walks back on.
+                for dx, dy, mv in ((0, -1, "up"), (1, 0, "right"), (0, 1, "down"), (-1, 0, "left")):
+                    nx, ny = state.x + dx, state.y + dy
+                    if (nx, ny) not in targets and self._truth_mod.passable(
+                        m, self._truth_pairs, state.x, state.y, nx, ny
+                    ):
+                        return mv
+                continue
+            # Bodies are the ENGINE's to adjudicate down here, not the ROM object table's: B2F's
+            # only corridor runs through the fossil tiles (12,6)/(13,6), which the live game
+            # clears after the Super Nerd event — pre-blocking sprites plans around a passage
+            # that actually opens, and there is no plan left. Press into bodies; the A-press
+            # clears dialogs, battles get fought, and real walls hard-block with expiry.
+            d = self._truth_walk(state, targets, f"mtmoon tier {targets}", use_learned=False, use_sprites=False)
+            if d is not None:
+                nxt = getattr(self, "_truth_next", None)
+                if nxt is not None and nxt[0] == state.map_id and (nxt[1], nxt[2]) in targets:
+                    self._dungeon_pending = nxt
+                return d
+        return None
 
     def _quest_target(self, state: OverworldState) -> dict | None:
         """Build the parcel-quest nav override for this turn, or None to defer to waypoints.
@@ -2835,9 +2934,15 @@ class PokemonAgent:
         }
 
     @staticmethod
-    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None) -> bool:
-        """True once the overworld state satisfies a --stop-on-* condition."""
-        if stop_on_map is not None and ow.map_id == stop_on_map:
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None) -> bool:
+        """True once the overworld state satisfies a --stop-on-* condition.
+
+        ``stop_min_x`` narrows a map condition to x >= that column. Needed when arriving on the
+        target map is not the goal: Mt. Moon's clear ends on Route 4 (15), but the WEST side of 15
+        is where the lane entered the cave from — its entrance mat is (18,5), the dungeon's east
+        exit lands at (24,5), and the surface between them is one-way. Plain --stop-on-map 15
+        would call the first bounce back out of the entrance a clear."""
+        if stop_on_map is not None and ow.map_id == stop_on_map and (stop_min_x is None or ow.x >= stop_min_x):
             return True
         if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
             return True
@@ -2956,6 +3061,7 @@ class PokemonAgent:
         save_state_every=None,
         stop_on_map=None,
         stop_on_badge=None,
+        stop_min_x=None,
         stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
@@ -3201,7 +3307,7 @@ class PokemonAgent:
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
                 if stop_on_map is not None or stop_on_badge is not None:
                     ow = self.memory.read_overworld_state()
-                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge):
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x):
                         if stop_state:
                             self._save_settled_stop_state(stop_state)
                         else:
@@ -3455,6 +3561,12 @@ def main():
         help="End the run once this map id is reached (state dumped to --stop-state first)",
     )
     parser.add_argument(
+        "--stop-min-x",
+        type=int,
+        default=None,
+        help="With --stop-on-map: only stop when x >= this column (east-exit vs west-entrance disambiguation)",
+    )
+    parser.add_argument(
         "--stop-on-badge",
         type=int,
         default=None,
@@ -3620,6 +3732,7 @@ def main():
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
             stop_on_map=args.stop_on_map,
+            stop_min_x=args.stop_min_x,
             stop_on_badge=args.stop_on_badge,
             stop_state=args.stop_state,
             fitness_every=args.fitness_every,

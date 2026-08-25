@@ -350,6 +350,14 @@ def test_ask_ollama_parses_chat_reply(monkeypatch):
     assert got["answer"] == "open choose_action" and got["thinking"] == "hmm"
     assert got["out_tok_s"] == 20.0 and got["out_tok"] == 20
     assert seen["body"]["options"] == {"temperature": 0, "seed": 7, "num_ctx": 131072, "num_predict": 50}
+    assert "think" not in seen["body"]  # default: the model's own thinking behaviour
+
+    # --think off rescues thinkers that ruminate past any budget (kimi-k2.6 spent 72 KB of
+    # thinking on an answer its first paragraph already contained); levels pass through verbatim.
+    rme.ask_ollama("m-128k", "why?", ctx=131072, num_predict=50, seed=7, think="off")
+    assert seen["body"]["think"] is False
+    rme.ask_ollama("m-128k", "why?", ctx=131072, num_predict=50, seed=7, think="low")
+    assert seen["body"]["think"] == "low"
     assert seen["body"]["messages"][0]["role"] == "system"
 
 
