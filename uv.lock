@@ -1557,6 +1557,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pyboy" },
+    { name = "pyyaml" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -1580,6 +1581,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pyboy" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "uvicorn", specifier = ">=0.29" },
     { name = "websockets", specifier = ">=12.0" },
 ]
