@@ -21,7 +21,9 @@ never fired — the outer 3 h timeout killed attempt 3 first.
 1. **The seed MANIFEST lies.** `route4_east_hp25.state` loads at **(24,5) — standing on the
    east cave door mat**, not (27,3). That is the whole 15↔60 spring: the lane is born on the
    warp. The step-off-the-landing-mat discipline that killed the inside springs never covered
-   a *seed that starts on one*. Also: the lead is **Charmander L20**, not Charmeleon.
+   a *seed that starts on one*. (The operator's party read also claimed "Charmander L20 at 47/50 HP" — a proper 44-byte
+   struct read says **Charmeleon L22 at 25/63**: the filename was honest, the learning was not.
+   Verify the verifier.)
 2. **Route 4 east is a lake maze, not open road.** Holding east crosses to (49,6) and the
    engine refuses ~146 further presses — solid column at x=50, rows 2..9. The hardcoded
    "drive east" state machine (`_mtmoon_action`, map 15 x≥24 special case) walks straight
