@@ -2358,13 +2358,22 @@ class PokemonAgent:
         bag_healing = self.memory.find_healing_item()
         # The quartermaster's catch policy outranks the fight: a wanted, weakened wild with a
         # ball in the bag is a roster slot, and the ball throw is the same battle-menu path the
-        # potion action already drives (scripts/quartermaster.py).
+        # potion action already drives (scripts/quartermaster.py). CAPPED at 3 throws per enemy:
+        # the hook bypasses choose_action, which means it also bypasses the battle STALL GUARD —
+        # the roster bench's x=64 lane threw at one wedged-menu Rattata for 2,900 turns because
+        # nothing ever pressed the unstick. Past the cap the strategy takes the turn back and its
+        # own machinery (unstick, fight, flee) owns the battle.
         catch = None
         if self.catch_wanted:
-            catch = quartermaster.should_catch(
-                battle, self.memory.read_party_species(), self.memory.read_bag_items(), self.catch_wanted
-            )
+            if battle.enemy_species != getattr(self, "_catch_enemy", None):
+                self._catch_enemy = battle.enemy_species
+                self._catch_throws = 0
+            if self._catch_throws < 3:
+                catch = quartermaster.should_catch(
+                    battle, self.memory.read_party_species(), self.memory.read_bag_items(), self.catch_wanted
+                )
         if catch is not None:
+            self._catch_throws += 1
             action = {"action": "item", "item": "ball", "bag_index": catch[0]}
             self.log(
                 f"CATCH | ball (bag {catch[0]}) at L{battle.enemy_level} {battle.enemy_species_name} "
@@ -2964,7 +2973,7 @@ class PokemonAgent:
         }
 
     @staticmethod
-    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None) -> bool:
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None, stop_on_party=None) -> bool:
         """True once the overworld state satisfies a --stop-on-* condition.
 
         ``stop_min_x`` narrows a map condition to x >= that column. Needed when arriving on the
@@ -2975,6 +2984,9 @@ class PokemonAgent:
         if stop_on_map is not None and ow.map_id == stop_on_map and (stop_min_x is None or ow.x >= stop_min_x):
             return True
         if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
+            return True
+        # The recruit condition: the quartermaster's catch hook grew the party to the target.
+        if stop_on_party is not None and ow.party_count >= stop_on_party:
             return True
         return False
 
@@ -3092,6 +3104,7 @@ class PokemonAgent:
         stop_on_map=None,
         stop_on_badge=None,
         stop_min_x=None,
+        stop_on_party=None,
         stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
@@ -3360,9 +3373,9 @@ class PokemonAgent:
                             self.pyboy.save_state(f)
                         self._map_state_saved = True
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
-                if stop_on_map is not None or stop_on_badge is not None:
+                if stop_on_map is not None or stop_on_badge is not None or stop_on_party is not None:
                     ow = self.memory.read_overworld_state()
-                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x):
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x, stop_on_party):
                         if stop_state:
                             self._save_settled_stop_state(stop_state)
                         else:
@@ -3627,6 +3640,12 @@ def main():
         help="With --stop-on-map: only stop when x >= this column (east-exit vs west-entrance disambiguation)",
     )
     parser.add_argument(
+        "--stop-on-party",
+        type=int,
+        default=None,
+        help="End the run once the party holds this many Pokemon (the recruit segments' condition)",
+    )
+    parser.add_argument(
         "--stop-on-badge",
         type=int,
         default=None,
@@ -3793,6 +3812,7 @@ def main():
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
             stop_on_map=args.stop_on_map,
+            stop_on_party=args.stop_on_party,
             stop_min_x=args.stop_min_x,
             stop_on_badge=args.stop_on_badge,
             stop_state=args.stop_state,

@@ -118,3 +118,35 @@ def test_battle_end_emits_escaped_or_lost_on_a_whiteout(tmp_path):
     with img:
         ag.run(max_turns=2)
     assert ag.collector.encounter.call_args[0][8] == "escaped_or_lost"
+
+
+def test_stop_condition_met_on_party_size(tmp_path):
+    from agent import PokemonAgent
+    from memory_reader import OverworldState
+
+    ok = PokemonAgent._stop_condition_met(OverworldState(party_count=3), stop_on_party=3)
+    assert ok
+    assert not PokemonAgent._stop_condition_met(OverworldState(party_count=2), stop_on_party=3)
+
+
+def test_catch_hook_caps_throws_and_returns_the_turn_to_the_strategy(tmp_path):
+    """The hook bypasses choose_action's stall guard, so an uncapped throw loop at a wedged
+    battle menu never unsticks (the roster bench's x=64 lane: 2,900 turns at one Rattata)."""
+    ag = _battle_agent(tmp_path, _wild_battle())
+    ag.catch_wanted = {SPEAROW}
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "fight", "move_index": 0})
+    for _ in range(5):
+        ag.run_battle_turn()
+    assert ag._catch_throws == 3
+    assert ag.battle_strategy.choose_action.call_count == 2  # turns 4 and 5 went back to the fight
+
+
+def test_catch_throw_cap_resets_on_a_new_enemy(tmp_path):
+    ag = _battle_agent(tmp_path, _wild_battle())
+    ag.catch_wanted = {SPEAROW, 0xA5}
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "fight", "move_index": 0})
+    for _ in range(3):
+        ag.run_battle_turn()
+    ag.memory.read_battle_state = MagicMock(return_value=_wild_battle(species=0xA5))  # Rattata now
+    ag.run_battle_turn()
+    assert ag._catch_throws == 1  # fresh enemy, fresh cap
