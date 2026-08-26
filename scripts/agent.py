@@ -36,6 +36,7 @@ except ImportError:
     Image = None
 
 import advice
+import quartermaster
 from game_events import GameEventCollector
 from game_profile import RED_BLUE, YELLOW, detect_profile
 from memory_file import MemoryFile
@@ -781,6 +782,8 @@ class PokemonAgent:
         self.rom_path = rom_path
         self.pyboy = PyBoy(rom_path, window="null")
         self.controller = GameController(self.pyboy)
+        # Species ids the quartermaster may spend balls on (--catch); empty = never throw.
+        self.catch_wanted: set[int] = set()
         overrides = {"red_blue": RED_BLUE, "yellow": YELLOW}
         self.profile = overrides.get(game or "") or detect_profile(self.pyboy)
         self.memory = MemoryReader(self.pyboy, self.profile)
@@ -2353,7 +2356,22 @@ class PokemonAgent:
             self.turn_count += 1
             return  # the battle ended while settling (the outer loop records the outcome)
         bag_healing = self.memory.find_healing_item()
-        action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
+        # The quartermaster's catch policy outranks the fight: a wanted, weakened wild with a
+        # ball in the bag is a roster slot, and the ball throw is the same battle-menu path the
+        # potion action already drives (scripts/quartermaster.py).
+        catch = None
+        if self.catch_wanted:
+            catch = quartermaster.should_catch(
+                battle, self.memory.read_party_species(), self.memory.read_bag_items(), self.catch_wanted
+            )
+        if catch is not None:
+            action = {"action": "item", "item": "ball", "bag_index": catch[0]}
+            self.log(
+                f"CATCH | ball (bag {catch[0]}) at L{battle.enemy_level} {battle.enemy_species_name} "
+                f"{battle.enemy_hp}/{battle.enemy_max_hp}"
+            )
+        else:
+            action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
 
         act_desc = action["action"]
         if act_desc == "fight":
@@ -3554,6 +3572,11 @@ def main():
     parser.add_argument("--viewer-url", default="ws://127.0.0.1:8200", help="Viewer WebSocket base URL")
     parser.add_argument("--label", default="", help="Human-readable label shown on the viewer's run tile")
     parser.add_argument("--load-state", default=None, help="Load a PyBoy save state and skip the intro")
+    parser.add_argument(
+        "--catch",
+        default="",
+        help='Species the quartermaster may spend balls on, e.g. "Oddish,Spearow" (names or internal ids)',
+    )
     parser.add_argument("--save-state-on-battle", default=None, help="Dump a save state at the first detected battle")
     parser.add_argument("--save-state-on-map", default=None, help='Dump a state at a map, as "MAPID:PATH"')
     parser.add_argument(
@@ -3700,6 +3723,7 @@ def main():
     agent.in_run_heal_notes = args.in_run_heal_notes
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.catch_wanted = quartermaster.parse_catch(args.catch)
     agent.sideloop_parallel = max(1, args.sideloop_parallel)
     agent.sideloop_every = max(0, args.sideloop_every)
 

@@ -48,6 +48,20 @@ SPECIES_ID_MAP: dict[int, str] = {
     0x7A: "Butterfree",
     0x97: "Beedrill",
     0x96: "Pidgeotto",
+    # The Route 4 / 24 / 25 wilds — the quartermaster's catch targets (pokered internal index
+    # order; each id is confirmed the first time one is actually caught and read back).
+    0x05: "Spearow",
+    0x6C: "Ekans",
+    0x60: "Sandshrew",
+    0x39: "Mankey",
+    0x94: "Abra",
+    0xB9: "Oddish",
+    0xBC: "Bellsprout",
+    0x04: "Clefairy",
+    0x6B: "Zubat",
+    0x46: "Paras",
+    0xA9: "Geodude",
+    0x64: "Jigglypuff",
 }
 
 # Healing items the agent knows how to use in battle
