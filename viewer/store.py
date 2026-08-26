@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -23,6 +24,26 @@ class RunSummary:
         return asdict(self)
 
 
+def _is_run_dir(path: Path) -> bool:
+    """Playable runs only — what `recorder.start` lays down before turn 1.
+
+    Other things live in a runs dir: the fan-out writes fitness JSONs to
+    runs/fanout-proof/, and demo-runs/ carries a states/ dir. Listing those put
+    a frameless, turn-0 entry at the top of the gallery whose feed was nothing
+    but the global alerts tail, since `build_feed` had no events to merge.
+    """
+    return (path / "events.jsonl").exists() or (path / "frames").is_dir()
+
+
+def _natural_key(name: str) -> list:
+    """Digit-aware sort, so beat10 lands above beat9 rather than beside beat1.
+
+    `re.split` on a capturing digit group always alternates text/number and
+    always starts with text, so two keys compare type-for-type at every index.
+    """
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
+
+
 class RunStore:
     def __init__(self, runs_dir: Path) -> None:
         self.runs_dir = Path(runs_dir)
@@ -31,8 +52,8 @@ class RunStore:
         if not self.runs_dir.is_dir():
             return []
         return sorted(
-            (p for p in self.runs_dir.iterdir() if p.is_dir()),
-            key=lambda p: p.name,
+            (p for p in self.runs_dir.iterdir() if p.is_dir() and _is_run_dir(p)),
+            key=lambda p: _natural_key(p.name),
             reverse=True,
         )
 

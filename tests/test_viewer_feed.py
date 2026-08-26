@@ -138,3 +138,56 @@ def test_build_feed_decision_entries_and_agent_state_excluded():
     assert [(e.turn, e.kind) for e in feed] == [(70, "decision"), (71, "decision")]
     assert feed[0].text == "▸ right — map 38 (3,7) stuck=0"
     assert feed[1].text == "▸ wait — settling"
+
+
+def _run_events():
+    """A two-minute run, so an alert window can fall inside or outside it."""
+    return [
+        {"event_type": "milestone", "turn": 10, "occurred_at": "2026-08-21T22:18:00Z", "data": {}},
+        {"event_type": "milestone", "turn": 20, "occurred_at": "2026-08-21T22:19:00Z", "data": {}},
+        {"event_type": "milestone", "turn": 30, "occurred_at": "2026-08-21T22:20:00Z", "data": {}},
+    ]
+
+
+def test_alert_lands_on_the_turn_its_window_covers():
+    alert = {"alert_type": "DOOR_STALL", "detail": "map=59", "window_start": "2026-08-21 22:19:10"}
+    feed = build_feed(_run_events(), anomalies=[alert])
+    entry = next(e for e in feed if e.kind == "anomaly")
+    assert entry.turn == 20  # the last event at or before the window
+    assert entry.ts == "2026-08-21 22:19:10"
+
+
+def test_alert_from_another_run_is_dropped():
+    """alerts.jsonl is box-wide: an alert outside this run's clock is not this run's."""
+    old = {
+        "alert_type": "NO_PROGRESS",
+        "detail": "map=51",
+        "window_start": "2026-06-26 13:19:30",
+        "window_end": "2026-06-26 13:20:30",
+    }
+    later = {"alert_type": "NO_PROGRESS", "detail": "map=51", "window_start": "2026-09-01 00:00:00"}
+    feed = build_feed(_run_events(), anomalies=[old, later])
+    assert [e.kind for e in feed] == ["milestone", "milestone", "milestone"]
+
+
+def test_alert_window_end_inside_run_is_kept():
+    alert = {
+        "alert_type": "STUCK_STREAK_SPIKE",
+        "detail": "streak=20",
+        "window_start": "2026-08-21 22:17:00",
+        "window_end": "2026-08-21 22:18:30",
+    }
+    feed = build_feed(_run_events(), anomalies=[alert])
+    assert next(e for e in feed if e.kind == "anomaly").turn == 10
+
+
+def test_alert_without_a_parseable_window_is_dropped():
+    for alert in ({"alert_type": "X"}, {"alert_type": "X", "window_start": "not a date"}):
+        assert build_feed(_run_events(), anomalies=[alert]) == build_feed(_run_events())
+
+
+def test_alerts_dropped_when_the_run_has_no_timestamps():
+    """No clock to place them against — the fixture runs and any pre-ts run."""
+    events = [{"event_type": "milestone", "turn": 5, "data": {}}]
+    alert = {"alert_type": "DOOR_STALL", "detail": "map=59", "window_start": "2026-08-21 22:19:10"}
+    assert [e.kind for e in build_feed(events, anomalies=[alert])] == ["milestone"]
