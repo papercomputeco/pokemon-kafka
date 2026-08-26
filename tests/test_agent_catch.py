@@ -66,3 +66,55 @@ def test_read_party_species_reads_the_slot_list(tmp_path):
     mem = {ag.memory.ADDR_PARTY_COUNT: 2, 0xD164: CHARMELEON, 0xD165: SPEAROW}
     ag.memory._read = MagicMock(side_effect=lambda addr: mem.get(addr, 0))
     assert ag.memory.read_party_species() == [CHARMELEON, SPEAROW]
+
+
+def _end_to_end_battle_agent(tmp_path, party_after, whited_out=False):
+    from unittest.mock import patch
+
+    import agent as agent_mod
+    from memory_reader import OverworldState
+
+    ag = _make_agent(tmp_path)
+    battle_active = BattleState(
+        battle_type=1,
+        player_hp=50,
+        player_max_hp=100,
+        enemy_hp=29,
+        enemy_max_hp=29,
+        enemy_species=SPEAROW,
+        enemy_type1=0x00,
+        enemy_type2=0x02,
+        moves=[0x01, 0x00, 0x00, 0x00],
+        move_pp=[10, 0, 0, 0],
+        player_level=22,
+    )
+    battle_none = BattleState(battle_type=0)
+    ag.memory.read_battle_state = MagicMock(side_effect=[battle_active, battle_active, battle_none, battle_none])
+    ag.memory.read_overworld_state = MagicMock(return_value=OverworldState(map_id=15, x=70, y=10))
+    ag.memory.find_healing_item = MagicMock(return_value=None)
+    ag.memory.read_party_species = MagicMock(return_value=[CHARMELEON])
+    ag.memory.player_whited_out = MagicMock(return_value=whited_out)
+    ag.memory.read_party = MagicMock(return_value=party_after)
+    ag.collector.encounter = MagicMock()
+    return ag, patch.object(agent_mod, "Image", None)
+
+
+def test_battle_end_emits_a_caught_encounter(tmp_path):
+    """Party growth across the battle is the one disposition the win flag cannot express."""
+    two = [
+        {"species": "Charmeleon", "level": 22, "hp": 60, "max_hp": 63},
+        {"species": "Spearow", "level": 10, "hp": 29, "max_hp": 29},
+    ]
+    ag, img = _end_to_end_battle_agent(tmp_path, two)
+    with img:
+        ag.run(max_turns=2)
+    kwargs = ag.collector.encounter.call_args[0]
+    assert kwargs[1] == "Spearow" and kwargs[8] == "caught" and kwargs[9] == 2
+
+
+def test_battle_end_emits_escaped_or_lost_on_a_whiteout(tmp_path):
+    one = [{"species": "Charmeleon", "level": 22, "hp": 0, "max_hp": 63}]
+    ag, img = _end_to_end_battle_agent(tmp_path, one, whited_out=True)
+    with img:
+        ag.run(max_turns=2)
+    assert ag.collector.encounter.call_args[0][8] == "escaped_or_lost"

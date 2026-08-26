@@ -210,6 +210,68 @@ def loaded_ledges(truth: dict) -> set[tuple[str, int, int]]:
     return {(d, s, le) for d, s, le in truth.get("ledges", ())}
 
 
+# Gen 1 type constants (pokered): the hand-typed copy of this map once swapped grass<->electric
+# and psychic<->ice, mis-typing battle scoring for months — hence extraction over recall here too.
+TYPE_NAMES = {
+    0x00: "normal",
+    0x01: "fighting",
+    0x02: "flying",
+    0x03: "poison",
+    0x04: "ground",
+    0x05: "rock",
+    0x07: "bug",
+    0x08: "ghost",
+    0x14: "fire",
+    0x15: "water",
+    0x16: "grass",
+    0x17: "electric",
+    0x18: "psychic",
+    0x19: "ice",
+    0x1A: "dragon",
+}
+_NAME_CHARS = {0xE1: "Pk", 0xE2: "Mn", 0xEF: "M", 0xF5: "F", 0xE8: "."}
+
+
+def species_table(rom: bytes) -> dict[str, dict]:
+    """Internal species id -> {name, dex, types, catch_rate}, from the ROM's own three tables:
+    the name table (10 bytes/entry, internal order — found by RHYDON at id 1), the internal->dex
+    order table, and the dex-order base stats (28 bytes/entry: types at +6/+7, catch rate at +8).
+    All located by content signature, never by address. MISSINGNO slots are skipped; a dex entry
+    past the stats table (Mew, stored separately in Red) keeps name/dex with empty types."""
+
+    def enc(s: str) -> bytes:
+        return bytes(0x80 + ord(c) - ord("A") for c in s)
+
+    names_base = rom.find(enc("RHYDON"))
+    dex_base = rom.find(bytes([112, 115, 32, 35, 21, 100, 34, 80, 2]))
+    stats_base = rom.find(bytes([1, 45, 49, 49, 45, 65, 0x16, 0x03, 45, 64]))
+    if min(names_base, dex_base, stats_base) < 0:
+        raise ValueError("species tables not found in ROM")
+    out: dict[str, dict] = {}
+    for iid in range(1, 191):
+        raw = rom[names_base + 10 * (iid - 1) : names_base + 10 * iid]
+        name = ""
+        for b in raw:
+            if 0x80 <= b <= 0x99:
+                name += chr(ord("A") + b - 0x80)
+            elif b in _NAME_CHARS:
+                name += _NAME_CHARS[b]
+            elif b == 0x50:
+                break
+        if not name or "MISSINGNO" in name:
+            continue
+        name = {"NIDORANM": "NidoranM", "NIDORANF": "NidoranF"}.get(name, name.title())
+        dex = rom[dex_base + iid - 1]
+        entry = {"name": name, "dex": dex, "types": [], "catch_rate": None}
+        if 1 <= dex <= 150:  # Mew (151) lives outside the table in Red
+            e = stats_base + (dex - 1) * 28
+            t1, t2 = TYPE_NAMES.get(rom[e + 6], "?"), TYPE_NAMES.get(rom[e + 7], "?")
+            entry["types"] = [t1] if t2 == t1 else [t1, t2]
+            entry["catch_rate"] = rom[e + 8]
+        out[str(iid)] = entry
+    return out
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -221,6 +283,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "tile_pairs": [list(t) for t in sorted(tile_pairs(rom))],
         "ledges": [list(t) for t in ledge_hops(rom)],
+        "species": species_table(rom),
         "maps": maps,
     }
 

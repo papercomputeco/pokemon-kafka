@@ -69,7 +69,10 @@ class TestTypeIdMap:
         assert TYPE_ID_MAP[0x00] == "normal"
         assert TYPE_ID_MAP[0x14] == "fire"
         assert TYPE_ID_MAP[0x15] == "water"
-        assert TYPE_ID_MAP[0x17] == "grass"
+        # pokered: GRASS $16, ELECTRIC $17 — the map (and this test) had them swapped
+        # until the encounter catalog exposed it (2026-08-26).
+        assert TYPE_ID_MAP[0x16] == "grass"
+        assert TYPE_ID_MAP[0x17] == "electric"
         assert TYPE_ID_MAP[0x02] == "flying"
         assert TYPE_ID_MAP[0x03] == "poison"
 
@@ -93,8 +96,10 @@ class TestSpeciesIdMap:
         assert SPECIES_ID_MAP[0xB3] == "Wartortle"
         assert SPECIES_ID_MAP[0x99] == "Bulbasaur"
         assert SPECIES_ID_MAP[0x09] == "Ivysaur"
-        assert SPECIES_ID_MAP[0x7A] == "Butterfree"
-        assert SPECIES_ID_MAP[0x97] == "Beedrill"
+        # Ids from the ROM name table (the hand-typed 0x7A/0x97 guesses were wrong).
+        assert SPECIES_ID_MAP[0x7D] == "Butterfree"
+        assert SPECIES_ID_MAP[0x72] == "Beedrill"
+        assert SPECIES_ID_MAP[0x97] == "Pidgeot"
         assert SPECIES_ID_MAP[0x96] == "Pidgeotto"
 
     def test_all_entries_are_strings(self):

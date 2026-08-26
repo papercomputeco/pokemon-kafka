@@ -3165,6 +3165,8 @@ class PokemonAgent:
                     self._battle_start_turn = self.turn_count
                     self._battle_type = battle.battle_type
                     self._battle_map_id = self.memory._read(self.memory.ADDR_MAP_ID)
+                    prev_ow = self.last_overworld_state
+                    self._battle_pos = (prev_ow.x, prev_ow.y) if prev_ow is not None else (-1, -1)
                     self._battle_opponent_species = battle.enemy_species_name
                     self._battle_opponent_level = battle.enemy_level
                     # Whether the Boulder Badge was already in hand when this fight started. Brock
@@ -3174,7 +3176,8 @@ class PokemonAgent:
                     # and whether a heal item is on hand.
                     self._battle_my_hp_start = battle.player_hp
                     self._battle_my_max_hp = battle.player_max_hp
-                    self._battle_enemy_type = battle.enemy_type_name
+                    t1, t2 = battle.enemy_type_name, TYPE_ID_MAP.get(battle.enemy_type2, "")
+                    self._battle_enemy_type = t1 if not t2 or t2 == t1 else f"{t1}/{t2}"
                     self._battle_my_move_types = [MOVE_DATA.get(m, ("", "none", 0, 0))[1] for m in battle.moves if m]
                     self.log(
                         f"BATTLE START | type={self._battle_type} map={self._battle_map_id} "
@@ -3299,6 +3302,28 @@ class PokemonAgent:
                         self._battle_opponent_species,
                         self._battle_opponent_level,
                         self.memory.read_party(),
+                    )
+
+                    # The labeled ENCOUNTER row — the roster catalog's unit: who, where (map AND
+                    # tile), and how it ended. "caught" is party growth across the battle, the
+                    # only disposition the win flag can't express.
+                    party_after = self.memory.read_party()
+                    if len(party_after) > len(self._pre_battle_species):
+                        disposition = "caught"
+                    elif won:
+                        disposition = "won"
+                    else:
+                        disposition = "escaped_or_lost"
+                    self.collector.encounter(
+                        self.turn_count,
+                        self._battle_opponent_species,
+                        self._battle_opponent_level,
+                        getattr(self, "_battle_enemy_type", ""),
+                        self._battle_type,
+                        self._battle_map_id,
+                        *getattr(self, "_battle_pos", (-1, -1)),
+                        disposition,
+                        len(party_after),
                     )
 
                     # Emit the labeled WIN-PROBABILITY row: start-of-battle features + result.
