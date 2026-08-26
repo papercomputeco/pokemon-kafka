@@ -334,7 +334,7 @@ uv run --group fanout scripts/fanout/ollama_host.py down                       #
 
 Models are roster aliases: everything in `local_models.py` `ROSTER`, plus the H100-only `DAYTONA_ROSTER` tier for what the local 32 GB card can't hold (currently `gpt-oss-120b`, 65 GB — benched at ~70 tok/s across the full case suite). Measured session shape: sandbox in ~1s, ollama install ~6s, the pull dominates (~11 min for 65 GB at ~100 MB/s), evals in minutes. A persistent weights volume exists (`--volume fanout-ollama-models`) but is **off by default** on measured evidence — the FUSE mount reads 75–78 MB/s regardless of parallelism, slower than re-pulling — so it only earns its keep when the registry is down or rate-limiting. The preview URL is public while the host is up; the TTL bounds the exposure.
 
-### The crew (heist casting, by benchmark)
+### The model crew (heist casting, by benchmark)
 
 Every heist film opens the same way: a job, and a title for each specialist on it. This repo's
 role vocabulary comes from Inception's crew — the advisor pipeline already runs an Extractor,
