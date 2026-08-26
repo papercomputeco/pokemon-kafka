@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 _MILESTONE_TYPES = {"milestone", "map_change"}
@@ -63,6 +64,46 @@ def _event_text(event: dict) -> str:
     return et or "event"
 
 
+def _parse_ts(value) -> datetime | None:
+    """Parse the two timestamp shapes the feed sees, as UTC.
+
+    Events carry ISO-8601 `occurred_at` ending in Z; alerts.jsonl carries naive
+    "YYYY-MM-DD HH:MM:SS" window bounds. Both writers stamp UTC, so a naive
+    value is read as UTC rather than as local time.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _alert_turn(alert: dict, timeline: list[tuple[datetime, int]]) -> int | None:
+    """The run turn an alert fired on, or None when the alert is not this run's.
+
+    alerts.jsonl is box-wide and append-only: it holds every alert the Flink
+    stack has ever raised, for every run, and the entries carry a time window
+    instead of a turn. Merging the file wholesale put ~1.4k turn-0 anomalies in
+    front of each run's own wedges — entries pointing at no moment in this run,
+    so selecting one showed frame 0 of a run that never raised it. An alert
+    belongs to this run only if its window overlaps the run's own timeline.
+    """
+    start = _parse_ts(alert.get("window_start"))
+    end = _parse_ts(alert.get("window_end")) or start
+    if start is None or not timeline:
+        return None
+    if end < timeline[0][0] or start > timeline[-1][0]:
+        return None
+    turn = timeline[0][1]
+    for ts, event_turn in timeline:
+        if ts > end:
+            break
+        turn = event_turn
+    return turn
+
+
 def build_feed(events, anomalies=None) -> list[FeedEntry]:
     entries: list[FeedEntry] = []
     for ev in events:
@@ -88,11 +129,20 @@ def build_feed(events, anomalies=None) -> list[FeedEntry]:
                 data=ev.get("data", {}),
             )
         )
+    # Built from the events alone: an alert is placed against the run's own
+    # clock, so it can never drag an unrelated run's turn into this feed.
+    timeline = sorted((ts, e.turn) for e in entries if (ts := _parse_ts(e.ts)))
     for an in anomalies or []:
+        if "turn" in an:  # the live path stamps a turn; trust it
+            turn = int(an.get("turn", 0))
+        else:
+            turn = _alert_turn(an, timeline)
+            if turn is None:
+                continue
         entries.append(
             FeedEntry(
-                ts="",
-                turn=int(an.get("turn", 0)),
+                ts=str(an.get("window_start") or ""),
+                turn=turn,
                 kind="anomaly",
                 text=f"{an.get('alert_type', 'ANOMALY')}: {an.get('detail', '')}",
                 data=an,

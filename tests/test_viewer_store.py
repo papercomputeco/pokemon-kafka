@@ -97,3 +97,40 @@ def test_load_events_with_empty_lines(tmp_path: Path):
     events = RunStore(tmp_path).load_events("r")
     assert len(events) == 3
     assert events[0] == {"a": 1}
+
+
+def test_list_runs_skips_dirs_that_are_not_runs(tmp_path: Path):
+    """The fan-out's fitness JSONs and demo-runs/states are not playable runs."""
+    make_fixture_run(tmp_path, "20260626-000001-aaaa")
+    proof = tmp_path / "fanout-proof"
+    proof.mkdir()
+    (proof / "fanout-proof-20260824-221113.json").write_text('{"cohort": "fanout-proof"}')
+    (tmp_path / "fanout").mkdir()
+    states = tmp_path / "states"
+    states.mkdir()
+    (states / "route1.state").write_bytes(b"\x00")
+
+    assert [r.run_id for r in RunStore(tmp_path).list_runs()] == ["20260626-000001-aaaa"]
+
+
+def test_list_runs_keeps_a_run_that_has_only_started(tmp_path: Path):
+    """recorder.start lays down frames/ and events.jsonl before turn 1 — keep it."""
+    live = tmp_path / "20260825-120000-live"
+    (live / "frames").mkdir(parents=True)
+    (live / "events.jsonl").write_text("")
+
+    runs = RunStore(tmp_path).list_runs()
+    assert [r.run_id for r in runs] == ["20260825-120000-live"]
+    assert runs[0].status == "live"
+
+
+def test_list_runs_sorts_beat_numbers_naturally(tmp_path: Path):
+    for run_id in ("beat9-discovery", "beat10-gym-brock", "beat11-mt-moon", "beat12-mt-moon-clear"):
+        make_fixture_run(tmp_path, run_id)
+
+    assert [r.run_id for r in RunStore(tmp_path).list_runs()] == [
+        "beat12-mt-moon-clear",
+        "beat11-mt-moon",
+        "beat10-gym-brock",
+        "beat9-discovery",
+    ]
