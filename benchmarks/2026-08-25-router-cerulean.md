@@ -53,3 +53,18 @@ benchmark can answer.
 - Live press-sweep the three suspect columns (x=62, x=75, x=80, rows 9-12); let
   `truth_refuse_strikes` and the expiring hard-block layer absorb whichever are real.
 - Fix the seed MANIFEST (position, species, level) so the next mission doesn't inherit the lie.
+
+## Postscript, 2026-08-26: the road opens — it was ledges all along
+
+The fix spec above, implemented (`run/cerulean-router`): the grid's "disconnection" was real in
+the grid and false in the world — **Route 4's east road is connected only over one-way LEDGE
+hops**, which no walkable-cell BFS can see. `rom_truth.py` now extracts pokered's LedgeTiles
+table from the ROM (found by structure, not address: 8 records) and `path_on_map` adds the
+one-way two-cell edges on the overworld tileset; `_mtmoon_action` hands Route 4 east (x ≥ 22)
+to `_truth_step(→ 3)` so the cave door is never hunted again — killing the 15↔60 seed spring
+without touching the mat logic. The MANIFEST's two lies are corrected in place.
+
+Live gate: a single-lane probe from the exact seed reached **Cerulean (map 3) in 96 turns**,
+zero battles, path crossing the (44,8) and (79,8) ledges. Three hours of six-lane relays could
+never have found this row; one hour of the operator's measurement plus a 40-line planner change
+did. The wall was never navigation — it was a missing edge type in the world model.

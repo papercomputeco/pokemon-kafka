@@ -24,7 +24,8 @@ from rom_truth import (
 )
 from world_map import WorldMap
 
-WALK, WALL, GRASS, LIP = 0x00, 0x01, 0x52, 0x03
+WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
+LEDGES_OFF = 0x0D00
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -54,6 +55,16 @@ def build_rom() -> bytearray:
     rom[BLOCKS + 48 : BLOCKS + 64] = bytes([LIP] * 16)
     # TilePairCollisionsLand: WALK <-> LIP is refused on tileset 0 even though both are walkable.
     rom[rom_truth.TILE_PAIR_COLLISIONS_LAND : rom_truth.TILE_PAIR_COLLISIONS_LAND + 4] = bytes([0, WALK, LIP, 0xFF])
+    # LedgeTiles at its real shape (facing, standing, ledge, input; facing must agree with input,
+    # which is what ledge_hops scans for). Five records so the fixture's is the longest table.
+    rom[LEDGES_OFF : LEDGES_OFF + 21] = bytes(
+        [0x00, WALK, LEDGE, 0x80]  # down
+        + [0x00, GRASS, LEDGE, 0x80]  # down, from grass
+        + [0x08, WALK, 0x06, 0x20]  # left
+        + [0x0C, WALK, 0x07, 0x10]  # right
+        + [0x00, WALK, 0x06, 0x80]  # down over the left-ledge tile
+        + [0xFF]
+    )
 
     for mid, hdr in ((0, HDR0), (1, HDR1), (2, HDR2), (3, HDR3)):
         rom[MAP_HEADER_BANKS + mid] = 0
@@ -280,3 +291,74 @@ def test_loaded_pairs_reads_the_extracted_list(rom):
     truth = parse_rom(p)
     assert rom_truth.loaded_pairs(truth) == rom_truth.tile_pairs(data)
     assert rom_truth.loaded_pairs({"maps": {}}) == set()
+
+
+# ---- ledges -------------------------------------------------------------------------------------
+
+
+def test_ledge_hops_scans_the_table_by_structure(rom):
+    _, data = rom
+    hops = rom_truth.ledge_hops(data)
+    assert len(hops) == 5
+    assert ("down", WALK, LEDGE) in hops and ("left", WALK, 0x06) in hops and ("right", WALK, 0x07) in hops
+
+
+def test_ledge_hops_raises_when_no_table_exists():
+    with pytest.raises(ValueError):
+        rom_truth.ledge_hops(bytes(0x8000))
+
+
+def test_extract_carries_the_ledge_table(rom):
+    path, _ = rom
+    truth = parse_rom(path)
+    assert ["down", WALK, LEDGE] in truth["ledges"]
+    assert rom_truth.loaded_ledges({"ledges": truth["ledges"]}) == {tuple(t) for t in truth["ledges"]}
+
+
+def _ledge_map():
+    """A 1x5 column: open, open, LEDGE (solid in the grid), open, open — connected only by the hop."""
+    return {
+        "ledges": [["down", 0x2C, 0x37]],
+        "maps": {
+            "7": {
+                "width": 1,
+                "height": 5,
+                "tileset": 0,
+                "grid": ["1", "1", "0", "1", "1"],
+                "tiles": ["2c", "2c", "37", "2c", "2c"],
+            }
+        },
+    }
+
+
+def test_path_on_map_crosses_a_ledge_downward_only(rom_truth_mod=rom_truth):
+    truth = _ledge_map()
+    path = rom_truth.path_on_map(truth, set(), 7, (0, 0), {(0, 4)})
+    assert path == [(0, 0), (0, 1), (0, 3), (0, 4)]  # (0,1) -> (0,3) is the two-cell hop
+    # One-way: from below, the ledge is a wall.
+    assert rom_truth.path_on_map(truth, set(), 7, (0, 4), {(0, 0)}) is None
+
+
+def test_ledge_hop_respects_blocked_and_tileset(rom_truth_mod=rom_truth):
+    truth = _ledge_map()
+    # A body on the ledge tile blocks the hop.
+    assert rom_truth.path_on_map(truth, set(), 7, (0, 0), {(0, 4)}, blocked={(0, 2)}) is None
+    # Ledges are an overworld-tileset behaviour: any other tileset never hops.
+    truth["maps"]["7"]["tileset"] = 17
+    assert rom_truth.path_on_map(truth, set(), 7, (0, 0), {(0, 4)}) is None
+
+
+TRUTH_FILE = rom_truth.TRUTH_DEFAULT
+
+
+@pytest.mark.skipif(not TRUTH_FILE.exists(), reason="no extracted references/rom_truth.json")
+def test_route4_east_reaches_cerulean_over_ledges():
+    """The first routed run's wall (benchmarks/2026-08-25-router-cerulean.md): a plain grid BFS
+    reads Route 4's east road as disconnected from the cave exit; the ledge edges connect it."""
+    truth = json.loads(TRUTH_FILE.read_text())
+    m = truth["maps"]["15"]
+    edge = {(m["width"] - 1, y) for y in range(m["height"]) if m["grid"][y][m["width"] - 1] == "1"}
+    path = rom_truth.path_on_map(truth, rom_truth.loaded_pairs(truth), 15, (24, 5), edge)
+    assert path is not None
+    hops = [1 for a, b in zip(path, path[1:]) if abs(a[0] - b[0]) + abs(a[1] - b[1]) == 2]
+    assert hops, "the east road is only connected over ledges"

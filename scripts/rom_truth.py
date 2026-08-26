@@ -167,6 +167,49 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     }
 
 
+# pokered's LedgeTiles (engine/overworld/ledges.asm): 4-byte records of (sprite facing,
+# standing tile, ledge tile, joypad input), 0xFF-terminated, and consulted by the engine only
+# on the OVERWORLD tileset (HandleLedges bails unless wCurMapTileset == 0). Standing on a
+# `standing` tile and pressing `input` into an adjacent `ledge` tile hops the player TWO cells
+# in that direction — a one-way edge the walkable grid cannot express. Route 4's east half is
+# the proof: a plain BFS over its grid reads the road to Cerulean as disconnected (two "solid"
+# columns and a seal at x=80), yet the real map crosses there — over the ledges
+# (benchmarks/2026-08-25-router-cerulean.md). The table is found by structure, not address:
+# every record's facing byte must agree with its input byte, and no other run of ROM bytes
+# parses that way four records deep.
+_LEDGE_FACING_TO_INPUT = {0x00: 0x80, 0x04: 0x40, 0x08: 0x20, 0x0C: 0x10}  # down, up, left, right
+_LEDGE_INPUT_TO_DIR = {0x80: "down", 0x40: "up", 0x20: "left", 0x10: "right"}
+LEDGE_DELTAS = {"down": (0, 1), "up": (0, -1), "left": (-1, 0), "right": (1, 0)}
+
+
+def ledge_hops(rom: bytes) -> list[tuple[str, int, int]]:
+    """``(direction, standing tile, ledge tile)`` triples from the ROM's LedgeTiles table."""
+    best: list[tuple[str, int, int]] = []
+    i, n = 0, len(rom)
+    while i < n - 4:
+        j, records = i, []
+        while j + 4 <= n and rom[j] != 0xFF:
+            facing, standing, ledge, joy = rom[j : j + 4]
+            if _LEDGE_FACING_TO_INPUT.get(facing) != joy:
+                break
+            records.append((_LEDGE_INPUT_TO_DIR[joy], standing, ledge))
+            j += 4
+        if len(records) >= 4 and j < n and rom[j] == 0xFF:
+            if len(records) > len(best):
+                best = records
+            i = j + 1  # a suffix of the table also parses; skipping past keeps the full one
+        else:
+            i += 1
+    if not best:
+        raise ValueError("LedgeTiles table not found in ROM")
+    return best
+
+
+def loaded_ledges(truth: dict) -> set[tuple[str, int, int]]:
+    """The ledge-hop set as stored in an extracted truth file (empty for a pre-ledge file)."""
+    return {(d, s, le) for d, s, le in truth.get("ledges", ())}
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -177,6 +220,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
     return {
         "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "tile_pairs": [list(t) for t in sorted(tile_pairs(rom))],
+        "ledges": [list(t) for t in ledge_hops(rom)],
         "maps": maps,
     }
 
@@ -307,7 +351,9 @@ def path_on_map(
 ) -> list[tuple[int, int]] | None:
     """Shortest tile path from ``start`` to the nearest of ``targets``, or ``None``.
 
-    BFS over :func:`passable`, so it honours tile-pair collisions as well as the walkable grid.
+    BFS over :func:`passable`, so it honours tile-pair collisions as well as the walkable grid —
+    plus the ROM's one-way LEDGE hops on the overworld tileset (a two-cell jump over a tile the
+    grid calls solid; without them Route 4's east road reads as disconnected).
     ``blocked`` adds tiles the grid calls walkable but a caller knows are not (sprites, and cells a
     lane has learned are solid). ``start`` is never treated as blocked — a lane standing on a tile
     that later reads blocked must still be able to route out of it.
@@ -322,13 +368,33 @@ def path_on_map(
     targets = targets - blocked
     if not targets:
         return None
+    tiles = m.get("tiles")
+    ledges = loaded_ledges(truth) if m.get("tileset") == 0 and tiles else set()
+
+    def _tile(tx: int, ty: int) -> int:
+        return int(tiles[ty][2 * tx : 2 * tx + 2], 16)
+
     prev: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
     queue = [start]
     while queue:
         nxt = []
         for x, y in queue:
-            for step in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                if step in prev or step in blocked or not passable(m, pairs, x, y, *step):
+            steps = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+            hops = []
+            if ledges:
+                # A hop lands two cells out; the mid tile is the ledge itself (solid in the
+                # grid, jumped over by the engine), so only the LANDING cell must be open.
+                t0 = _tile(x, y)
+                for d, (dx, dy) in LEDGE_DELTAS.items():
+                    mx, my, lx, ly = x + dx, y + dy, x + 2 * dx, y + 2 * dy
+                    if not (0 <= lx < m["width"] and 0 <= ly < m["height"]):
+                        continue
+                    if (d, t0, _tile(mx, my)) in ledges and m["grid"][ly][lx] == "1" and (mx, my) not in blocked:
+                        hops.append((lx, ly))
+            for step in steps + hops:
+                if step in prev or step in blocked:
+                    continue
+                if step not in hops and not passable(m, pairs, x, y, *step):
                     continue
                 prev[step] = (x, y)
                 if step in targets:
