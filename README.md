@@ -334,14 +334,35 @@ uv run --group fanout scripts/fanout/ollama_host.py down                       #
 
 Models are roster aliases: everything in `local_models.py` `ROSTER`, plus the H100-only `DAYTONA_ROSTER` tier for what the local 32 GB card can't hold (currently `gpt-oss-120b`, 65 GB — benched at ~70 tok/s across the full case suite). Measured session shape: sandbox in ~1s, ollama install ~6s, the pull dominates (~11 min for 65 GB at ~100 MB/s), evals in minutes. A persistent weights volume exists (`--volume fanout-ollama-models`) but is **off by default** on measured evidence — the FUSE mount reads 75–78 MB/s regardless of parallelism, slower than re-pulling — so it only earns its keep when the registry is down or rate-limiting. The preview URL is public while the host is up; the TTL bounds the exposure.
 
-### Semantic router (the right bot for the right situation)
+### The crew (heist casting, by benchmark)
 
-The skill matrix (benchmarks/2026-08-22-skill-matrix.md) measured which model wins each part of
-the game; [vllm semantic-router](https://github.com/vllm-project/semantic-router) turns that
-table into infrastructure. `references/semantic_router.yaml` routes model `vllm-sr/auto` by
-keyword signals — battle → the Driver (laguna-xs), navigation → the best line (qwen38-27b),
-puzzle → the deepest (kimi cloud) — through the tapes proxy, so routed sessions stay captured.
-`scripts/semantic_router.py` validates, dry-runs, serves, and registers it with pi. See
+Every heist film opens the same way: a job, and a title for each specialist on it. This repo's
+role vocabulary comes from Inception's crew — the advisor pipeline already runs an Extractor,
+an Architect, an Oracle and a gate (`scripts/advisor.py`, after `pcc-labs/inception`), and
+[docs/model-fit.md](docs/model-fit.md) scores each model as the character it actually plays.
+What the per-skill matrix added is the casting call: **titles here are earned by benchmark,
+not assigned by vibe.** Six models, three skill-isolated legs — battle, navigation, puzzle —
+one slot per model per leg ([benchmarks/2026-08-22-skill-matrix.md](benchmarks/2026-08-22-skill-matrix.md)):
+
+| title | model | the measured evidence |
+|---|---|---|
+| **The Point Man** — the brute-force investigator | `qwen38-27b` | Best navigation line of six (49 turns / 36 HP, dominating the column on both axes); the only model whose first puzzle attempt didn't die on the entrance spring; measured at 33 single-lane probes before its one relay — and the model that committed Mt. Moon's root-cause diagnosis to the repo (`obstacles.md`) |
+| **The Extractor** — goes in deepest when the job is a puzzle | `kimi-k2.6:cloud` | Deepest of six on the puzzle leg (B2F, 18 tiles in a 50-minute slot) and top puzzle screen score (0.55) — and the screen's ordering predicted the expedition's exactly |
+| **The Wheelman** — fast on an open road | `laguna-xs` | The battle leg went 6/6 with near-identical rows — an execution baseline, not a discriminator — so it goes to the measured Driver: Haiku's cadence (3.3–4.0 s/turn), first model to reach the Gym |
+
+No single model earned every title — the same matrix put the Extractor's cloud depth and the
+Point Man's diagnosis on different sheets — which is exactly why the crew needs a caller.
+
+### Semantic router (the crew's caller)
+
+The [vllm semantic-router](https://github.com/vllm-project/semantic-router) turns the casting
+table above into infrastructure: `references/semantic_router.yaml` routes model `vllm-sr/auto`
+by keyword signals — battle → the Wheelman (laguna-xs), navigation → the Point Man
+(qwen38-27b), puzzle → the Extractor (kimi cloud) — through the tapes proxy, so routed
+sessions stay captured. The router reads each request and puts the right specialist on the
+job; in its first field run it escalated the seat from the Point Man to the Extractor
+mid-session as a wall's vocabulary took over the transcript. `scripts/semantic_router.py`
+validates, dry-runs, serves, and registers it with pi. See
 [docs/semantic-router.md](docs/semantic-router.md).
 
 ### Discovery engine (capability healing)
