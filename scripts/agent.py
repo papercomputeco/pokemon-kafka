@@ -125,6 +125,12 @@ MT_MOON_DUNGEON_MAPS = (MT_MOON_1F_MAP, MT_MOON_B1F_MAP, MT_MOON_B2F_MAP)
 ROUTE_3_MAP = 14  # the road between Pewter and Mt. Moon (empty warp table: t14 probe, 2026-08-18)
 ROUTE_4_MAP = 15  # west stub feeds Mt. Moon's door; the east half (x >= 22) is the road to Cerulean
 CERULEAN_CITY_MAP = 3
+CERULEAN_GYM_MAP = 65  # door mat at city (30,19); Misty on the top platform, talked to from (5,2)
+ROUTE_24_MAP = 35  # Nugget Bridge: seven trainers up the x=10/11 column, grass past them
+ROUTE_25_MAP = 36  # nine more trainers along the y=2..9 path to Bill's
+# Solo L24 Charmeleon potion-treadmills at 1 HP against Starmie (measured); the bridge gauntlet
+# is the XP that turns the fight. Below this level the badge-2 driver grinds instead of challenging.
+BADGE2_GRIND_LEVEL = 27
 PEWTER_BUILDING_MAPS = (PEWTER_CITY_MAP, PEWTER_GYM_MAP, 52, 56, PEWTER_CENTER_MAP)
 
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
@@ -1212,6 +1218,15 @@ class PokemonAgent:
         if heal is not None:
             return heal
 
+        # Badge 1 in hand, Badge 2 not: Cerulean is gym ground, not a corridor. Runs before the
+        # Mt. Moon driver so the city never falls to its dead-end wander.
+        badge2 = self._badge2_action(state)
+        if badge2 is not None:
+            if state.map_id == CERULEAN_GYM_MAP:
+                # No restores in a gym, for Brock's reason: a backtrack undoes a correct climb.
+                self._quest_nav_active = True
+            return badge2
+
         # Badge 1 in hand: the way to Mt. Moon. Takes the exit of whichever map the lane is on —
         # the only door on 54, the east edge on 2, the cave warps on 14 — before the pre-badge
         # Pewter machinery or the waypoint navigator can steer it at the Gym door again.
@@ -1571,6 +1586,74 @@ class PokemonAgent:
                 f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
             )
         return d
+
+    def _badge2_action(self, state: OverworldState) -> str | None:
+        """Badge 1 in hand, Badge 2 not: drive Cerulean's gym and Misty. ``None`` elsewhere.
+
+        Truth-planned like Route 4 east. The city walk targets the gym door mat (30,19) — a
+        building door warps on entry — and the interior walk targets (4,3), the tile under the
+        top platform, then presses UP into Misty: walking into a leader (or a trainer's line of
+        sight on the way) opens the fight, the battle turn owns it from there, and the Cascade
+        bit turning on switches this driver off."""
+        if not (state.badges & 0x01) or (state.badges & 0x02):
+            return None
+        grind_maps = (CERULEAN_CITY_MAP, CERULEAN_GYM_MAP, ROUTE_24_MAP, ROUTE_25_MAP)
+        if state.map_id not in grind_maps or not self._truth_ready():
+            return None
+        if self.memory._read(self.memory.PARTY_BASE + 33) < BADGE2_GRIND_LEVEL:
+            g = self._badge2_grind_action(state)
+            if g is not None:
+                return g
+        if state.map_id == CERULEAN_CITY_MAP:
+            return self._truth_walk(state, {(30, 19)}, "cerulean gym door")
+        if state.map_id == CERULEAN_GYM_MAP:
+            # Misty stands at (4,2) on the fenced platform; the talkable tile is (5,2), HER
+            # EAST SIDE, reached (5,3) -> up (screenshot-verified: "Hi, you're a new face!").
+            # (4,3), her south side, is usually parked on by the defeated swimmer's body — a
+            # beaten Gen 1 trainer never despawns (the B2F Rocket lesson, indoors) — so it is
+            # the fallback, not the plan. The alternating face/A is one press to turn, one to
+            # talk; the battle flag takes the turn over once her speech ends.
+            if (state.x, state.y) == (5, 2):
+                return "left" if self.turn_count % 2 == 0 else "a"
+            if (state.x, state.y) == (5, 3):
+                return "up"
+            if (state.x, state.y) == (4, 3):
+                return "up" if self.turn_count % 2 == 0 else "a"
+            return self._truth_walk(state, {(5, 3)}, "misty approach")
+        return None
+
+    def _badge2_grind_action(self, state: OverworldState) -> str | None:
+        """Below BADGE2_GRIND_LEVEL: ping-pong the Nugget Bridge gauntlet for XP (and whatever
+        the --catch list recruits from the Route 24/25 grass). The walk only carries the lane
+        past sight lines — every fight it triggers belongs to the battle engine. A white-out
+        self-corrects: the Center revives the lane in Cerulean at full HP with its XP kept."""
+        if state.map_id == CERULEAN_CITY_MAP:
+            m = self._truth["maps"][str(CERULEAN_CITY_MAP)]
+            row0 = {(x, 0) for x in range(m["width"]) if m["grid"][0][x] == "1"}
+            d = self._truth_walk(state, row0, "to nugget bridge")
+            return d if d is not None else "up"  # an edge hands the lane over on the step OFF it
+        if state.map_id == ROUTE_24_MAP:
+            if getattr(self, "_grind_flip", False):
+                d = self._truth_walk(state, {(10, 16), (11, 16)}, "bridge head")
+                if d is None:
+                    self._grind_flip = False
+                return d if d is not None else "up"
+            m = self._truth["maps"][str(ROUTE_24_MAP)]
+            east = {(m["width"] - 1, y) for y in range(m["height"]) if m["grid"][y][m["width"] - 1] == "1"}
+            d = self._truth_walk(state, east, "to route 25")
+            return d if d is not None else "right"
+        if state.map_id == ROUTE_25_MAP:
+            if getattr(self, "_grind_flip", False):
+                m = self._truth["maps"][str(ROUTE_25_MAP)]
+                west = {(0, y) for y in range(m["height"]) if m["grid"][y][0] == "1"}
+                d = self._truth_walk(state, west, "back to route 24")
+                return d if d is not None else "left"
+            d = self._truth_walk(state, {(40, 4), (40, 3)}, "route 25 sweep")
+            if d is None:
+                self._grind_flip = True
+                return "left"
+            return d
+        return None
 
     def _mtmoon_action(self, state: OverworldState) -> str | None:
         """With Badge 1 in hand, drive the current map's own exit toward Mt. Moon. ``None`` elsewhere.
@@ -2355,6 +2438,18 @@ class PokemonAgent:
         if not menu_up and battle.battle_type == 0:
             self.turn_count += 1
             return  # the battle ended while settling (the outer loop records the outcome)
+        if not menu_up and battle.battle_type != 0 and battle.enemy_hp == 0:
+            # The enemy is down but the battle lingers: KO text, level-up — or the four-move
+            # LEARN prompt, which parked the Misty fight for 2,400 turns (screenshot-diagnosed:
+            # "AAAAAAAAA is trying to learn..."). Refuse-and-advance: B answers NO to the
+            # delete-a-move menu, A confirms the text either way. Move management is a later
+            # engine; a known move is never gambled away to a menu mash mid-fight.
+            self.controller.press("b")
+            self.controller.wait(20)
+            self.controller.press("a")
+            self.controller.wait(20)
+            self.turn_count += 1
+            return
         bag_healing = self.memory.find_healing_item()
         # The quartermaster's catch policy outranks the fight: a wanted, weakened wild with a
         # ball in the bag is a roster slot, and the ball throw is the same battle-menu path the
@@ -2656,16 +2751,42 @@ class PokemonAgent:
         The screen is stuck in a submenu/text state that the run/fight selections cannot leave
         (see BATTLE_WEDGE_TURNS). Back out with B, repeated so it registers past nested menus,
         then idle briefly so the top battle menu is redrawn before this turn's action selects
-        from it. B only — an A here would re-enter whatever the remembered cursor points at.
+        from it. B first — an A on an open battle menu would re-enter whatever the remembered
+        cursor points at. But if FIGHT is still not drawn after the volley, the screen is
+        B-PROOF and there is no remembered cursor to fear: the four-move learn flow cycles
+        "trying to learn -> delete a move? -> abandon learning?" forever under pure B (measured:
+        8,000 turns parked in the Misty fight), and only an A on the abandon confirm leaves it.
         """
         self.log(
             f"WEDGE | battle frozen (attempt {self._battle_wedge_attempts}/{BATTLE_WEDGE_MAX_ATTEMPTS}) — "
-            "recovery: B x8, wait 120"
+            "recovery: B x8, wait 120, A if still no menu"
         )
         for _ in range(8):
             self.controller.press("b")
             self.controller.wait(8)
         self.controller.wait(120)
+        if not self.memory.battle_menu_visible():
+            # B-proof screen: the four-move LEARN flow. Pure B cycles it forever (measured 8,000
+            # turns in the Misty fight) and blind B,A pairs lose to its multi-box text. Resolve
+            # by LEARNING into the worst slot: press A until the forget picker is up (its menu
+            # extent reads 3 — the four-move list), give up the lowest-power move, mash the
+            # rest. On another B-proof screen (a forced switch) the A presses select a party
+            # mon, which is the needed action there too.
+            for _ in range(8):
+                if self.memory._read(0xCC28) == 3:  # wMaxMenuItem: the 4-move picker is drawn
+                    moves = [self.memory._read(self.memory.PARTY_BASE + 8 + j) for j in range(4)]
+                    powers = [MOVE_DATA.get(m, (None, None, 0, 0))[2] for m in moves]
+                    slot = powers.index(min(powers))
+                    self.log(f"WEDGE | learn flow: giving up slot {slot + 1} (move {moves[slot]:#04x})")
+                    for _ in range(slot):
+                        self.controller.press("down")
+                        self.controller.wait(12)
+                    self.controller.press("a")
+                    self.controller.wait(60)
+                    self.controller.mash_a(4, delay=30)
+                    break
+                self.controller.press("a")
+                self.controller.wait(60)
 
     def _resolve_brock_badge(self, won: bool) -> bool:
         """Whether Brock is really beaten = the Boulder Badge bit. It is awarded during Brock's
