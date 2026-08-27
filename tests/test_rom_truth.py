@@ -28,6 +28,7 @@ WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
 LEDGES_OFF = 0x0D00
 STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
 WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
+EVOS_PTRS, EVOS_BLOCK, EVOS_BLOCK2 = 0x5000, 0x5200, 0x5220  # bank 1: addr == file offset
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -73,6 +74,14 @@ def build_rom() -> bytearray:
     rom[WILD_BLOCK : WILD_BLOCK + 22] = bytes([8] + [3, 1] * 10 + [0])
     for i in range(248):
         rom[WILD_PTRS + 2 * i : WILD_PTRS + 2 * i + 2] = bytes([0x00, 0x48])
+
+    # Evolutions/learnsets at their real shape: 190 same-bank pointers, one block per species —
+    # a level evolution + learnset shared by ids 1..189, and an item + trade pair for id 190.
+    rom[EVOS_BLOCK : EVOS_BLOCK + 9] = bytes([1, 16, 2, 0, 9, 52, 15, 43, 0])
+    rom[EVOS_BLOCK2 : EVOS_BLOCK2 + 9] = bytes([2, 10, 1, 5, 3, 1, 6, 0, 0])
+    for i in range(190):
+        p = EVOS_BLOCK2 if i == 189 else EVOS_BLOCK
+        rom[EVOS_PTRS + 2 * i : EVOS_PTRS + 2 * i + 2] = bytes(_u16(p))
 
     # Species tables, at their real shapes, found by the same content signatures as on the real
     # ROM: base stats open with Bulbasaur's row, the dex-order table opens with Rhydon's 112, and
@@ -133,6 +142,36 @@ def rom(tmp_path):
     p = tmp_path / "mini.gb"
     p.write_bytes(data)
     return p, bytes(data)
+
+
+def test_evolutions_table_found_by_signature(rom):
+    """The pointer-run scan lands on the true table start (windows shifted into the run lose
+    their tail to block data), and all three evolution methods decode."""
+    _, data = rom
+    evo = rom_truth.evolutions_table(data)
+    assert len(evo) == 190
+    assert evo["1"] == {"evolutions": [["level", 16, 2]], "learnset": [[9, 52], [15, 43]]}
+    assert evo["190"] == {"evolutions": [["item", 10, 5], ["trade", 1, 6]], "learnset": []}
+
+
+def test_evolutions_table_missing_raises():
+    with pytest.raises(ValueError, match="evolutions table"):
+        rom_truth.evolutions_table(bytes(0x8000))
+
+
+def test_evolutions_table_rejects_malformed_blocks():
+    """Near-miss pointer runs are refused by shape: too many evolution entries, an
+    out-of-range move id, and a learnset longer than any real species carries."""
+    rom = bytearray(0x8000)
+    bad1, bad2, bad3 = 0x6000, 0x6100, 0x6200
+    rom[bad1 : bad1 + 13] = bytes([1, 16, 2] * 4 + [0])  # four evolutions: more than real
+    rom[bad2 : bad2 + 4] = bytes([0, 9, 250, 0])  # move id 250: out of range
+    rom[bad3 : bad3 + 2 * 26 + 2] = bytes([0] + [9, 52] * 26 + [0])  # 26 learn pairs
+    for run, target in ((0x4400, bad1), (0x4800, bad2), (0x4C00, bad3)):
+        for i in range(190):
+            rom[run + 2 * i : run + 2 * i + 2] = bytes(_u16(target))
+    with pytest.raises(ValueError, match="evolutions table"):
+        rom_truth.evolutions_table(bytes(rom))
 
 
 def test_parse_map_reads_dims_warps_connections_and_sprites(rom):

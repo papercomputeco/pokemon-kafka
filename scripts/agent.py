@@ -2617,12 +2617,8 @@ class PokemonAgent:
             # engine; a known move is never gambled away to a menu mash mid-fight. EXCEPT on the
             # evolution screen, where B cancels the evolution itself (the Charmeleon-at-40
             # lesson): there A is the only safe advance.
-            if "evolv" in self.memory.read_dialogue().lower():
-                self.controller.press("a")
-                self.controller.wait(20)
-            else:
-                self.controller.press("b")
-                self.controller.wait(20)
+            self._press_b_unless_evolving()
+            self.controller.wait(20)
             self.controller.press("a")
             self.controller.wait(20)
             self.turn_count += 1
@@ -2836,9 +2832,10 @@ class PokemonAgent:
             # the FIGHT selection isn't landing (a desynced battle menu / lingering text box). Mash
             # B to close any submenu/text and return to a clean top-level battle menu so the next
             # FIGHT selection registers. Trainer battles can't be fled, so recovery is a menu reset,
-            # never "run".
+            # never "run". (Routed through the evolution guard: an "unstick" fired while the
+            # evolution screen plays would otherwise cancel it with the first B.)
             for _ in range(6):
-                self.controller.press("b")
+                self._press_b_unless_evolving()
                 self.controller.wait(20)
             self.controller.wait(40)
 
@@ -2912,12 +2909,20 @@ class PokemonAgent:
             # to 40, and the same fight replayed with A-only evolved it (charizard.state). The
             # animation window keeps "is evolving!" as the stale readable text, so this check
             # holds through the whole morph.
-            if "evolv" in self.memory.read_dialogue().lower():
-                self.controller.press("a")
-            else:
-                self.controller.press("b")
+            self._press_b_unless_evolving()
             self.controller.wait(20)
         return False
+
+    def _press_b_unless_evolving(self):
+        """B is the safe no-op on every battle screen except ONE: evolution, where B means
+        STOP EVOLVING — measured: Charmeleon's evolution was silently cancelled at every
+        level-up from 36 to 40 before the settle loop learned this. Every blind-B battle
+        volley routes through here; the animation window keeps "is evolving!" readable the
+        whole way through, so the check holds mid-morph."""
+        if "evolv" in self.memory.read_dialogue().lower():
+            self.controller.press("a")
+        else:
+            self.controller.press("b")
 
     def _select_battle_menu(self, target: str) -> bool:
         """Sync to the top battle menu, walk the cursor to ``target`` (fight/item/pkmn/run) — one
@@ -3009,7 +3014,7 @@ class PokemonAgent:
             "recovery: B x8, wait 120, A if still no menu"
         )
         for _ in range(8):
-            self.controller.press("b")
+            self._press_b_unless_evolving()
             self.controller.wait(8)
         self.controller.wait(120)
         if not self.memory.battle_menu_visible():
@@ -3658,6 +3663,16 @@ class PokemonAgent:
                             post_name = SPECIES_ID_MAP.get(post, f"#{post:02X}")
                             self.log(f"EVOLUTION | Slot {slot}: {pre_name} -> {post_name}!")
                             self.evolution_log.append({"slot": slot, "from": pre_name, "to": post_name})
+                            # An evolution is roster-lineage telemetry the optimizer can use —
+                            # emit it like any other on-screen discovery, in the game's words.
+                            self.collector.discovery(
+                                self.turn_count,
+                                self._battle_map_id,
+                                self._battle_pos[0],
+                                self._battle_pos[1],
+                                f"{pre_name} evolved into {post_name}!",
+                                kind="evolution",
+                            )
 
                     # Record the Brock (gym 1) outcome once. The Pewter Gym interior is its
                     # own map, so identify Brock by the configured map id when known, else by
