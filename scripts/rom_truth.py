@@ -121,7 +121,14 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     for _ in range(rom[obj + 1]):
         warps.append((rom[q + 1], rom[q], rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
         q += 4
-    q += 1 + 3 * rom[q]  # signs: count byte then (y, x, text id) each
+    # Signs: count byte then (y, x, text id) each. Coordinates only — sign TEXT is read live
+    # (walk up, face it, press A): what the game says on screen is the instruction stream.
+    signs = []
+    n_signs = rom[q]
+    q += 1
+    for _ in range(n_signs):
+        signs.append((rom[q + 1], rom[q]))  # stored y, x
+        q += 3
     sprites = []
     n_sprites = rom[q]
     q += 1
@@ -160,6 +167,7 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         "tileset": tileset,
         "connections": conns,
         "warps": [list(wp) for wp in warps],
+        "signs": [list(s) for s in signs],
         "sprites": sprites,
         "grass": grass_tiles,
         "grid": grid,

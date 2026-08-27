@@ -140,6 +140,7 @@ def test_parse_map_reads_dims_warps_connections_and_sprites(rom):
     m0 = parse_map(data, 0)
     assert (m0["width"], m0["height"]) == (4, 4)
     assert m0["warps"] == [[1, 3, LAST_MAP, 0], [2, 3, LAST_MAP, 0]]  # (x, y, dmap, dwarp)
+    assert m0["signs"] == [[1, 1]]  # (x, y); text is read live, never extracted
     assert m0["connections"] == {}
     kinds = [(s["kind"], s["x"], s["y"]) for s in m0["sprites"]]
     assert kinds == [("npc", 1, 2), ("trainer", 0, 3), ("item", 0, -4)]
