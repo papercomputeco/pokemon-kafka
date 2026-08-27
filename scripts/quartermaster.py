@@ -87,6 +87,8 @@ SHOPS = {
     # template as Cerulean's (clerk sprite at (0,5)). Stock order is verified by the purchase
     # itself — buy() reports the bag delta per requested item, so a wrong index reads as 0 gained.
     2: Shop(2, (23, 17), 56, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
+    # Vermilion: door (23,13) -> map 91 per the extracted warps; same interior template.
+    5: Shop(5, (23, 13), 91, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
 }
 # Cerulean Center: door (19,17) in the city; the nurse (3,1) is talked to across the counter
 # from (3,3) facing up — the same geometry as Pewter's flow.
@@ -94,7 +96,27 @@ CENTERS = {
     3: Center(3, (19, 17), 64, (3, 3), "up", ((3, 7), (4, 7))),
     # Pewter: door (13,25) -> map 58; nurse sprite (3,1), the standard counter geometry.
     2: Center(2, (13, 25), 58, (3, 3), "up", ((3, 7), (4, 7))),
+    # Vermilion: door (11,3) -> map 89; nurse sprite (3,1), the standard counter geometry.
+    5: Center(5, (11, 3), 89, (3, 3), "up", ((3, 7), (4, 7))),
 }
+
+
+# The southern loop, every hop resolved from the extracted truth at runtime (agent.py imports
+# this table for its in-leg driver; the journey errand below drives it between batons).
+# Cerulean's south region is fenced: the only land route runs through the Trashed House's
+# back-door mat, re-entering the city in the yard (measured: the main region's flood never
+# reaches row 35; the yard's does). route() itself mis-resolves this leg through a LAST_MAP
+# mat, and Route 5's south edge is Saffron's guarded gate — hence the explicit chain.
+VERMILION_CHAIN = {
+    3: ("cerulean-south", 16),
+    62: ("back-door", 3),
+    16: ("warp-to", 71),
+    71: ("warp-to", 119),
+    119: ("warp-to", 74),
+    74: ("mats-out", 17),
+    17: ("edge-south", 5),
+}
+VERMILION_CITY_MAP = 5
 
 
 class QuartermasterError(RuntimeError):
@@ -247,6 +269,22 @@ def settle(io, predicate, action, cap: int, label: str):
     raise QuartermasterError(f"{label}: no progress after {cap} attempts")
 
 
+def battle_through(io, cap: int = 150) -> None:
+    """Win a battle the boring way: normalize to FIGHT, press A. For trainer fights on an
+    errand route (they cannot be fled) with a lead that outlevels everything on the road."""
+    for _ in range(cap):
+        if not io.read(ADDR_IN_BATTLE):
+            io.wait(60)
+            return
+        io.press("up")
+        io.wait(8)
+        io.press("left")
+        io.wait(8)
+        io.press("a")
+        io.wait(90)
+    raise QuartermasterError(f"battle_through: still fighting after {cap} rounds")
+
+
 def flee_battle(io, cap: int = 25) -> None:
     """Run from a wild encounter that interrupted an errand walk. Errands don't fight — battles
     belong to the agent's strategy; an errand's only battle move is leaving. The 2x2 battle menu
@@ -265,7 +303,7 @@ def flee_battle(io, cap: int = 25) -> None:
     raise QuartermasterError(f"flee: still in battle after {cap} attempts")
 
 
-def walk_to(io, truth, pairs, map_id: int, target, cap: int = 400) -> None:
+def walk_to(io, truth, pairs, map_id: int, target, cap: int = 400, block_sprites: bool = True) -> None:
     """Truth-planned walk on ``map_id`` to ``target`` (or off it, via a warp). Each step is
     position-verified; the first press after a turn only rotates, so a stalled press retries —
     and a step that STAYS stalled presses B first: a lingering menu or dialog eats d-pad input
@@ -290,7 +328,13 @@ def walk_to(io, truth, pairs, map_id: int, target, cap: int = 400) -> None:
     veto: set = set()  # tiles the engine refused repeatedly this walk: a parked body, not a wall
     for _ in range(cap):
         if io.read(ADDR_IN_BATTLE):
-            flee_battle(io)
+            if io.read(ADDR_IN_BATTLE) == 2:
+                battle_through(io)  # a trainer cannot be fled
+            else:
+                try:
+                    flee_battle(io)
+                except QuartermasterError:
+                    battle_through(io)  # a wild that would not let go
             continue
         mp, x, y = read_pos(io)
         if mp != map_id or (x, y) in targets:
@@ -299,7 +343,8 @@ def walk_to(io, truth, pairs, map_id: int, target, cap: int = 400) -> None:
         if stalled:
             io.press("b")
             io.wait(12)
-        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=rt.sprite_tiles(truth, map_id) | veto)
+        base_block = rt.sprite_tiles(truth, map_id) if block_sprites else set()
+        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=base_block | veto)
         if not path or len(path) < 2:
             raise QuartermasterError(f"walk: no path on map {map_id} from {(x, y)} to {target}")
         (x0, y0), (x1, y1) = path[0], path[1]
@@ -408,6 +453,63 @@ def heal(io, center: Center) -> None:
         io.wait(20)
 
 
+def journey_step(io, truth, pairs, chain: dict) -> bool:
+    """One chain hop from the current map. Returns False when the map is not on the chain
+    (arrived, or lost). Targets come from the extracted tables; bodies, battles, and menus are
+    the walk's problem — that is why this is an errand and not an agent driver."""
+    mp, x, y = read_pos(io)
+    if mp not in chain:
+        return False
+    kind, nxt = chain[mp]
+    m = truth["maps"][str(mp)]
+    if kind in ("edge-south", "cerulean-south"):
+        row = m["height"] - 1
+        south = {(cx, row) for cx in range(m["width"]) if m["grid"][row][cx] == "1"}
+        if kind == "cerulean-south":
+            try:
+                walk_to(io, truth, pairs, mp, south, cap=250, block_sprites=False)
+            except QuartermasterError:
+                doors = {(w[0], w[1]) for w in m["warps"] if w[2] == 62}
+                walk_to(io, truth, pairs, mp, doors, block_sprites=False)
+                return True
+        else:
+            walk_to(io, truth, pairs, mp, south, block_sprites=False)
+        for _ in range(4):
+            if read_pos(io)[0] != mp:
+                break
+            io.press("down")
+            io.wait(30)
+        return True
+    if kind == "warp-to":
+        targets = {(w[0], w[1]) for w in m["warps"] if w[2] == nxt}
+        walk_to(io, truth, pairs, mp, targets, block_sprites=False)
+        io.wait(60)
+        return True
+    if kind == "back-door":
+        walk_to(io, truth, pairs, mp, {(3, 0)}, block_sprites=False)
+        for _ in range(4):
+            if read_pos(io)[0] != mp:
+                break
+            io.press("up")
+            io.wait(30)
+        return True
+    # mats-out
+    mats = {(w[0], w[1]) for w in m["warps"] if w[2] == 0xFF}
+    walk_to(io, truth, pairs, mp, mats, block_sprites=False)
+    leave_interior(io, mp)
+    return True
+
+
+def journey(io, truth, dest: int, chain: dict, max_hops: int = 24) -> None:
+    pairs_ = __import__("rom_truth").loaded_pairs(truth)
+    for _ in range(max_hops):
+        if read_pos(io)[0] == dest:
+            return
+        if not journey_step(io, truth, pairs_, chain):
+            raise QuartermasterError(f"journey: map {read_pos(io)[0]} is not on the chain")
+    raise QuartermasterError(f"journey: {max_hops} hops without reaching map {dest}")
+
+
 # --------------------------------------------------------------------------- errands
 
 
@@ -475,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
     er.add_argument("--out", type=Path, required=True)
     er.add_argument("--buy", default="", help="e.g. poke_ball=6,potion=4 (capped by money and plan_purchases)")
     er.add_argument("--heal", action="store_true")
+    er.add_argument("--go", default=None, help="journey after the phases: 'vermilion'")
     er.add_argument("--reserve", type=int, default=100)
     args = ap.parse_args(argv)
 
@@ -500,6 +603,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     try:
         report = run_errand(io, truth, plan, args.heal)
+        if args.go == "vermilion":
+            journey(io, truth, VERMILION_CITY_MAP, VERMILION_CHAIN)
+            report["arrived"] = read_pos(io)
     finally:
         with open(args.out, "wb") as f:
             pb.save_state(f)

@@ -2044,6 +2044,49 @@ class TestRunBattleTurn:
         ag.run_battle_turn()
         assert any("MOVE |" in e and "KO" in e for e in ag.events)
 
+    def test_fight_loss_is_not_logged_as_enemy_ko(self, tmp_path):
+        """OUR faint ends the battle too: battle-over with our battle HP at 0 is a loss, and the
+        Surge probe recorded exactly this as "Ember dmg=66/66 KO" — a phantom full-damage row
+        that poisons the roster optimizer's move stats. A loss emits no move_result at all."""
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 0})
+        ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
+        ag._select_move_slot = MagicMock(return_value=True)
+        ag._await_battle_menu = MagicMock(return_value=True)
+        ag._await_turn_resolved = MagicMock(return_value=True)
+        ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 0  # battle ended...
+        ag.pyboy.memory[ag.memory.ADDR_PLAYER_HP_HI] = 0  # ...with our lead at 0 HP
+        ag.pyboy.memory[ag.memory.ADDR_PLAYER_HP_LO] = 0
+        ag.pyboy.memory[ag.memory.ADDR_ENEMY_HP_LO] = 0  # torn-down battle RAM reads 0 too
+        ag.run_battle_turn()
+        assert not any("MOVE |" in e for e in ag.events)
+
+    def test_fight_whiteout_teleport_is_not_logged_as_ko(self, tmp_path):
+        """The settle loop can B all the way through the white-out — Center heal, full HP, new
+        map — so the map change is the loss evidence when HP no longer reads 0 (measured on the
+        first Surge attempt: settled at full HP in Vermilion City, then logged a phantom KO)."""
+        ag = self._setup_agent_for_battle(tmp_path, {"action": "fight", "move_index": 0})
+        ag.controller = MagicMock()
+        ag._select_battle_menu = MagicMock(return_value=True)
+        ag._select_move_slot = MagicMock(return_value=True)
+        ag._await_turn_resolved = MagicMock(return_value=True)
+        ag.pyboy.memory[ag.memory.ADDR_MAP_ID] = 92  # decision-time map: the gym
+        settle_calls = {"n": 0}
+
+        def _settle():
+            settle_calls["n"] += 1
+            if settle_calls["n"] >= 2:  # the post-move settle, after map_before was captured
+                ag.pyboy.memory[ag.memory.ADDR_BATTLE_TYPE] = 0
+                ag.pyboy.memory[ag.memory.ADDR_MAP_ID] = 89  # teleported to the Center
+                ag.pyboy.memory[ag.memory.ADDR_PLAYER_HP_HI] = 0
+                ag.pyboy.memory[ag.memory.ADDR_PLAYER_HP_LO] = 97  # and healed to full
+                ag.pyboy.memory[ag.memory.ADDR_ENEMY_HP_LO] = 0
+            return True
+
+        ag._await_battle_menu = MagicMock(side_effect=_settle)
+        ag.run_battle_turn()
+        assert not any("MOVE |" in e for e in ag.events)
+
     def test_battle_turn_returns_early_when_battle_ended_during_sync(self, tmp_path):
         ag = _make_agent(tmp_path)
         ag.controller = MagicMock()

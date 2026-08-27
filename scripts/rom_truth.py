@@ -121,7 +121,14 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     for _ in range(rom[obj + 1]):
         warps.append((rom[q + 1], rom[q], rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
         q += 4
-    q += 1 + 3 * rom[q]  # signs: count byte then (y, x, text id) each
+    # Signs: count byte then (y, x, text id) each. Coordinates only — sign TEXT is read live
+    # (walk up, face it, press A): what the game says on screen is the instruction stream.
+    signs = []
+    n_signs = rom[q]
+    q += 1
+    for _ in range(n_signs):
+        signs.append((rom[q + 1], rom[q]))  # stored y, x
+        q += 3
     sprites = []
     n_sprites = rom[q]
     q += 1
@@ -160,6 +167,7 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         "tileset": tileset,
         "connections": conns,
         "warps": [list(wp) for wp in warps],
+        "signs": [list(s) for s in signs],
         "sprites": sprites,
         "grass": grass_tiles,
         "grid": grid,
@@ -329,6 +337,72 @@ def wild_encounters(rom: bytes, species_ids: set[int]) -> dict[str, dict]:
     raise ValueError("wild encounter tables not found in ROM")
 
 
+def evolutions_table(rom: bytes, species_count: int = 190) -> dict[str, dict]:
+    """Per-internal-id evolutions and level-up learnsets, located by content signature.
+
+    pokered's EvosMovesPointerTable: one same-bank 2-byte pointer per internal species id;
+    each target holds evolution entries — (1, level, species) for level, (2, item, 1, species)
+    for stone, (3, level, species) for trade — then a (level, move) learnset, both
+    0-terminated. Found by scanning every bank for the run of ``species_count`` in-bank
+    pointers whose targets all parse to that shape, never by remembered address. Validated
+    live the day it was written: Charmeleon level-36 -> Charizard (the evolution the B button
+    had been cancelling), and Drowzee's learnset put POISON GAS at the exact level the live
+    learn prompt fired (29)."""
+
+    def parse_block(o: int) -> tuple[list, list] | None:
+        evos: list = []
+        while o < len(rom) and rom[o] != 0:
+            m = rom[o]
+            if m == 1 and o + 2 < len(rom):
+                evos.append(["level", rom[o + 1], rom[o + 2]])
+                o += 3
+            elif m == 2 and o + 3 < len(rom):
+                evos.append(["item", rom[o + 1], rom[o + 3]])
+                o += 4
+            elif m == 3 and o + 2 < len(rom):
+                evos.append(["trade", rom[o + 1], rom[o + 2]])
+                o += 3
+            else:
+                return None
+            if len(evos) > 3:
+                return None
+        o += 1
+        learn: list = []
+        while o + 1 < len(rom) and rom[o] != 0:
+            lvl, mv = rom[o], rom[o + 1]
+            if not (1 <= lvl <= 100 and 1 <= mv <= 200):
+                return None
+            learn.append([lvl, mv])
+            o += 2
+            if len(learn) > 25:
+                return None
+        return evos, learn
+
+    for bank in range(len(rom) // 0x4000):
+        base = bank * 0x4000
+        for off in range(base, base + 0x4000 - 2 * species_count):
+            ok = True
+            for i in range(8):
+                p = rom[off + 2 * i] | (rom[off + 2 * i + 1] << 8)
+                if not (0x4000 <= p < 0x8000):
+                    ok = False
+                    break
+            if not ok:
+                continue
+            entries: dict[str, dict] = {}
+            for i in range(species_count):
+                p = rom[off + 2 * i] | (rom[off + 2 * i + 1] << 8)
+                parsed = None if not (0x4000 <= p < 0x8000) else parse_block(base + p - 0x4000)
+                if parsed is None:
+                    break
+                entries[str(i + 1)] = {"evolutions": parsed[0], "learnset": parsed[1]}
+            if len(entries) == species_count:
+                # The ascending scan reaches the true table start first: windows shifted into
+                # the pointer run lose their tail to block data and score short.
+                return entries
+    raise ValueError("evolutions table not found in ROM")
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -343,6 +417,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "ledges": [list(t) for t in ledge_hops(rom)],
         "species": species,
         "wilds": wild_encounters(rom, {int(k) for k in species}),
+        "evolutions": evolutions_table(rom),
         "maps": maps,
     }
 

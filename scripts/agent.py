@@ -129,6 +129,27 @@ CERULEAN_GYM_MAP = 65  # door mat at city (30,19); Misty on the top platform, ta
 ROUTE_24_MAP = 35  # Nugget Bridge: seven trainers up the x=10/11 column, grass past them
 ROUTE_25_MAP = 36  # nine more trainers along the y=2..9 path to Bill's
 BILLS_COTTAGE_MAP = 88  # the Route 25 sweep can wander in through its door; exit mats (2,7)/(3,7)
+ROUTE_5_MAP = 16
+UNDERGROUND_HOUSE_N_MAP = 71  # Route 5 side; its (4,4) warp is the stairs down
+UNDERGROUND_TUNNEL_MAP = 119  # 8x48, north-south
+UNDERGROUND_HOUSE_S_MAP = 74  # Route 6 side
+ROUTE_6_MAP = 17
+VERMILION_CITY_MAP = 5  # structurally confirmed: north edge is 17, east is Route 11
+# The southbound chain, every hop resolved from the extracted warp tables at runtime. route()
+# itself mis-resolves this leg (its 3->5 chain runs through a LAST_MAP mat into glitch map 231),
+# and Route 5's south EDGE leads into Saffron's guarded gate — hence an explicit chain.
+TRASHED_HOUSE_MAP = 62  # Cerulean's south region is fenced off; the ONLY land route runs
+# through this house's back-door mat at (3,0), re-entering the city in the yard (extraction:
+# the main region's flood never reaches row 35; the yard's does, x=11..23).
+VERMILION_CHAIN = {
+    CERULEAN_CITY_MAP: ("cerulean-south", ROUTE_5_MAP),
+    TRASHED_HOUSE_MAP: ("back-door", CERULEAN_CITY_MAP),
+    ROUTE_5_MAP: ("warp-to", UNDERGROUND_HOUSE_N_MAP),
+    UNDERGROUND_HOUSE_N_MAP: ("warp-to", UNDERGROUND_TUNNEL_MAP),
+    UNDERGROUND_TUNNEL_MAP: ("warp-to", UNDERGROUND_HOUSE_S_MAP),
+    UNDERGROUND_HOUSE_S_MAP: ("mats-out", ROUTE_6_MAP),
+    ROUTE_6_MAP: ("edge-south", VERMILION_CITY_MAP),
+}
 # Solo L24 Charmeleon potion-treadmills at 1 HP against Starmie (measured); the bridge gauntlet
 # is the XP that turns the fight. Below this level the badge-2 driver grinds instead of challenging.
 BADGE2_GRIND_LEVEL = 27
@@ -1197,6 +1218,19 @@ class PokemonAgent:
                 self.collector.discovery(self.turn_count, state.map_id, state.x, state.y, text)
             return "a"
 
+        # Cutscene observation: scripted sequences freeze the lane while text_box_active reads
+        # False (the Route 3 trainer-freeze lesson — the flag lies under script control). When
+        # the position is frozen, read the screen anyway: what a cutscene SAYS is the
+        # observation that tells the next probe what to do — the Bill event asked for the
+        # "Cell Separation System" in plain text while blind automation flailed past it.
+        prev = self.last_overworld_state
+        if prev is not None and (prev.map_id, prev.x, prev.y) == (state.map_id, state.x, state.y):
+            text = self.memory.read_dialogue()
+            if text and text != getattr(self, "_last_discovery", None):
+                self._last_discovery = text
+                self.log(f'DISCOVERY | cutscene map={state.map_id} pos=({state.x},{state.y}) text="{text}"')
+                self.collector.discovery(self.turn_count, state.map_id, state.x, state.y, text, kind="cutscene")
+
         # Viridian Mart parcel cutscene (pret ViridianMartDefaultScript): entering the Mart shows
         # the clerk's text, then SIMULATES the joypad to walk the player to the counter and hands
         # over OAK'S PARCEL. Our own directional inputs fight that simulated movement, so until the
@@ -1225,6 +1259,11 @@ class PokemonAgent:
         recruit = self._recruit_action(state)
         if recruit is not None:
             return recruit
+
+        # Badge 2 in hand: the southern loop owns its maps before anything else can wander them.
+        south = self._vermilion_action(state)
+        if south is not None:
+            return south
 
         # Badge 1 in hand, Badge 2 not: Cerulean is gym ground, not a corridor. Runs before the
         # Mt. Moon driver so the city never falls to its dead-end wander.
@@ -1649,6 +1688,47 @@ class PokemonAgent:
             i = (i + 1) % len(cells)
         self._recruit_i = i
         return None  # nothing reachable from this pocket: the map's own driver takes the turn
+
+    def _vermilion_action(self, state: OverworldState) -> str | None:
+        """Badge 2 in hand: drive the southern loop to Vermilion. ``None`` elsewhere.
+
+        One generic step over VERMILION_CHAIN, every target resolved from the extracted truth
+        at runtime: an edge hop walks off the named side, a warp hop walks onto the tile whose
+        extracted destination is the chain's next map, and a mats-out hop walks onto a
+        LAST_MAP mat and steps down off it (interior doors hand over on the step DOWN)."""
+        if not (state.badges & 0x02) or state.map_id not in VERMILION_CHAIN or not self._truth_ready():
+            return None
+        kind, _nxt = VERMILION_CHAIN[state.map_id]
+        m = self._truth["maps"][str(state.map_id)]
+        if kind == "cerulean-south":
+            # Two regions, one map id: the yard (behind the Trashed House) reaches the south
+            # row; the main city does not. Try the edge; unreachable means we are still in the
+            # main region, and the road south is the house's front door.
+            row = m["height"] - 1
+            south = {(x, row) for x in range(m["width"]) if m["grid"][row][x] == "1"}
+            if (state.x, state.y) in south:
+                return "down"
+            d = self._truth_walk(state, south, "cerulean south edge", avoid_warps=True, use_sprites=False)
+            if d is not None:
+                return d
+            doors = {(w[0], w[1]) for w in m["warps"] if w[2] == TRASHED_HOUSE_MAP}
+            return self._truth_walk(state, doors, "trashed house front door", avoid_warps=True, use_sprites=False)
+        if kind == "back-door":
+            targets = {(3, 0)}
+            d = self._truth_walk(state, targets, "trashed house back door", avoid_warps=True, use_sprites=False)
+            return d if d is not None else "up"
+        if kind == "edge-south":
+            row = m["height"] - 1
+            targets = {(x, row) for x in range(m["width"]) if m["grid"][row][x] == "1"}
+            d = self._truth_walk(state, targets, f"south edge of {state.map_id}", avoid_warps=True, use_sprites=False)
+            return d if d is not None else "down"  # an edge hands over on the step OFF it
+        if kind == "warp-to":
+            targets = {(w[0], w[1]) for w in m["warps"] if w[2] == _nxt}
+            return self._truth_walk(state, targets, f"warp {state.map_id}->{_nxt}", avoid_warps=True, use_sprites=False)
+        # mats-out: the interior's LAST_MAP mats, then off them.
+        targets = {(w[0], w[1]) for w in m["warps"] if w[2] == 0xFF}
+        d = self._truth_walk(state, targets, f"mats out of {state.map_id}", avoid_warps=True, use_sprites=False)
+        return d if d is not None else "down"
 
     def _badge2_action(self, state: OverworldState) -> str | None:
         """Badge 1 in hand, Badge 2 not: drive Cerulean's gym and Misty. ``None`` elsewhere.
@@ -2180,7 +2260,13 @@ class PokemonAgent:
         return True
 
     def _truth_walk(
-        self, state: OverworldState, targets: set, goal: str, use_learned: bool = True, use_sprites: bool = True
+        self,
+        state: OverworldState,
+        targets: set,
+        goal: str,
+        use_learned: bool = True,
+        use_sprites: bool = True,
+        avoid_warps: bool = False,
     ) -> str | None:
         """One step toward the nearest of ``targets`` on the current map, ROM-truth planned.
 
@@ -2220,6 +2306,13 @@ class PokemonAgent:
         # over-reported, a step the engine refused above) is layered on top, so a route is never
         # replanned through a wall this lane has already met.
         blocked = rt.sprite_tiles(self._truth, state.map_id) if use_sprites else set()
+        if avoid_warps:
+            # Surface navigation must never step on a warp it does not mean: a plan that
+            # threaded the Pokemon Center's door tile as ordinary floor pressed into it for
+            # 6,000 turns on the southbound leg (the door is grid-open; the engine treats it
+            # as an entrance, not a corridor).
+            mm = self._truth["maps"].get(str(state.map_id), {})
+            blocked |= {(w[0], w[1]) for w in mm.get("warps", ())} - set(targets)
         if use_learned:
             # Observed zeros help on the overworld — but a viewport observation of a WANDERING
             # body (a B2F Rocket beside the ladder mat) persists as a wall until re-observed, and
@@ -2521,11 +2614,20 @@ class PokemonAgent:
             # LEARN prompt, which parked the Misty fight for 2,400 turns (screenshot-diagnosed:
             # "AAAAAAAAA is trying to learn..."). Refuse-and-advance: B answers NO to the
             # delete-a-move menu, A confirms the text either way. Move management is a later
-            # engine; a known move is never gambled away to a menu mash mid-fight.
-            self.controller.press("b")
+            # engine; a known move is never gambled away to a menu mash mid-fight. EXCEPT on the
+            # evolution screen, where B cancels the evolution itself (the Charmeleon-at-40
+            # lesson): there A is the only safe advance.
+            self._press_b_unless_evolving()
             self.controller.wait(20)
             self.controller.press("a")
             self.controller.wait(20)
+            self.turn_count += 1
+            return
+        if not menu_up and battle.battle_type != 0 and battle.player_hp == 0 and self._send_next_mon():
+            # The forced switch: our mon is down but the battle goes on, and the game holds the
+            # "Bring out which POKeMON?" party menu that B cannot leave (the case _await_battle_menu's
+            # cap exists for). Without this branch the turn loop bounced 150 fight/run decisions off
+            # that menu — measured on Route 6, the roster grind's first faint past the lead.
             self.turn_count += 1
             return
         bag_healing = self.memory.find_healing_item()
@@ -2614,6 +2716,7 @@ class PokemonAgent:
             enemy_hp_before = battle.enemy_hp
             player_hp_before = battle.player_hp
             pp_before = self.memory.read_move_pp()
+            map_before = self.memory._read(self.memory.ADDR_MAP_ID)
             # Execute the move RELIABLY, from the screen the game is actually on. The old fixed
             # sequence (up, left, A, down x idx, A, A, then A x8) assumed the turn starts on the
             # battle menu with the move-list cursor on slot 0 — neither holds: the trailing A-mash
@@ -2649,6 +2752,21 @@ class PokemonAgent:
             # a KO too (its fresh HP would otherwise read as "healed").
             enemy_swapped = self.memory._read(self.memory.ADDR_ENEMY_SPECIES) != battle.enemy_species
             fainted = battle_over or after_hp <= 0 or enemy_swapped
+            # OUR faint ends the battle too, and treating battle_over alone as a KO recorded the
+            # loss to Lt. Surge's Raichu as "Ember dmg=66/66 KO" — a phantom full-damage row that
+            # poisons the roster optimizer's move stats. A loss shows as: battle over AND (our
+            # battle HP reads 0, or the white-out already teleported us — the settle loop can B
+            # all the way through the Center heal, leaving full HP on a different map). Post-loss
+            # battle RAM is torn down mid-settle, so no delta from it is trustworthy: emit nothing
+            # rather than a guess. (A self-KO trade where both sides faint is also suppressed —
+            # conservative, and rarer than the loss it guards against.)
+            our_hp_after = (self.memory._read(self.memory.ADDR_PLAYER_HP_HI) << 8) | self.memory._read(
+                self.memory.ADDR_PLAYER_HP_LO
+            )
+            we_lost = battle_over and (our_hp_after == 0 or self.memory._read(self.memory.ADDR_MAP_ID) != map_before)
+            if we_lost:
+                fainted = False
+                after_hp = enemy_hp_before  # no trustworthy delta
             enemy_hp_after = 0 if fainted else after_hp
             dmg = max(0, enemy_hp_before - enemy_hp_after)
             # Record only a real landed hit: enemy was alive and HP actually dropped (or it fainted).
@@ -2714,9 +2832,10 @@ class PokemonAgent:
             # the FIGHT selection isn't landing (a desynced battle menu / lingering text box). Mash
             # B to close any submenu/text and return to a clean top-level battle menu so the next
             # FIGHT selection registers. Trainer battles can't be fled, so recovery is a menu reset,
-            # never "run".
+            # never "run". (Routed through the evolution guard: an "unstick" fired while the
+            # evolution screen plays would otherwise cancel it with the first B.)
             for _ in range(6):
-                self.controller.press("b")
+                self._press_b_unless_evolving()
                 self.controller.wait(20)
             self.controller.wait(40)
 
@@ -2746,6 +2865,35 @@ class PokemonAgent:
                 return True
         return False
 
+    def _send_next_mon(self) -> bool:
+        """Answer the forced-switch party menu with the highest-level healthy mon.
+
+        Trusted only when the party list itself shows a faint: wBattleMon HP reads STALE values
+        until the next lead is sent out (the same lie the settle path guards against), so a 0
+        with a fully healthy party is a battle-intro artifact, not a down lead. Returns False on
+        that artifact and on a party wipe (the white-out machinery owns that screen)."""
+        party = self.memory.read_party()
+        if not any(m["hp"] == 0 for m in party):
+            return False
+        best, best_level = None, -1
+        for i, mon in enumerate(party):
+            if mon["hp"] > 0 and mon["level"] > best_level:
+                best, best_level = i, mon["level"]
+        if best is None:
+            return False
+        for _ in range(10):
+            cur = self.memory._read(0xCC26)  # wCurrentMenuItem: the party menu cursor
+            if cur == best:
+                break
+            self.controller.press("down" if cur < best else "up")
+            self.controller.wait(12)
+        self.controller.press("a")
+        self.controller.wait(30)
+        self.controller.press("a")  # through "Go! X!" — A only ever confirms here
+        self.controller.wait(60)
+        self.log(f"SWITCH | sent {party[best]['species']} L{best_level} (forced switch)")
+        return True
+
     def _await_battle_menu(self, max_presses: int = BATTLE_MENU_SYNC_PRESSES) -> bool:
         """Bring the game to the top battle menu: press B (advances text, closes the move list and
         every submenu, is a no-op on the battle menu itself — never selects) until "FIGHT" is drawn.
@@ -2756,9 +2904,25 @@ class PokemonAgent:
                 return False
             if self.memory.battle_menu_visible():
                 return True
-            self.controller.press("b")
+            # The one battle screen where B is NOT a safe no-op: evolution. B there CANCELS it —
+            # measured: Charmeleon's evolution was silently cancelled at every level-up from 36
+            # to 40, and the same fight replayed with A-only evolved it (charizard.state). The
+            # animation window keeps "is evolving!" as the stale readable text, so this check
+            # holds through the whole morph.
+            self._press_b_unless_evolving()
             self.controller.wait(20)
         return False
+
+    def _press_b_unless_evolving(self):
+        """B is the safe no-op on every battle screen except ONE: evolution, where B means
+        STOP EVOLVING — measured: Charmeleon's evolution was silently cancelled at every
+        level-up from 36 to 40 before the settle loop learned this. Every blind-B battle
+        volley routes through here; the animation window keeps "is evolving!" readable the
+        whole way through, so the check holds mid-morph."""
+        if "evolv" in self.memory.read_dialogue().lower():
+            self.controller.press("a")
+        else:
+            self.controller.press("b")
 
     def _select_battle_menu(self, target: str) -> bool:
         """Sync to the top battle menu, walk the cursor to ``target`` (fight/item/pkmn/run) — one
@@ -2850,7 +3014,7 @@ class PokemonAgent:
             "recovery: B x8, wait 120, A if still no menu"
         )
         for _ in range(8):
-            self.controller.press("b")
+            self._press_b_unless_evolving()
             self.controller.wait(8)
         self.controller.wait(120)
         if not self.memory.battle_menu_visible():
@@ -3388,6 +3552,12 @@ class PokemonAgent:
                     self._pre_battle_level = battle.player_level
                     self._battle_start_turn = self.turn_count
                     self._battle_type = battle.battle_type
+                    # A fresh battle is a fresh enemy: the 3-throw catch cap tracks its enemy by
+                    # SPECIES, so without this reset one failed catch silences every later
+                    # encounter of that species (measured in Diglett's Cave: 120 roam legs of
+                    # Digletts, zero balls thrown after the first three).
+                    self._catch_enemy = None
+                    self._catch_throws = 0
                     self._battle_map_id = self.memory._read(self.memory.ADDR_MAP_ID)
                     prev_ow = self.last_overworld_state
                     self._battle_pos = (prev_ow.x, prev_ow.y) if prev_ow is not None else (-1, -1)
@@ -3493,6 +3663,16 @@ class PokemonAgent:
                             post_name = SPECIES_ID_MAP.get(post, f"#{post:02X}")
                             self.log(f"EVOLUTION | Slot {slot}: {pre_name} -> {post_name}!")
                             self.evolution_log.append({"slot": slot, "from": pre_name, "to": post_name})
+                            # An evolution is roster-lineage telemetry the optimizer can use —
+                            # emit it like any other on-screen discovery, in the game's words.
+                            self.collector.discovery(
+                                self.turn_count,
+                                self._battle_map_id,
+                                self._battle_pos[0],
+                                self._battle_pos[1],
+                                f"{pre_name} evolved into {post_name}!",
+                                kind="evolution",
+                            )
 
                     # Record the Brock (gym 1) outcome once. The Pewter Gym interior is its
                     # own map, so identify Brock by the configured map id when known, else by

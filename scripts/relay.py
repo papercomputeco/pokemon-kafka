@@ -36,6 +36,7 @@ WORKSPACE = SCRIPT_DIR.parent
 MAPS = {
     "PEWTER_CITY": 2,
     "CERULEAN_CITY": 3,
+    "VERMILION_CITY": 5,
     "VIRIDIAN_FOREST": 51,
     "PEWTER_GYM": 54,
     "MT_MOON_1F": 59,
@@ -137,6 +138,9 @@ SEGMENTS = (
     # answer for Misty (encounters.py recommend --vs water, 2026-08-26: Paras first); the leg
     # ends when the party holds 3. Runs from a SUPPLIED baton — balls come from the
     # quartermaster errand between legs, never from mid-leg shopping.
+    # The southern loop: Cerulean down the Underground Path to Vermilion (the Route 5 edge into
+    # Saffron is guard-gated, so the chain goes through the tunnel — agent.VERMILION_CHAIN).
+    Segment("cerulean_to_vermilion", MAPS["VERMILION_CITY"], None, 6000, NAV_SPREAD),
     Segment(
         "cerulean_recruit",
         None,

@@ -219,6 +219,70 @@ def test_battle_turn_advances_ko_text_when_enemy_is_down(tmp_path):
     assert [c.args[0] for c in ag.controller.press.call_args_list] == ["b", "a"]
 
 
+def test_ko_text_advance_uses_a_on_the_evolution_screen(tmp_path):
+    """B on the evolution screen CANCELS the evolution — measured: Charmeleon's was silently
+    cancelled at every level-up from 36 to 40, and the same fight replayed with A-only made
+    Charizard. When the screen says "evolving", A is the only safe advance."""
+    from memory_reader import BattleState
+
+    ag = _make_agent(tmp_path)
+    ag.controller = MagicMock()
+    ag._await_battle_menu = MagicMock(return_value=False)
+    ag.memory.read_battle_state = MagicMock(
+        return_value=BattleState(battle_type=2, enemy_hp=0, enemy_max_hp=41, player_hp=34, player_max_hp=68)
+    )
+    ag.memory.read_dialogue = MagicMock(return_value="What? AAAAAAAAAA is evolving!")
+    ag.battle_strategy.choose_action = MagicMock(side_effect=AssertionError("strategy ran on a downed enemy"))
+    ag.run_battle_turn()
+    assert [c.args[0] for c in ag.controller.press.call_args_list] == ["a", "a"]
+
+
+def test_await_battle_menu_advances_the_evolution_with_a(tmp_path):
+    """The settle loop's "B never selects" motto has one exception: the evolution screen, where
+    the animation window keeps "is evolving!" readable the whole way through."""
+    ag = _make_agent(tmp_path)
+    ag.controller = MagicMock()
+    ag.memory._read = MagicMock(return_value=2)  # battle still up
+    ag.memory.battle_menu_visible = MagicMock(return_value=False)
+    ag.memory.read_dialogue = MagicMock(return_value="AAAAAAAAAA is evolving!")
+    assert ag._await_battle_menu(max_presses=3) is False
+    presses = [c.args[0] for c in ag.controller.press.call_args_list]
+    assert presses == ["a", "a", "a"]
+    ag.controller = MagicMock()
+    ag.memory.read_dialogue = MagicMock(return_value="")  # any other text: B as ever
+    ag._await_battle_menu(max_presses=2)
+    assert [c.args[0] for c in ag.controller.press.call_args_list] == ["b", "b"]
+
+
+def test_wedge_recovery_never_cancels_an_evolution(tmp_path):
+    """Every blind-B battle volley routes through the evolution guard: a wedge recovery that
+    fired mid-morph would otherwise cancel the evolution with its first B."""
+    ag = _make_agent(tmp_path)
+    ag.controller = MagicMock()
+    ag.memory.read_dialogue = MagicMock(return_value="AAAAAAAAAA is evolving!")
+    ag.memory.battle_menu_visible = MagicMock(return_value=True)  # menu back after the volley
+    ag._recover_battle_wedge()
+    presses = [c.args[0] for c in ag.controller.press.call_args_list]
+    assert "b" not in presses
+    assert presses.count("a") == 8
+
+
+def test_unstick_routes_through_the_evolution_guard(tmp_path):
+    from memory_reader import BattleState
+
+    ag = _make_agent(tmp_path)
+    ag.controller = MagicMock()
+    ag._await_battle_menu = MagicMock(return_value=True)
+    ag.memory.read_battle_state = MagicMock(
+        return_value=BattleState(battle_type=2, enemy_hp=10, enemy_max_hp=41, player_hp=34, player_max_hp=68)
+    )
+    ag.memory.find_healing_item = MagicMock(return_value=None)
+    ag.memory.read_dialogue = MagicMock(return_value="AAAAAAAAAA is evolving!")
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "unstick"})
+    ag.run_battle_turn()
+    assert "b" not in [c.args[0] for c in ag.controller.press.call_args_list]
+
+
 def test_leveled_lane_on_the_routes_drives_home(tmp_path):
     """Round 2 ended parked in Bill's cottage: above grind level, everything north of the
     city is just the road home — cottage door, Route 25 west, bridge south, then the gym."""

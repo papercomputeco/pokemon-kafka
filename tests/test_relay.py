@@ -38,6 +38,7 @@ def test_segments_cover_the_road_to_cerulean():
         "mtmoon_clear",
         "route4_to_cerulean",
         "cerulean_to_badge2",
+        "cerulean_to_vermilion",
         "cerulean_recruit",
     ]
     assert SEGMENTS[0].stop_on_map == 51
@@ -46,7 +47,8 @@ def test_segments_cover_the_road_to_cerulean():
     assert SEGMENTS[3].stop_on_map == 59
     assert SEGMENTS[6].stop_on_map == 3
     assert SEGMENTS[7].stop_on_badge == 2
-    assert SEGMENTS[8].stop_on_party == 3 and "--catch" in SEGMENTS[8].extra_args
+    assert SEGMENTS[8].stop_on_map == 5
+    assert SEGMENTS[9].stop_on_party == 3 and "--catch" in SEGMENTS[9].extra_args
 
 
 def test_build_agent_cmd_emits_stop_flags_and_isolated_paths(tmp_path):
