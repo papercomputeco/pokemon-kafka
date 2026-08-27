@@ -2614,9 +2614,15 @@ class PokemonAgent:
             # LEARN prompt, which parked the Misty fight for 2,400 turns (screenshot-diagnosed:
             # "AAAAAAAAA is trying to learn..."). Refuse-and-advance: B answers NO to the
             # delete-a-move menu, A confirms the text either way. Move management is a later
-            # engine; a known move is never gambled away to a menu mash mid-fight.
-            self.controller.press("b")
-            self.controller.wait(20)
+            # engine; a known move is never gambled away to a menu mash mid-fight. EXCEPT on the
+            # evolution screen, where B cancels the evolution itself (the Charmeleon-at-40
+            # lesson): there A is the only safe advance.
+            if "evolv" in self.memory.read_dialogue().lower():
+                self.controller.press("a")
+                self.controller.wait(20)
+            else:
+                self.controller.press("b")
+                self.controller.wait(20)
             self.controller.press("a")
             self.controller.wait(20)
             self.turn_count += 1
@@ -2901,7 +2907,15 @@ class PokemonAgent:
                 return False
             if self.memory.battle_menu_visible():
                 return True
-            self.controller.press("b")
+            # The one battle screen where B is NOT a safe no-op: evolution. B there CANCELS it —
+            # measured: Charmeleon's evolution was silently cancelled at every level-up from 36
+            # to 40, and the same fight replayed with A-only evolved it (charizard.state). The
+            # animation window keeps "is evolving!" as the stale readable text, so this check
+            # holds through the whole morph.
+            if "evolv" in self.memory.read_dialogue().lower():
+                self.controller.press("a")
+            else:
+                self.controller.press("b")
             self.controller.wait(20)
         return False
 
