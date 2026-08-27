@@ -27,7 +27,7 @@ def _baton(tmp_path, genome=None):
     return Baton(state_path=state, worldmap_path=None, genome=genome or {})
 
 
-def test_segments_cover_the_road_to_mt_moon():
+def test_segments_cover_the_road_to_cerulean():
     names = [s.name for s in SEGMENTS]
     assert names == [
         "route1_to_forest",
@@ -36,11 +36,15 @@ def test_segments_cover_the_road_to_mt_moon():
         "badge_to_mtmoon",
         "mtmoon_1f_to_b1f",
         "mtmoon_clear",
+        "route4_to_cerulean",
+        "cerulean_to_badge2",
     ]
     assert SEGMENTS[0].stop_on_map == 51
     assert SEGMENTS[1].stop_on_map == 2
     assert SEGMENTS[2].stop_on_badge == 1
     assert SEGMENTS[3].stop_on_map == 59
+    assert SEGMENTS[6].stop_on_map == 3
+    assert SEGMENTS[7].stop_on_badge == 2
 
 
 def test_build_agent_cmd_emits_stop_flags_and_isolated_paths(tmp_path):

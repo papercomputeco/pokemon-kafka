@@ -122,6 +122,8 @@ MT_MOON_B1F_MAP = 60
 MT_MOON_B2F_MAP = 61
 MT_MOON_DUNGEON_MAPS = (MT_MOON_1F_MAP, MT_MOON_B1F_MAP, MT_MOON_B2F_MAP)
 ROUTE_3_MAP = 14  # the road between Pewter and Mt. Moon (empty warp table: t14 probe, 2026-08-18)
+ROUTE_4_MAP = 15  # west stub feeds Mt. Moon's door; the east half (x >= 22) is the road to Cerulean
+CERULEAN_CITY_MAP = 3
 PEWTER_BUILDING_MAPS = (PEWTER_CITY_MAP, PEWTER_GYM_MAP, 52, 56, PEWTER_CENTER_MAP)
 
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
@@ -1598,6 +1600,16 @@ class PokemonAgent:
         LAST_MAP = 0xFF  # warp dest id for "back where we came from" (memory_reader passes it through raw)
         if state.map_id in MT_MOON_DUNGEON_MAPS:
             return self._mtmoon_dungeon_step(state)
+        if state.map_id == ROUTE_4_MAP and state.x >= 22:
+            # East of the clear (the 22 column is mtmoon_clear's own success line): the mountain
+            # is BEHIND the lane, and warp hunting here re-enters it — the only warp on this side
+            # is the east cave door the route4_east seed itself stands on, which is the 15<->60
+            # spring that ate the first routed run 571 bounces deep
+            # (benchmarks/2026-08-25-router-cerulean.md). The road to Cerulean is the east edge,
+            # and it is only connected over the LEDGES — a plain grid BFS reads the east half as
+            # disconnected, so this leg must be truth-planned (rom_truth ledge edges), never
+            # marched. None (missing truth file) falls back to the Navigator like every caller.
+            return self._truth_step(state, CERULEAN_CITY_MAP)
         if state.map_id == PEWTER_CENTER_MAP:
             # The Center: let the canonical Pewter heal flow serve it (counter -> heal -> walk out
             # the door). The seed legs start at 6/48 HP; Route 3 is tall grass, and a KO

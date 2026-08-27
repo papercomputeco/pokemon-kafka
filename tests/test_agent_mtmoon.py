@@ -776,3 +776,32 @@ def test_dungeon_wiggle_with_no_way_off_falls_through_to_the_next_tier(tmp_path)
     m = ag._truth["maps"][str(MT_MOON_B2F_MAP)]
     m["grid"] = ["1000", "0000", "0000", "0000"]  # only the arrival mat itself is walkable
     assert ag._mtmoon_dungeon_step(_ow(MT_MOON_B2F_MAP, 0, 0)) is None
+
+
+# ---- Route 4 east: the road to Cerulean --------------------------------------------------------
+
+
+def test_route4_east_is_truth_planned_toward_cerulean(tmp_path):
+    """East of the clear the mountain is BEHIND the lane: the only warp on that side is the cave
+    door the route4_east seed itself stands on, so a warp hunt is the 15<->60 spring (571 bounces,
+    benchmarks/2026-08-25-router-cerulean.md). The leg belongs to the truth planner, aimed at 3."""
+    from agent import CERULEAN_CITY_MAP, ROUTE_4_MAP
+
+    ag = _ag(tmp_path)
+    ag._truth_step = MagicMock(return_value="down")
+    ag.memory.read_warps = MagicMock(side_effect=AssertionError("warp hunt on Route 4 east"))
+    st = OverworldState(map_id=ROUTE_4_MAP, x=24, y=5, badges=1)
+    assert ag._mtmoon_action(st) == "down"
+    assert ag._truth_step.call_args[0][1] == CERULEAN_CITY_MAP
+
+
+def test_route4_west_still_feeds_the_mountain(tmp_path):
+    """The west stub (x < 22) is the inbound road: the badge_to_mtmoon warp hunt stays in charge."""
+    from agent import ROUTE_4_MAP
+
+    ag = _ag(tmp_path)
+    ag._truth_step = MagicMock(side_effect=AssertionError("truth-planned on the inbound stub"))
+    ag.memory.read_warps = MagicMock(return_value=[(18, 5, MT_MOON_1F_MAP)])
+    ag._pilot_to = MagicMock(return_value="up")
+    st = OverworldState(map_id=ROUTE_4_MAP, x=10, y=5, badges=1)
+    assert ag._mtmoon_action(st) == "up"
