@@ -1,0 +1,403 @@
+"""The road engine, driven through a scripted world.
+
+Every mechanism ported from the badge-4 expedition is exercised against a FakeIO whose
+d-pad presses move the player over truth-shaped grids, with warp behavior scripted per
+test: entry warps fire on arrival, thresholds fire on the directional step through, and
+misaligned edges hand over only at their true crossing cells."""
+
+import pytest
+import quartermaster as qm
+import road
+
+
+def _map(grid, connections=None, warps=None):
+    return {
+        "width": len(grid[0]),
+        "height": len(grid),
+        "grid": grid,
+        "tileset": 1,  # ledges are an overworld-tileset mechanism; keep them out of these tests
+        "connections": connections or {},
+        "warps": warps or [],
+        "sprites": [],
+    }
+
+
+class RoadIO:
+    """Presses mutate the same registers the engine reads: d-pads move over the grid,
+    arrival warps and threshold warps teleport, and a `frozen` flag models an input-eating
+    screen (a guard, a lingering box)."""
+
+    def __init__(self, truth, start, arrive=None, thresholds=None, frozen_at=None):
+        self.truth = truth
+        self.mem = {qm.ADDR_MAP: start[0], qm.ADDR_X: start[1], qm.ADDR_Y: start[2]}
+        self.arrive = arrive or {}  # (map,x,y) -> (map,x,y): fires when stepped onto
+        self.thresholds = thresholds or {}  # (map,x,y,dir) -> (map,x,y): fires stepping off
+        self.frozen_at = frozen_at or set()  # (map,x,y): d-pads are eaten while standing here
+        self.pressed = []
+
+    def _tp(self, dest):
+        self.mem[qm.ADDR_MAP], self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y] = dest
+
+    def press(self, btn, hold=8, release=8):
+        self.pressed.append(btn)
+        if btn not in ("up", "down", "left", "right"):
+            return
+        mp, x, y = qm.read_pos(self)
+        if (mp, x, y) in self.frozen_at:
+            return
+        th = self.thresholds.get((mp, x, y, btn))
+        if th:
+            self._tp(th)
+            return
+        dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[btn]
+        nx, ny = x + dx, y + dy
+        m = self.truth["maps"][str(mp)]
+        if not (0 <= nx < m["width"] and 0 <= ny < m["height"]) or m["grid"][ny][nx] != "1":
+            return
+        self._tp(self.arrive.get((mp, nx, ny), (mp, nx, ny)))
+
+    def wait(self, frames=30):
+        pass
+
+    def read(self, addr):
+        return self.mem.get(addr, 0)
+
+
+PAIRS: set = set()
+
+
+# --------------------------------------------------------------------------- edge_cells / bodies
+
+
+def test_edge_cells_all_four_sides():
+    truth = {
+        "maps": {
+            "1": _map(["111", "111", "101"], connections={"north": 2, "south": 3, "west": 4, "east": 5}),
+        }
+    }
+    assert road.edge_cells(truth, 1, 2) == ({(0, 0), (1, 0), (2, 0)}, "up")
+    assert road.edge_cells(truth, 1, 3) == ({(0, 2), (2, 2)}, "down")
+    assert road.edge_cells(truth, 1, 4) == ({(0, 0), (0, 1), (0, 2)}, "left")
+    assert road.edge_cells(truth, 1, 5) == ({(2, 0), (2, 1), (2, 2)}, "right")
+
+
+def test_live_bodies_reads_the_sprite_table():
+    io = RoadIO({"maps": {}}, (0, 0, 0))
+    io.mem[road.SPRITE_STATE_BASE + 0x10] = 1
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 7 + 4  # y
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 3 + 4  # x
+    assert road.live_bodies(io) == {(3, 7)}
+
+
+# --------------------------------------------------------------------------- walk
+
+
+def _open_world(w=6, h=1, **kw):
+    return {"maps": {"1": _map(["1" * w] * h, **kw)}}
+
+
+def test_walk_arrives():
+    io = RoadIO(_open_world(), (1, 0, 0))
+    assert road.walk(io, io.truth, PAIRS, 1, {(4, 0)}) is True
+    assert qm.read_pos(io) == (1, 4, 0)
+
+
+def test_walk_reports_map_change():
+    io = RoadIO(_open_world(), (1, 0, 0), arrive={(1, 2, 0): (9, 5, 5)})
+    assert road.walk(io, io.truth, PAIRS, 1, {(4, 0)}) == "map-change"
+
+
+def test_walk_no_path_and_body_blocked():
+    truth = {"maps": {"1": _map(["101"])}}
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.walk(io, truth, PAIRS, 1, {(2, 0)}) == "no-path"
+    io2 = RoadIO(_open_world(w=3), (1, 0, 0))
+    io2.mem[road.SPRITE_STATE_BASE + 0x10] = 1
+    io2.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 0 + 4
+    io2.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 1 + 4
+    assert road.walk(io2, io2.truth, PAIRS, 1, {(2, 0)}) == "body-blocked"
+
+
+def test_walk_delegates_battles_and_finishes():
+    io = RoadIO(_open_world(), (1, 0, 0))
+    io.mem[qm.ADDR_IN_BATTLE] = 1
+    fought = []
+
+    def battle(io_):
+        fought.append(True)
+        io_.mem[qm.ADDR_IN_BATTLE] = 0
+
+    assert road.walk(io, io.truth, PAIRS, 1, {(3, 0)}, battle=battle) is True
+    assert fought == [True]
+
+
+def test_walk_without_a_handler_refuses_to_guess():
+    io = RoadIO(_open_world(), (1, 0, 0))
+    io.mem[qm.ADDR_IN_BATTLE] = 1
+    with pytest.raises(qm.QuartermasterError, match="no battle handler"):
+        road.walk(io, io.truth, PAIRS, 1, {(3, 0)})
+
+
+def test_walk_stall_cycles_then_refused():
+    """An input-eating screen: A/B cycles fire, and only persistent immobility refuses."""
+    io = RoadIO(_open_world(), (1, 1, 0), frozen_at={(1, 1, 0)})
+    assert road.walk(io, io.truth, PAIRS, 1, {(4, 0)}) == "refused"
+    assert io.pressed.count("a") == 12  # 4 cycles x 3 A-presses
+    assert "b" in io.pressed
+
+
+def test_walk_stall_speech_leads_into_the_fight():
+    """The trainer-speech shape: frozen until an A opens the battle, which the handler wins."""
+    io = RoadIO(_open_world(), (1, 1, 0), frozen_at={(1, 1, 0)})
+    orig = io.press
+
+    def press(btn, hold=8, release=8):
+        if btn == "a":
+            io.mem[qm.ADDR_IN_BATTLE] = 2
+        orig(btn, hold, release)
+
+    io.press = press
+
+    def battle(io_):
+        io_.mem[qm.ADDR_IN_BATTLE] = 0
+        io_.frozen_at = set()  # the fight over, the road is open
+
+    assert road.walk(io, io.truth, PAIRS, 1, {(4, 0)}, battle=battle) is True
+
+
+def test_walk_cap():
+    io = RoadIO(_open_world(), (1, 0, 0), frozen_at={(1, 0, 0)})
+    assert road.walk(io, io.truth, PAIRS, 1, {(4, 0)}, cap=3) == "cap"
+
+
+# --------------------------------------------------------------------------- warps
+
+
+def test_through_warp_fires_on_arrival():
+    io = RoadIO(_open_world(), (1, 0, 0), arrive={(1, 3, 0): (7, 1, 1)})
+    assert road.through_warp(io, io.truth, PAIRS, 1, 3, 0) is True
+    assert qm.read_pos(io)[0] == 7
+
+
+def test_through_warp_threshold_fires_on_the_step_through():
+    """Route 11's gate door: standing on the tile does nothing; the deeper step fires."""
+    truth = _open_world(w=4)
+    io = RoadIO(truth, (1, 0, 0), thresholds={(1, 3, 0, "right"): (7, 0, 5)})
+    assert road.through_warp(io, io.truth, PAIRS, 1, 3, 0) is True
+    assert qm.read_pos(io)[0] == 7
+
+
+def test_through_warp_ladder_fires_on_reentry():
+    """The Rock Tunnel ladder: step off, and the step BACK onto the tile fires."""
+    truth = _open_world(w=4)
+    io = RoadIO(truth, (1, 2, 0))
+    # walking onto (3,0) as a target does not fire; stepping right is walled; the undo of a
+    # successful left step re-enters the tile, which now fires.
+    fired = {"armed": False}
+    orig_tp = io._tp
+
+    def tp(dest):
+        if dest == (1, 3, 0) and fired["armed"]:
+            orig_tp((7, 9, 9))
+        else:
+            fired["armed"] = dest == (1, 2, 0)
+            orig_tp(dest)
+
+    io._tp = tp
+    assert road.through_warp(io, io.truth, PAIRS, 1, 3, 0) is True
+    assert qm.read_pos(io)[0] == 7
+
+
+def test_through_warp_dead_and_walk_failure_passthrough():
+    io = RoadIO({"maps": {"1": _map(["0001"])}}, (1, 3, 0))
+    assert road.through_warp(io, io.truth, PAIRS, 1, 3, 0) == "warp-dead"
+    io2 = RoadIO({"maps": {"1": _map(["101"])}}, (1, 0, 0))
+    assert road.through_warp(io2, io2.truth, PAIRS, 1, 2, 0) == "no-path"
+
+
+# --------------------------------------------------------------------------- interiors and gates
+
+
+GATE = _map(["111"] * 3, warps=[[0, 1, 255, 0], [2, 1, 255, 1]])
+
+
+def test_traverse_interior_exits_the_far_side():
+    truth = {"maps": {"8": GATE}}
+    io = RoadIO(truth, (8, 0, 1), thresholds={(8, 2, 1, "right"): (1, 5, 0)})
+    assert road.traverse_interior(io, truth, PAIRS, 8) is True
+    assert qm.read_pos(io)[0] == 1
+
+
+def test_traverse_interior_north_south_mats():
+    """A vertical gate: entered by the south mats, exited by the north (mat rows classify)."""
+    tall = _map(["111"] * 4, warps=[[1, 0, 255, 0], [1, 3, 255, 1]])
+    truth = {"maps": {"8": tall}}
+    io = RoadIO(truth, (8, 1, 3), thresholds={(8, 1, 0, "up"): (2, 4, 4)})
+    assert road.traverse_interior(io, truth, PAIRS, 8) is True
+    assert qm.read_pos(io) == (2, 4, 4)
+
+
+def test_traverse_interior_map_change_and_unknown_and_stuck():
+    truth = {"maps": {"8": GATE}}
+    io = RoadIO(truth, (8, 0, 1), arrive={(8, 2, 1): (1, 5, 0)})
+    assert road.traverse_interior(io, truth, PAIRS, 8) is True
+    assert road.traverse_interior(RoadIO(truth, (8, 0, 1)), truth, PAIRS, 99) == "unknown-interior"
+    io3 = RoadIO(truth, (8, 0, 1))  # far mat reachable but nothing ever fires
+    assert road.traverse_interior(io3, truth, PAIRS, 8) == "interior-stuck"
+
+
+def _gate_world():
+    """A route severed mid-map: west half, wall, east half; a decoy house and a real gate."""
+    route = _map(
+        ["1111011", "1111011"],
+        connections={"east": 3},
+        warps=[[1, 0, 60, 0], [3, 0, 8, 0], [3, 1, 8, 1]],
+    )
+    house = _map(["11"], warps=[[0, 0, 255, 0]])  # one door: back where you came from
+    return {"maps": {"2": route, "8": GATE, "60": house}}
+
+
+def test_pass_gate_validates_candidates_and_crosses():
+    truth = _gate_world()
+    io = RoadIO(
+        truth,
+        (2, 0, 0),
+        arrive={(2, 1, 0): (60, 1, 0), (2, 3, 0): (8, 0, 1), (2, 3, 1): (8, 0, 1)},
+        thresholds={(60, 0, 0, "left"): (2, 0, 0), (8, 2, 1, "right"): (2, 5, 0)},
+    )
+    cells = {(6, 0), (6, 1)}
+    assert road.pass_gate(io, truth, PAIRS, 2, cells) is True
+    assert qm.read_pos(io) == (2, 5, 0)
+
+
+def test_pass_gate_guard_refusal_and_exhaustion():
+    truth = _gate_world()
+    # the gate interior eats every input: a guard — pass_gate reports failure from inside
+    io = RoadIO(truth, (2, 2, 0), arrive={(2, 3, 0): (8, 1, 1)}, frozen_at={(8, 1, 1)})
+    io.truth["maps"]["2"]["warps"] = [[3, 0, 8, 0]]
+    assert road.pass_gate(io, truth, PAIRS, 2, {(6, 0)}) is False
+    # no candidate ever leaves the map at all
+    truth2 = _gate_world()
+    io2 = RoadIO(truth2, (2, 0, 0))
+    assert road.pass_gate(io2, truth2, PAIRS, 2, {(6, 0)}) is False
+
+
+# --------------------------------------------------------------------------- edges
+
+
+def test_cross_edge_sweeps_for_the_aligned_cell():
+    """Only the second edge cell actually hands over (the connection-offset lesson)."""
+    truth = {"maps": {"1": _map(["111", "111"], connections={"east": 2})}}
+    io = RoadIO(truth, (1, 0, 0), thresholds={(1, 2, 1, "right"): (2, 0, 1)})
+    assert road.cross_edge(io, truth, PAIRS, 1, 2) is True
+    assert qm.read_pos(io)[0] == 2
+
+
+def test_cross_edge_walk_failure_and_stuck():
+    truth = {"maps": {"1": _map(["101"], connections={"east": 2})}}
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.cross_edge(io, truth, PAIRS, 1, 2) == "no-path"
+    truth2 = {"maps": {"1": _map(["111"], connections={"east": 2})}}
+    io2 = RoadIO(truth2, (1, 0, 0))
+    assert road.cross_edge(io2, truth2, PAIRS, 1, 2) == "stuck-on-edge"
+
+
+def test_cross_edge_hands_over_en_route_to_the_next_cell():
+    """The map can change while WALKING toward another candidate cell."""
+    truth = {"maps": {"1": _map(["111", "111"], connections={"east": 2})}}
+    io = RoadIO(truth, (1, 2, 0), arrive={(1, 2, 1): (2, 0, 1)})
+    assert road.cross_edge(io, truth, PAIRS, 1, 2) is True
+
+
+# --------------------------------------------------------------------------- cut
+
+
+def test_cut_facing_drives_the_menu_registers():
+    io = RoadIO(_open_world(), (1, 0, 0))
+    cur = {"v": 0}
+    io.read_orig = io.read
+    io.read = lambda addr: cur["v"] if addr == qm.ADDR_MENU_CUR else io.read_orig(addr)
+    orig = io.press
+
+    def press(btn, hold=8, release=8):
+        if btn in ("down", "up"):
+            cur["v"] += 1 if btn == "down" else -1
+        orig(btn, hold, release)
+
+    io.press = press
+    road.cut_facing(io, "right")
+    assert io.pressed[0] == "right"
+    assert io.pressed.count("down") == 1  # cursor walked to the POKeMON row once
+    assert io.pressed.count("a") == 3  # party -> lead -> CUT
+    assert io.pressed[-1] == "b"
+
+
+# --------------------------------------------------------------------------- drive_to
+
+
+def _two_map_world():
+    a = _map(["111"], connections={"east": 2})
+    b = _map(["111"], connections={"west": 1}, warps=[[2, 0, 9, 0]])
+    c = _map(["11"])
+    return {"maps": {"1": a, "2": b, "9": c}}
+
+
+def test_drive_to_edges_and_warps():
+    truth = _two_map_world()
+    logs = []
+    io = RoadIO(truth, (1, 0, 0), thresholds={(1, 2, 0, "right"): (2, 0, 0)}, arrive={(2, 2, 0): (9, 0, 0)})
+    assert road.drive_to(io, truth, PAIRS, 9, log=logs.append) is True
+    assert any("--edge-->" in m or "edge" in m for m in logs)
+
+
+def test_drive_to_no_route_and_hop_failure():
+    truth = {"maps": {"1": _map(["111"]), "9": _map(["11"])}}
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.drive_to(io, truth, PAIRS, 9) is False  # no route at all
+    truth2 = {"maps": {"1": _map(["111"], connections={"east": 2}), "2": _map(["111"], connections={"west": 1})}}
+    io2 = RoadIO(truth2, (1, 0, 0))  # edge never hands over, no gate to pass
+    assert road.drive_to(io2, truth2, PAIRS, 2) is False
+
+
+def test_drive_to_passes_a_gate_when_the_edge_is_severed():
+    route = _map(
+        ["110111", "110111"],
+        connections={"east": 3},
+        warps=[[1, 0, 8, 0]],
+    )
+    far = _map(["11"], connections={"west": 2})
+    truth = {"maps": {"2": route, "8": GATE, "3": far}}
+    io = RoadIO(
+        truth,
+        (2, 0, 0),
+        arrive={(2, 1, 0): (8, 0, 1)},
+        thresholds={(8, 2, 1, "right"): (2, 3, 0), (2, 5, 0, "right"): (3, 0, 0), (2, 5, 1, "right"): (3, 0, 0)},
+    )
+    assert road.drive_to(io, truth, PAIRS, 3) is True
+
+
+def test_drive_to_traverses_a_swallowing_interior():
+    """An edge crossing that lands INSIDE a gate: the interior is traversed onward."""
+    a = _map(["111"], connections={"east": 3})
+    far = _map(["11"], connections={"west": 1})
+    truth = {"maps": {"1": a, "8": GATE, "3": far}}
+    io = RoadIO(
+        truth,
+        (1, 0, 0),
+        thresholds={(1, 2, 0, "right"): (8, 0, 1), (8, 2, 1, "right"): (3, 0, 0)},
+    )
+    assert road.drive_to(io, truth, PAIRS, 3) is True
+    # and one that refuses from inside (a guard eating input)
+    io2 = RoadIO(
+        truth,
+        (1, 0, 0),
+        thresholds={(1, 2, 0, "right"): (8, 1, 1)},
+        frozen_at={(8, 1, 1)},
+    )
+    assert road.drive_to(io2, truth, PAIRS, 3) is False
+
+
+def test_drive_to_hop_cap_runs_out():
+    truth = _two_map_world()
+    io = RoadIO(truth, (1, 0, 0), thresholds={(1, 2, 0, "right"): (2, 0, 0)}, arrive={(2, 2, 0): (9, 0, 0)})
+    assert road.drive_to(io, truth, PAIRS, 9, max_hops=0) is False
