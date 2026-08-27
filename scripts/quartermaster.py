@@ -87,6 +87,8 @@ SHOPS = {
     # template as Cerulean's (clerk sprite at (0,5)). Stock order is verified by the purchase
     # itself — buy() reports the bag delta per requested item, so a wrong index reads as 0 gained.
     2: Shop(2, (23, 17), 56, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
+    # Vermilion: door (23,13) -> map 91 per the extracted warps; same interior template.
+    5: Shop(5, (23, 13), 91, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
 }
 # Cerulean Center: door (19,17) in the city; the nurse (3,1) is talked to across the counter
 # from (3,3) facing up — the same geometry as Pewter's flow.
@@ -94,6 +96,8 @@ CENTERS = {
     3: Center(3, (19, 17), 64, (3, 3), "up", ((3, 7), (4, 7))),
     # Pewter: door (13,25) -> map 58; nurse sprite (3,1), the standard counter geometry.
     2: Center(2, (13, 25), 58, (3, 3), "up", ((3, 7), (4, 7))),
+    # Vermilion: door (11,3) -> map 89; nurse sprite (3,1), the standard counter geometry.
+    5: Center(5, (11, 3), 89, (3, 3), "up", ((3, 7), (4, 7))),
 }
 
 

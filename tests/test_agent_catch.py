@@ -143,6 +143,18 @@ def test_catch_hook_caps_throws_and_returns_the_turn_to_the_strategy(tmp_path):
     assert ag.battle_strategy.choose_action.call_count == 2  # turns 4 and 5 went back to the fight
 
 
+def test_catch_throw_cap_resets_when_a_new_battle_starts(tmp_path):
+    """The cap tracks its enemy by SPECIES, so without a battle-start reset one failed catch
+    silences every later encounter of that species (measured in Diglett's Cave: 120 roam legs
+    of Digletts, zero balls thrown after the first three)."""
+    ag, img = _end_to_end_battle_agent(tmp_path, [{"species": "Charmeleon", "level": 22, "hp": 60, "max_hp": 63}])
+    ag._catch_enemy = SPEAROW  # stale: a previous Spearow ate its three throws
+    ag._catch_throws = 3
+    with img:
+        ag.run(max_turns=2)
+    assert ag._catch_enemy is None and ag._catch_throws == 0
+
+
 def test_catch_throw_cap_resets_on_a_new_enemy(tmp_path):
     ag = _battle_agent(tmp_path, _wild_battle())
     ag.catch_wanted = {SPEAROW, 0xA5}

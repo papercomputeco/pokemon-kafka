@@ -3497,6 +3497,12 @@ class PokemonAgent:
                     self._pre_battle_level = battle.player_level
                     self._battle_start_turn = self.turn_count
                     self._battle_type = battle.battle_type
+                    # A fresh battle is a fresh enemy: the 3-throw catch cap tracks its enemy by
+                    # SPECIES, so without this reset one failed catch silences every later
+                    # encounter of that species (measured in Diglett's Cave: 120 roam legs of
+                    # Digletts, zero balls thrown after the first three).
+                    self._catch_enemy = None
+                    self._catch_throws = 0
                     self._battle_map_id = self.memory._read(self.memory.ADDR_MAP_ID)
                     prev_ow = self.last_overworld_state
                     self._battle_pos = (prev_ow.x, prev_ow.y) if prev_ow is not None else (-1, -1)
