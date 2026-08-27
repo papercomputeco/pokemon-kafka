@@ -2621,6 +2621,13 @@ class PokemonAgent:
             self.controller.wait(20)
             self.turn_count += 1
             return
+        if not menu_up and battle.battle_type != 0 and battle.player_hp == 0 and self._send_next_mon():
+            # The forced switch: our mon is down but the battle goes on, and the game holds the
+            # "Bring out which POKeMON?" party menu that B cannot leave (the case _await_battle_menu's
+            # cap exists for). Without this branch the turn loop bounced 150 fight/run decisions off
+            # that menu — measured on Route 6, the roster grind's first faint past the lead.
+            self.turn_count += 1
+            return
         bag_healing = self.memory.find_healing_item()
         # The quartermaster's catch policy outranks the fight: a wanted, weakened wild with a
         # ball in the bag is a roster slot, and the ball throw is the same battle-menu path the
@@ -2854,6 +2861,35 @@ class PokemonAgent:
             if pp_before is not None and self.memory.read_move_pp() != pp_before:
                 return True
         return False
+
+    def _send_next_mon(self) -> bool:
+        """Answer the forced-switch party menu with the highest-level healthy mon.
+
+        Trusted only when the party list itself shows a faint: wBattleMon HP reads STALE values
+        until the next lead is sent out (the same lie the settle path guards against), so a 0
+        with a fully healthy party is a battle-intro artifact, not a down lead. Returns False on
+        that artifact and on a party wipe (the white-out machinery owns that screen)."""
+        party = self.memory.read_party()
+        if not any(m["hp"] == 0 for m in party):
+            return False
+        best, best_level = None, -1
+        for i, mon in enumerate(party):
+            if mon["hp"] > 0 and mon["level"] > best_level:
+                best, best_level = i, mon["level"]
+        if best is None:
+            return False
+        for _ in range(10):
+            cur = self.memory._read(0xCC26)  # wCurrentMenuItem: the party menu cursor
+            if cur == best:
+                break
+            self.controller.press("down" if cur < best else "up")
+            self.controller.wait(12)
+        self.controller.press("a")
+        self.controller.wait(30)
+        self.controller.press("a")  # through "Go! X!" — A only ever confirms here
+        self.controller.wait(60)
+        self.log(f"SWITCH | sent {party[best]['species']} L{best_level} (forced switch)")
+        return True
 
     def _await_battle_menu(self, max_presses: int = BATTLE_MENU_SYNC_PRESSES) -> bool:
         """Bring the game to the top battle menu: press B (advances text, closes the move list and

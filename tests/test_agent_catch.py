@@ -70,6 +70,74 @@ def test_read_party_species_reads_the_slot_list(tmp_path):
     assert ag.memory.read_party_species() == [CHARMELEON, SPEAROW]
 
 
+def _downed_lead_battle():
+    return BattleState(
+        battle_type=1,
+        enemy_species=SPEAROW,
+        enemy_hp=29,
+        enemy_max_hp=29,
+        player_hp=0,
+        player_max_hp=28,
+        moves=[0x34, 0x00, 0x00, 0x00],
+        move_pp=[10, 0, 0, 0],
+    )
+
+
+def _forced_switch_agent(tmp_path, party):
+    """A battle agent parked on the 'Bring out which POKeMON?' menu: lead down, enemy alive,
+    no battle menu for B to reach — with a live cursor register so the menu walk is real."""
+    ag = _battle_agent(tmp_path, _downed_lead_battle())
+    ag._await_battle_menu = MagicMock(return_value=False)
+    ag.memory.read_party = MagicMock(return_value=party)
+    cursor = {"v": 0}
+    ag.memory._read = MagicMock(side_effect=lambda addr: cursor["v"] if addr == 0xCC26 else 0)
+
+    def on_press(button, **kw):
+        cursor["v"] += {"down": 1, "up": -1}.get(button, 0)
+
+    ag.controller = MagicMock()
+    ag.controller.press = MagicMock(side_effect=on_press)
+    return ag
+
+
+def test_forced_switch_sends_the_best_healthy_mon(tmp_path):
+    """Lead down, battle live: the game holds the party menu B cannot leave (measured on the
+    Route 6 grind: 150 fight/run decisions bounced off it). The turn answers it with the
+    highest-level healthy mon instead of consulting the strategy."""
+    ag = _forced_switch_agent(
+        tmp_path,
+        [
+            {"species": "Mankey", "level": 10, "hp": 0, "max_hp": 28},
+            {"species": "Drowzee", "level": 13, "hp": 0, "max_hp": 38},
+            {"species": "Charmeleon", "level": 38, "hp": 106, "max_hp": 106},
+            {"species": "Diglett", "level": 17, "hp": 33, "max_hp": 33},
+        ],
+    )
+    ag.battle_strategy.choose_action = MagicMock(side_effect=AssertionError("strategy consulted at the forced switch"))
+    ag.run_battle_turn()
+    presses = [c.args[0] for c in ag.controller.press.call_args_list]
+    assert presses.count("down") == 2  # cursor walked to Charmeleon's row
+    assert presses[-2:] == ["a", "a"]  # select, then confirm through "Go! ..."
+    assert any("SWITCH" in e and "Charmeleon" in e for e in ag.events)
+
+
+def test_forced_switch_guard_ignores_stale_battle_hp(tmp_path):
+    """wBattleMon HP lies until the lead is sent out: a 0 with a fully healthy party is a
+    battle-intro artifact, and the turn falls through to the strategy."""
+    ag = _forced_switch_agent(tmp_path, [{"species": "Charmeleon", "level": 38, "hp": 106, "max_hp": 106}])
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "run"})
+    ag.run_battle_turn()
+    ag.battle_strategy.choose_action.assert_called_once()
+
+
+def test_forced_switch_yields_the_party_wipe_to_the_whiteout(tmp_path):
+    ag = _forced_switch_agent(tmp_path, [{"species": "Mankey", "level": 10, "hp": 0, "max_hp": 28}])
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "run"})
+    ag.run_battle_turn()
+    ag.battle_strategy.choose_action.assert_called_once()
+    assert not any("SWITCH" in e for e in ag.events)
+
+
 def _end_to_end_battle_agent(tmp_path, party_after, whited_out=False):
     from unittest.mock import patch
 
