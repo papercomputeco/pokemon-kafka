@@ -574,3 +574,168 @@ def test_run_errand_leaves_a_known_interior_first(monkeypatch):
     report = qm.run_errand(io, {"maps": {}, "tile_pairs": []}, None, True)
     assert calls[0] == ("walk", 67, qm.SHOPS[3].exit_mats) and calls[1] == ("leave", 67)
     assert report["healed"]
+
+
+def test_battle_through_fights_until_the_flag_clears():
+    def on_press(io, btn):
+        if btn == "a":
+            io.mem["hits"] = io.mem.get("hits", 0) + 1
+            if io.mem["hits"] >= 3:
+                io.mem[qm.ADDR_IN_BATTLE] = 0
+
+    io = FakeIO({qm.ADDR_IN_BATTLE: 2}, on_press)
+    qm.battle_through(io)
+    assert io.mem["hits"] == 3
+    with pytest.raises(qm.QuartermasterError, match="still fighting"):
+        qm.battle_through(FakeIO({qm.ADDR_IN_BATTLE: 2}), cap=3)
+
+
+def test_walk_to_fights_trainers_and_stubborn_wilds(monkeypatch):
+    io = _walking_io()
+    io.mem[qm.ADDR_IN_BATTLE] = 2  # a trainer: cannot be fled
+    fought = {}
+    monkeypatch.setattr(
+        qm, "battle_through", lambda i, cap=150: (fought.setdefault("t", True), i.mem.__setitem__(qm.ADDR_IN_BATTLE, 0))
+    )
+    qm.walk_to(io, OPEN_MAP, set(), 5, (1, 0))
+    assert fought.get("t")
+    io2 = _walking_io()
+    io2.mem[qm.ADDR_IN_BATTLE] = 1  # a wild that will not let go: flee raises, fight wins
+    monkeypatch.setattr(qm, "flee_battle", lambda i, cap=25: (_ for _ in ()).throw(qm.QuartermasterError("flee")))
+    monkeypatch.setattr(qm, "battle_through", lambda i, cap=150: i.mem.__setitem__(qm.ADDR_IN_BATTLE, 0))
+    qm.walk_to(io2, OPEN_MAP, set(), 5, (1, 0))
+    assert qm.read_pos(io2) == (5, 1, 0)
+
+
+def test_walk_to_can_press_through_sprites(monkeypatch):
+    called = {}
+    import rom_truth as rt
+
+    real = rt.path_on_map
+
+    def spy(truth, pairs, mid, start, targets, blocked=None):
+        called["blocked"] = set(blocked or ())
+        return real(truth, pairs, mid, start, targets, blocked=blocked)
+
+    monkeypatch.setattr(rt, "path_on_map", spy)
+    io = _walking_io()
+    spr_map = {"maps": {"5": dict(OPEN_MAP["maps"]["5"], sprites=[{"kind": "npc", "x": 3, "y": 0}])}}
+    qm.walk_to(io, spr_map, set(), 5, (1, 0), block_sprites=False)
+    assert (3, 0) not in called["blocked"]  # bodies are not walls on a journey
+
+
+def _journey_truth():
+    return {
+        "maps": {
+            "3": {"width": 2, "height": 2, "grid": ["11", "11"], "warps": [[1, 0, 62, 0]]},
+            "62": {"width": 2, "height": 2, "grid": ["11", "11"], "warps": [[1, 0, 255, 7]]},
+            "17": {"width": 2, "height": 2, "grid": ["11", "11"], "warps": []},
+        },
+        "tile_pairs": [],
+    }
+
+
+def test_journey_step_kinds(monkeypatch):
+    io = FakeIO()
+    calls = []
+    monkeypatch.setattr(qm, "walk_to", lambda i, t, p, m, xy, cap=400, block_sprites=True: calls.append((m, xy)))
+    monkeypatch.setattr(qm, "leave_interior", lambda i, m: calls.append(("leave", m)))
+    truth = _journey_truth()
+    pairs = set()
+    chain = {3: ("cerulean-south", 16), 62: ("back-door", 3), 17: ("edge-south", 5), 74: ("mats-out", 17)}
+    set_pos(io, 62, 0, 0)
+    assert qm.journey_step(io, truth, pairs, chain)
+    assert calls[-1] == (62, {(3, 0)})
+    set_pos(io, 17, 0, 0)
+    assert qm.journey_step(io, truth, pairs, chain)
+    truth["maps"]["74"] = truth["maps"]["62"]
+    set_pos(io, 74, 0, 0)
+    assert qm.journey_step(io, truth, pairs, chain)
+    assert calls[-1] == ("leave", 74)
+    set_pos(io, 99, 0, 0)
+    assert not qm.journey_step(io, truth, pairs, chain)  # off the chain
+
+
+def test_journey_step_cerulean_falls_back_to_the_house(monkeypatch):
+    io = FakeIO()
+    seen = []
+
+    def wt(i, t, p, m, xy, cap=400, block_sprites=True):
+        seen.append(xy)
+        if len(seen) == 1:
+            raise qm.QuartermasterError("no path")
+
+    monkeypatch.setattr(qm, "walk_to", wt)
+    set_pos(io, 3, 0, 0)
+    assert qm.journey_step(io, FakeIO and _journey_truth(), set(), {3: ("cerulean-south", 16)})
+    assert seen[1] == {(1, 0)}  # the door to 62
+
+
+def test_journey_arrives_or_raises(monkeypatch):
+    io = FakeIO()
+    set_pos(io, 5, 0, 0)
+    qm.journey(io, _journey_truth(), 5, {})  # already there
+    set_pos(io, 99, 0, 0)
+    with pytest.raises(qm.QuartermasterError, match="not on the chain"):
+        qm.journey(io, _journey_truth(), 5, {})
+    hops = {"n": 0}
+
+    def step(i, t, p, c):
+        hops["n"] += 1
+        return True
+
+    monkeypatch.setattr(qm, "journey_step", step)
+    set_pos(io, 3, 0, 0)
+    with pytest.raises(qm.QuartermasterError, match="hops without"):
+        qm.journey(io, _journey_truth(), 5, {3: ("edge-south", 16)}, max_hops=3)
+    assert hops["n"] == 3
+
+
+def test_journey_step_warp_and_step_off_breaks(monkeypatch):
+    calls = []
+    monkeypatch.setattr(qm, "walk_to", lambda i, t, p, m, xy, cap=400, block_sprites=True: calls.append((m, xy)))
+    truth = _journey_truth()
+    io = FakeIO(on_press=lambda i, b: set_pos(i, 16, 0, 0))  # the first step-off press hands over
+    set_pos(io, 3, 0, 1)
+    assert qm.journey_step(io, truth, set(), {3: ("edge-south", 16)})
+    assert io.pressed == ["down"]  # broke out after the map changed
+    io2 = FakeIO()
+    set_pos(io2, 3, 0, 0)
+    assert qm.journey_step(io2, truth, set(), {3: ("warp-to", 62)})
+    assert calls[-1] == (3, {(1, 0)})  # the extracted door tile for dest 62
+    io3 = FakeIO(on_press=lambda i, b: set_pos(i, 3, 27, 9))
+    set_pos(io3, 62, 3, 0)
+    assert qm.journey_step(io3, truth, set(), {62: ("back-door", 3)})
+    assert io3.pressed == ["up"]
+
+
+def test_cli_go_vermilion(tmp_path, monkeypatch, capsys):
+    class FakePyBoy:
+        def __init__(self, rom, window=None):
+            import collections
+
+            self.memory = collections.defaultdict(int)
+
+        def load_state(self, f):
+            f.read()
+
+        def save_state(self, f):
+            f.write(b"out")
+
+        def stop(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "pyboy", types.SimpleNamespace(PyBoy=FakePyBoy))
+    import rom_truth
+
+    monkeypatch.setattr(rom_truth, "load_truth", lambda *a, **k: {"maps": {}, "tile_pairs": []})
+    monkeypatch.setattr(
+        qm, "run_errand", lambda io, t, p, h: {"bought": [], "healed": False, "money": 0, "party": [], "bag": []}
+    )
+    seen = {}
+    monkeypatch.setattr(qm, "journey", lambda io, t, d, c: seen.update(dest=d))
+    state = tmp_path / "in.state"
+    state.write_bytes(b"x")
+    out = tmp_path / "out.state"
+    assert qm.main(["errand", "--state", str(state), "--out", str(out), "--go", "vermilion"]) == 0
+    assert seen["dest"] == qm.VERMILION_CITY_MAP

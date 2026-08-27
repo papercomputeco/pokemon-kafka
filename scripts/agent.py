@@ -129,6 +129,27 @@ CERULEAN_GYM_MAP = 65  # door mat at city (30,19); Misty on the top platform, ta
 ROUTE_24_MAP = 35  # Nugget Bridge: seven trainers up the x=10/11 column, grass past them
 ROUTE_25_MAP = 36  # nine more trainers along the y=2..9 path to Bill's
 BILLS_COTTAGE_MAP = 88  # the Route 25 sweep can wander in through its door; exit mats (2,7)/(3,7)
+ROUTE_5_MAP = 16
+UNDERGROUND_HOUSE_N_MAP = 71  # Route 5 side; its (4,4) warp is the stairs down
+UNDERGROUND_TUNNEL_MAP = 119  # 8x48, north-south
+UNDERGROUND_HOUSE_S_MAP = 74  # Route 6 side
+ROUTE_6_MAP = 17
+VERMILION_CITY_MAP = 5  # structurally confirmed: north edge is 17, east is Route 11
+# The southbound chain, every hop resolved from the extracted warp tables at runtime. route()
+# itself mis-resolves this leg (its 3->5 chain runs through a LAST_MAP mat into glitch map 231),
+# and Route 5's south EDGE leads into Saffron's guarded gate — hence an explicit chain.
+TRASHED_HOUSE_MAP = 62  # Cerulean's south region is fenced off; the ONLY land route runs
+# through this house's back-door mat at (3,0), re-entering the city in the yard (extraction:
+# the main region's flood never reaches row 35; the yard's does, x=11..23).
+VERMILION_CHAIN = {
+    CERULEAN_CITY_MAP: ("cerulean-south", ROUTE_5_MAP),
+    TRASHED_HOUSE_MAP: ("back-door", CERULEAN_CITY_MAP),
+    ROUTE_5_MAP: ("warp-to", UNDERGROUND_HOUSE_N_MAP),
+    UNDERGROUND_HOUSE_N_MAP: ("warp-to", UNDERGROUND_TUNNEL_MAP),
+    UNDERGROUND_TUNNEL_MAP: ("warp-to", UNDERGROUND_HOUSE_S_MAP),
+    UNDERGROUND_HOUSE_S_MAP: ("mats-out", ROUTE_6_MAP),
+    ROUTE_6_MAP: ("edge-south", VERMILION_CITY_MAP),
+}
 # Solo L24 Charmeleon potion-treadmills at 1 HP against Starmie (measured); the bridge gauntlet
 # is the XP that turns the fight. Below this level the badge-2 driver grinds instead of challenging.
 BADGE2_GRIND_LEVEL = 27
@@ -1197,6 +1218,19 @@ class PokemonAgent:
                 self.collector.discovery(self.turn_count, state.map_id, state.x, state.y, text)
             return "a"
 
+        # Cutscene observation: scripted sequences freeze the lane while text_box_active reads
+        # False (the Route 3 trainer-freeze lesson — the flag lies under script control). When
+        # the position is frozen, read the screen anyway: what a cutscene SAYS is the
+        # observation that tells the next probe what to do — the Bill event asked for the
+        # "Cell Separation System" in plain text while blind automation flailed past it.
+        prev = self.last_overworld_state
+        if prev is not None and (prev.map_id, prev.x, prev.y) == (state.map_id, state.x, state.y):
+            text = self.memory.read_dialogue()
+            if text and text != getattr(self, "_last_discovery", None):
+                self._last_discovery = text
+                self.log(f'DISCOVERY | cutscene map={state.map_id} pos=({state.x},{state.y}) text="{text}"')
+                self.collector.discovery(self.turn_count, state.map_id, state.x, state.y, text, kind="cutscene")
+
         # Viridian Mart parcel cutscene (pret ViridianMartDefaultScript): entering the Mart shows
         # the clerk's text, then SIMULATES the joypad to walk the player to the counter and hands
         # over OAK'S PARCEL. Our own directional inputs fight that simulated movement, so until the
@@ -1225,6 +1259,11 @@ class PokemonAgent:
         recruit = self._recruit_action(state)
         if recruit is not None:
             return recruit
+
+        # Badge 2 in hand: the southern loop owns its maps before anything else can wander them.
+        south = self._vermilion_action(state)
+        if south is not None:
+            return south
 
         # Badge 1 in hand, Badge 2 not: Cerulean is gym ground, not a corridor. Runs before the
         # Mt. Moon driver so the city never falls to its dead-end wander.
@@ -1649,6 +1688,47 @@ class PokemonAgent:
             i = (i + 1) % len(cells)
         self._recruit_i = i
         return None  # nothing reachable from this pocket: the map's own driver takes the turn
+
+    def _vermilion_action(self, state: OverworldState) -> str | None:
+        """Badge 2 in hand: drive the southern loop to Vermilion. ``None`` elsewhere.
+
+        One generic step over VERMILION_CHAIN, every target resolved from the extracted truth
+        at runtime: an edge hop walks off the named side, a warp hop walks onto the tile whose
+        extracted destination is the chain's next map, and a mats-out hop walks onto a
+        LAST_MAP mat and steps down off it (interior doors hand over on the step DOWN)."""
+        if not (state.badges & 0x02) or state.map_id not in VERMILION_CHAIN or not self._truth_ready():
+            return None
+        kind, _nxt = VERMILION_CHAIN[state.map_id]
+        m = self._truth["maps"][str(state.map_id)]
+        if kind == "cerulean-south":
+            # Two regions, one map id: the yard (behind the Trashed House) reaches the south
+            # row; the main city does not. Try the edge; unreachable means we are still in the
+            # main region, and the road south is the house's front door.
+            row = m["height"] - 1
+            south = {(x, row) for x in range(m["width"]) if m["grid"][row][x] == "1"}
+            if (state.x, state.y) in south:
+                return "down"
+            d = self._truth_walk(state, south, "cerulean south edge", avoid_warps=True, use_sprites=False)
+            if d is not None:
+                return d
+            doors = {(w[0], w[1]) for w in m["warps"] if w[2] == TRASHED_HOUSE_MAP}
+            return self._truth_walk(state, doors, "trashed house front door", avoid_warps=True, use_sprites=False)
+        if kind == "back-door":
+            targets = {(3, 0)}
+            d = self._truth_walk(state, targets, "trashed house back door", avoid_warps=True, use_sprites=False)
+            return d if d is not None else "up"
+        if kind == "edge-south":
+            row = m["height"] - 1
+            targets = {(x, row) for x in range(m["width"]) if m["grid"][row][x] == "1"}
+            d = self._truth_walk(state, targets, f"south edge of {state.map_id}", avoid_warps=True, use_sprites=False)
+            return d if d is not None else "down"  # an edge hands over on the step OFF it
+        if kind == "warp-to":
+            targets = {(w[0], w[1]) for w in m["warps"] if w[2] == _nxt}
+            return self._truth_walk(state, targets, f"warp {state.map_id}->{_nxt}", avoid_warps=True, use_sprites=False)
+        # mats-out: the interior's LAST_MAP mats, then off them.
+        targets = {(w[0], w[1]) for w in m["warps"] if w[2] == 0xFF}
+        d = self._truth_walk(state, targets, f"mats out of {state.map_id}", avoid_warps=True, use_sprites=False)
+        return d if d is not None else "down"
 
     def _badge2_action(self, state: OverworldState) -> str | None:
         """Badge 1 in hand, Badge 2 not: drive Cerulean's gym and Misty. ``None`` elsewhere.
@@ -2180,7 +2260,13 @@ class PokemonAgent:
         return True
 
     def _truth_walk(
-        self, state: OverworldState, targets: set, goal: str, use_learned: bool = True, use_sprites: bool = True
+        self,
+        state: OverworldState,
+        targets: set,
+        goal: str,
+        use_learned: bool = True,
+        use_sprites: bool = True,
+        avoid_warps: bool = False,
     ) -> str | None:
         """One step toward the nearest of ``targets`` on the current map, ROM-truth planned.
 
@@ -2220,6 +2306,13 @@ class PokemonAgent:
         # over-reported, a step the engine refused above) is layered on top, so a route is never
         # replanned through a wall this lane has already met.
         blocked = rt.sprite_tiles(self._truth, state.map_id) if use_sprites else set()
+        if avoid_warps:
+            # Surface navigation must never step on a warp it does not mean: a plan that
+            # threaded the Pokemon Center's door tile as ordinary floor pressed into it for
+            # 6,000 turns on the southbound leg (the door is grid-open; the engine treats it
+            # as an entrance, not a corridor).
+            mm = self._truth["maps"].get(str(state.map_id), {})
+            blocked |= {(w[0], w[1]) for w in mm.get("warps", ())} - set(targets)
         if use_learned:
             # Observed zeros help on the overworld — but a viewport observation of a WANDERING
             # body (a B2F Rocket beside the ladder mat) persists as a wall until re-observed, and
