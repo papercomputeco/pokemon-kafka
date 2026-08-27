@@ -267,3 +267,60 @@ def test_item_action_walks_the_bag_by_absolute_row(tmp_path):
     ag.run_battle_turn()
     pressed = [c.args[0] for c in ag.controller.press.call_args_list]
     assert pressed.count("up") == 1 and pressed[-1] == "a"  # one verified step up, then use
+
+
+# ---- the recruit roam ---------------------------------------------------------------------------
+
+
+def _recruit_ag(tmp_path, party_count=1):
+    ag = _ag(tmp_path)
+    ag._recruit_target = 2
+    ag.catch_wanted = {0xB9}
+    ag._truth = {
+        "maps": {str(ROUTE_24_MAP): {"width": 6, "height": 4, "grid": ["111111"] * 4, "grass": [[4, 1], [4, 3]]}},
+        "wilds": {str(ROUTE_24_MAP): {"grass_rate": 25, "grass": [[12, 0xB9]] * 10, "water_rate": 0, "water": []}},
+    }
+    return ag
+
+
+def test_recruit_roams_between_the_extracted_grass_extremes(tmp_path):
+    ag = _recruit_ag(tmp_path)
+    st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
+    assert ag._recruit_action(st) == "up"
+    assert ag._truth_walk.call_args[0][1] == {(4, 3)}  # the far grass end first
+    ag._truth_walk = MagicMock(return_value=None)  # reached it: turn around
+    assert ag._recruit_action(st) == "a"
+    ag._truth_walk = MagicMock(return_value="left")
+    assert ag._recruit_action(st) == "left"
+    assert ag._truth_walk.call_args[0][1] == {(4, 1)}
+
+
+def test_recruit_uses_open_cells_in_a_cave(tmp_path):
+    ag = _recruit_ag(tmp_path)
+    ag._truth["maps"][str(ROUTE_24_MAP)]["grass"] = []  # a cave: encounters on every floor tile
+    st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
+    assert ag._recruit_action(st) == "up"
+    assert ag._truth_walk.call_args[0][1] == {(5, 3)}  # the far open corner
+
+
+def test_recruit_inert_when_not_a_recruit_run(tmp_path):
+    st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
+    ag = _recruit_ag(tmp_path)
+    ag._recruit_target = None
+    assert ag._recruit_action(st) is None  # no --stop-on-party
+    ag = _recruit_ag(tmp_path)
+    ag.catch_wanted = set()
+    assert ag._recruit_action(st) is None  # nothing to catch
+    ag = _recruit_ag(tmp_path)
+    assert ag._recruit_action(OverworldState(map_id=ROUTE_24_MAP, party_count=2, badges=1)) is None  # target met
+    ag = _recruit_ag(tmp_path)
+    ag._truth["wilds"] = {}
+    assert ag._recruit_action(st) is None  # the ROM says nothing spawns here
+
+
+def test_decision_chain_gives_recruit_the_first_word(tmp_path):
+    ag = _ag(tmp_path)
+    ag._recruit_action = MagicMock(return_value="down")
+    ag._pewter_heal_action = MagicMock(return_value=None)
+    ag._badge2_action = MagicMock(side_effect=AssertionError("badge2 ran during a recruit roam"))
+    assert ag.choose_overworld_action(_st(ROUTE_24_MAP, 4, 20)) == "down"

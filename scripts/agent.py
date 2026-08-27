@@ -1219,6 +1219,13 @@ class PokemonAgent:
         if heal is not None:
             return heal
 
+        # A recruit run (--stop-on-party) ROAMS for encounters before any destination driver
+        # gets the map: the catch hook needs battles, and battles live where the ROM's own
+        # wild tables say they do.
+        recruit = self._recruit_action(state)
+        if recruit is not None:
+            return recruit
+
         # Badge 1 in hand, Badge 2 not: Cerulean is gym ground, not a corridor. Runs before the
         # Mt. Moon driver so the city never falls to its dead-end wander.
         badge2 = self._badge2_action(state)
@@ -1586,6 +1593,32 @@ class PokemonAgent:
                 f"HEAL | map=2 pos=({state.x},{state.y}) hp={party[0]['hp']}/{party[0]['max_hp']} "
                 f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
             )
+        return d
+
+    def _recruit_action(self, state: OverworldState) -> str | None:
+        """Roam for encounters while a --stop-on-party target is unmet. ``None`` otherwise.
+
+        Where to roam comes from the ROM, not from lore: on a map with grass, ping-pong between
+        the extracted grass extremes; in a cave (no grass tiles, but the map's wild table has a
+        nonzero rate — encounters fire on every floor tile there), ping-pong the open corners of
+        the reachable area. The catch hook owns every battle this walk triggers."""
+        tgt = getattr(self, "_recruit_target", None)
+        if not tgt or not self.catch_wanted or state.party_count >= tgt or not self._truth_ready():
+            return None
+        m = self._truth["maps"].get(str(state.map_id))
+        wilds = self._truth.get("wilds", {}).get(str(state.map_id))
+        if m is None or not wilds or not wilds.get("grass_rate"):
+            return None
+        cells = [tuple(c) for c in m.get("grass", [])]
+        if not cells:  # a cave: every open tile rolls encounters
+            cells = [(x, y) for y, row in enumerate(m["grid"]) for x, ch in enumerate(row) if ch == "1"]
+        cells.sort(key=lambda c: (c[1], c[0]))
+        ends = (cells[0], cells[-1])
+        target = ends[0] if getattr(self, "_recruit_flip", False) else ends[1]
+        d = self._truth_walk(state, {target}, "recruit roam")
+        if d is None:  # standing on (or cut off from) this end: turn around
+            self._recruit_flip = not getattr(self, "_recruit_flip", False)
+            return "a"
         return d
 
     def _badge2_action(self, state: OverworldState) -> str | None:
@@ -3274,6 +3307,8 @@ class PokemonAgent:
             brock-battle-learning skill).
         """
         self.log("Agent starting.")
+        # A --stop-on-party run is a RECRUIT run: the roam driver activates until the target.
+        self._recruit_target = stop_on_party
         self.collector.session(0, "start")
 
         if load_state:

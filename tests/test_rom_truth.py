@@ -27,6 +27,7 @@ from world_map import WorldMap
 WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
 LEDGES_OFF = 0x0D00
 STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
+WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -66,6 +67,12 @@ def build_rom() -> bytearray:
         + [0x00, WALK, 0x06, 0x80]  # down over the left-ledge tile
         + [0xFF]
     )
+
+    # Wild-encounter data at its real shape: a per-map pointer table (bank 1) where every map
+    # shares one grass block — ten (level, Rhydon) pairs at rate 8, no water table.
+    rom[WILD_BLOCK : WILD_BLOCK + 22] = bytes([8] + [3, 1] * 10 + [0])
+    for i in range(248):
+        rom[WILD_PTRS + 2 * i : WILD_PTRS + 2 * i + 2] = bytes([0x00, 0x48])
 
     # Species tables, at their real shapes, found by the same content signatures as on the real
     # ROM: base stats open with Bulbasaur's row, the dex-order table opens with Rhydon's 112, and
@@ -385,3 +392,40 @@ def test_species_table_extracts_names_dex_types_and_catch_rate(rom):
     assert "3" not in table  # unnamed ids are MISSINGNO slots
     with pytest.raises(ValueError, match="species tables"):
         rom_truth.species_table(bytes(0x8000))
+
+
+def test_wild_encounters_extracts_pools_by_structure(rom):
+    _, data = rom
+    wilds = rom_truth.wild_encounters(data, {1, 2})
+    assert len(wilds) == 248  # every fixture map shares the one block
+    assert wilds["51"]["grass_rate"] == 8
+    assert wilds["51"]["grass"] == [[3, 1]] * 10
+    assert wilds["51"]["water"] == []
+    with pytest.raises(ValueError, match="wild encounter"):
+        rom_truth.wild_encounters(bytes(0x8000), {1})
+
+
+def test_extract_carries_the_wild_tables(rom):
+    truth = parse_rom(rom[0], map_ids=[2])
+    assert truth["wilds"]["51"]["grass_rate"] == 8
+
+
+def test_wild_encounters_rejects_malformed_tables(rom):
+    _, data = rom
+    # Species filter: a table whose blocks name unknown species is not the table.
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(data, {2})
+    # An absurd rate disqualifies the block.
+    bad = bytearray(data)
+    bad[WILD_BLOCK] = 200
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(bad), {1})
+    # A block at the very last byte runs off the ROM on its water pass.
+    edge = bytearray(0x8000)
+    for i in range(248):
+        edge[0x4600 + 2 * i : 0x4600 + 2 * i + 2] = bytes([0xFF, 0x7F])
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(edge), {1})
+    # A ROM shorter than its own pointer table.
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(0x5000), {1})

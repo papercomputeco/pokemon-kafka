@@ -38,6 +38,14 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   the same 880 turns). See `benchmarks/2026-08-22-skill-matrix.md` for how six models failed
   this leg and collectively wrote the fix.
 
+- `beat13-oddish-recruit` — **the first recruit, on camera**: 17 turns in the Route 24
+  grass pocket, a wild L12 Oddish (the roster optimizer's #2 water counter), three Poke Balls,
+  and the party grows to two — carrying the new labeled `encounter` events (`disposition:
+  "caught"`) in its committed stream. Recorded from the badge-2 lineage
+  (`--stop-on-party 2 --catch Oddish`); the roam driver walks the ROM's own extracted grass
+  cells. The Paras twin of this beat is geographically locked until the southern loop opens:
+  the ROM's one-way ledges make Mt. Moon's east door unreachable from Cerulean.
+
 ### Why beat 11 needed a fix first
 
 `badge_to_mtmoon` had never landed — six genome lanes × 12,000 turns all wedged on

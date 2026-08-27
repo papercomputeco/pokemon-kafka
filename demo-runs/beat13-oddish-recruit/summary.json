@@ -1,0 +1,28 @@
+{
+  "turns": 17,
+  "battles_won": 2,
+  "maps_visited": 1,
+  "final_map_id": 35,
+  "final_x": 5,
+  "final_y": 29,
+  "badges": 1,
+  "party_size": 2,
+  "lead_hp": 66,
+  "stuck_count": 0,
+  "max_stuck_streak": 0,
+  "backtrack_restores": 0,
+  "encounters": 2,
+  "level_ups": 0,
+  "evolutions": 0,
+  "battle_wedge_recoveries": 0,
+  "brock_turns": null,
+  "brock_won": null,
+  "brock_lead_species": null,
+  "brock_lead_level": null,
+  "params": {
+    "strategy": "low",
+    "rom": "rom/pokemon_red.gb",
+    "label": "13 \u00b7 Route 24 \u2014 the first recruit"
+  },
+  "run_id": "20260827-004953-1c2b"
+}

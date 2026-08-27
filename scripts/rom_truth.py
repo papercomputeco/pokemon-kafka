@@ -272,6 +272,63 @@ def species_table(rom: bytes) -> dict[str, dict]:
     return out
 
 
+def wild_encounters(rom: bytes, species_ids: set[int]) -> dict[str, dict]:
+    """Per-map wild pools from the ROM's own encounter tables — the answer to "what spawns
+    where" that neither sampled telemetry nor recalled game lore can be trusted for (versions
+    differ; recall hallucinates — the species-id and type-map bugs both came from recall).
+
+    Format on cartridge: a per-map pointer table into one bank; each block is a grass rate byte
+    (0 = none, else 10 (level, species) pairs follow) then the same for water. The table is
+    located by STRUCTURE, never by address: the only run of 248 in-window pointers whose blocks
+    all parse with plausible rates, levels, and known species ids. Returns
+    ``{map_id: {"grass_rate": r, "grass": [[level, species], ...], "water_rate": r, "water": [...]}}``
+    for maps with any encounters."""
+
+    def parse_block(a: int):
+        out = {}
+        for kind in ("grass", "water"):
+            if a >= len(rom):
+                return None
+            rate = rom[a]
+            a += 1
+            out[kind + "_rate"] = rate
+            pairs = []
+            if rate:
+                if rate > 100 or a + 20 > len(rom):
+                    return None
+                for k in range(10):
+                    lv, sp = rom[a + 2 * k], rom[a + 2 * k + 1]
+                    if not (1 <= lv <= 80) or sp not in species_ids:
+                        return None
+                    pairs.append([lv, sp])
+                a += 20
+            out[kind] = pairs
+        return out
+
+    def try_base(base: int, bank: int):
+        lo = bank * 0x4000
+        blocks = {}
+        for mid in range(NUM_MAPS):
+            # base is bounded to whole banks, so off + 1 is always in range
+            off = base + 2 * mid
+            p = rom[off] | (rom[off + 1] << 8)
+            if not (0x4000 <= p < 0x8000):
+                return None
+            parsed = parse_block(lo + (p - 0x4000))
+            if parsed is None:
+                return None
+            if parsed["grass_rate"] or parsed["water_rate"]:
+                blocks[str(mid)] = parsed
+        return blocks if len(blocks) >= 20 else None  # a real overworld has dozens of wild maps
+
+    for bank in range(len(rom) // 0x4000):
+        for base in range(bank * 0x4000, (bank + 1) * 0x4000 - 2 * NUM_MAPS):
+            found = try_base(base, bank)
+            if found:
+                return found
+    raise ValueError("wild encounter tables not found in ROM")
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -279,11 +336,13 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         m = parse_map(rom, mid)
         if m is not None:
             maps[str(mid)] = m
+    species = species_table(rom)
     return {
         "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "tile_pairs": [list(t) for t in sorted(tile_pairs(rom))],
         "ledges": [list(t) for t in ledge_hops(rom)],
-        "species": species_table(rom),
+        "species": species,
+        "wilds": wild_encounters(rom, {int(k) for k in species}),
         "maps": maps,
     }
 
