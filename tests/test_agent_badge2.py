@@ -283,24 +283,37 @@ def _recruit_ag(tmp_path, party_count=1):
     return ag
 
 
-def test_recruit_roams_between_the_extracted_grass_extremes(tmp_path):
+def test_recruit_patrols_the_extracted_grass_anchors(tmp_path):
     ag = _recruit_ag(tmp_path)
     st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
     assert ag._recruit_action(st) == "up"
-    assert ag._truth_walk.call_args[0][1] == {(4, 3)}  # the far grass end first
-    ag._truth_walk = MagicMock(return_value=None)  # reached it: turn around
-    assert ag._recruit_action(st) == "a"
-    ag._truth_walk = MagicMock(return_value="left")
+    assert ag._truth_walk.call_args[0][1] == {(4, 1)}  # the first anchor in patrol order
+    # An unreachable anchor is skipped for the next, in the same turn — never an "a" standstill.
+    ag._truth_walk = MagicMock(side_effect=[None, "left"])
     assert ag._recruit_action(st) == "left"
+    assert ag._truth_walk.call_args[0][1] == {(4, 3)}
+    # Standing on an anchor advances past it without consuming a walk.
+    ag._truth_walk = MagicMock(return_value="down")
+    assert ag._recruit_action(OverworldState(map_id=ROUTE_24_MAP, x=4, y=3, badges=0x01, party_count=1)) == "down"
     assert ag._truth_walk.call_args[0][1] == {(4, 1)}
+    # Nothing reachable: the map's own driver takes the turn.
+    ag._truth_walk = MagicMock(return_value=None)
+    assert ag._recruit_action(st) is None
 
 
-def test_recruit_uses_open_cells_in_a_cave(tmp_path):
+def test_recruit_anchors_beside_the_warps_in_a_cave(tmp_path):
+    """Warp-tile anchors made the roam a floor-to-floor teleport loop (10 fights in 30,000
+    turns); it patrols the tiles BESIDE the ladders instead, and only where the ROM's wild
+    table says something wanted lives."""
     ag = _recruit_ag(tmp_path)
-    ag._truth["maps"][str(ROUTE_24_MAP)]["grass"] = []  # a cave: encounters on every floor tile
-    st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
+    m = ag._truth["maps"][str(ROUTE_24_MAP)]
+    m["grass"] = []
+    m["warps"] = [[0, 0, 255, 0], [5, 3, 255, 1]]
+    st = OverworldState(map_id=ROUTE_24_MAP, x=2, y=2, badges=0x01, party_count=1)
     assert ag._recruit_action(st) == "up"
-    assert ag._truth_walk.call_args[0][1] == {(5, 3)}  # the far open corner
+    assert ag._truth_walk.call_args[0][1] == {(0, 1)}  # beside the first warp, never on it
+    m["warps"] = [[0, 0, 255, 0]]  # a single anchor is no patrol
+    assert ag._recruit_action(st) is None
 
 
 def test_recruit_inert_when_not_a_recruit_run(tmp_path):
@@ -324,3 +337,12 @@ def test_decision_chain_gives_recruit_the_first_word(tmp_path):
     ag._pewter_heal_action = MagicMock(return_value=None)
     ag._badge2_action = MagicMock(side_effect=AssertionError("badge2 ran during a recruit roam"))
     assert ag.choose_overworld_action(_st(ROUTE_24_MAP, 4, 20)) == "down"
+
+
+def test_recruit_skips_maps_whose_rom_pool_lacks_the_wanted_species(tmp_path):
+    """Route 3's grass must not eat a Paras hunt: roam only where the extracted pool says a
+    wanted species actually spawns."""
+    ag = _recruit_ag(tmp_path)
+    ag._truth["wilds"][str(ROUTE_24_MAP)]["grass"] = [[3, 0x24]] * 10  # Pidgey country
+    st = OverworldState(map_id=ROUTE_24_MAP, x=0, y=0, badges=0x01, party_count=1)
+    assert ag._recruit_action(st) is None

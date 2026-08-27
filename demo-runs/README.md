@@ -43,8 +43,16 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   and the party grows to two — carrying the new labeled `encounter` events (`disposition:
   "caught"`) in its committed stream. Recorded from the badge-2 lineage
   (`--stop-on-party 2 --catch Oddish`); the roam driver walks the ROM's own extracted grass
-  cells. The Paras twin of this beat is geographically locked until the southern loop opens:
-  the ROM's one-way ledges make Mt. Moon's east door unreachable from Cerulean.
+  cells. The Paras twin
+  came from starting EARLIER instead (the operator's call): the badge-1 lineage still stands
+  west of the one-way ledges.
+
+- `beat14-paras-recruit` — **the Paras hunt**: the roster optimizer's #1 water counter,
+  caught where the ROM's own wild tables put it. From the Brock-victory seed: Pewter Mart
+  errand (6 balls), Route 3, into Mt. Moon, and the recruit patrol walks ladder-to-ladder
+  until a wild L10 Paras appears on B1F — two balls, turn 555, sixteen fights of XP on the
+  way. The patrol's three measured lessons (never anchor ON a warp, never yield a roamable
+  floor to the ladder-hunter, never answer a standstill with "a") are in the agent.
 
 ### Why beat 11 needed a fix first
 

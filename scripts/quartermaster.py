@@ -83,11 +83,17 @@ class Center:
 # (2,5) facing left; stock order Poke Ball, Potion, ... (indexes past 1 unpurchased so far).
 SHOPS = {
     3: Shop(3, (25, 25), 67, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
+    # Pewter: door (23,17) -> map 56 per the extracted warp table; the interior is the same 8x8
+    # template as Cerulean's (clerk sprite at (0,5)). Stock order is verified by the purchase
+    # itself — buy() reports the bag delta per requested item, so a wrong index reads as 0 gained.
+    2: Shop(2, (23, 17), 56, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
 }
 # Cerulean Center: door (19,17) in the city; the nurse (3,1) is talked to across the counter
 # from (3,3) facing up — the same geometry as Pewter's flow.
 CENTERS = {
     3: Center(3, (19, 17), 64, (3, 3), "up", ((3, 7), (4, 7))),
+    # Pewter: door (13,25) -> map 58; nurse sprite (3,1), the standard counter geometry.
+    2: Center(2, (13, 25), 58, (3, 3), "up", ((3, 7), (4, 7))),
 }
 
 

@@ -1609,17 +1609,46 @@ class PokemonAgent:
         wilds = self._truth.get("wilds", {}).get(str(state.map_id))
         if m is None or not wilds or not wilds.get("grass_rate"):
             return None
+        # Roam only where the ROM's own pool holds a wanted species — otherwise Route 3's grass
+        # would eat a Paras hunt forever on the way to the mountain that actually has one.
+        if not ({sp for _, sp in wilds.get("grass", [])} & self.catch_wanted):
+            return None
         cells = [tuple(c) for c in m.get("grass", [])]
-        if not cells:  # a cave: every open tile rolls encounters
-            cells = [(x, y) for y, row in enumerate(m["grid"]) for x, ch in enumerate(row) if ch == "1"]
+        if not cells:
+            # A cave: every floor tile rolls encounters. Anchor on tiles BESIDE the warps —
+            # the one neighborhood the clear proved reachable — never ON them: warp-tile
+            # anchors turned the roam into a floor-to-floor teleport loop that rolled no
+            # encounters at all (10 fights in 30,000 turns, measured). Approach a ladder,
+            # turn, walk the corridor to the next.
+            for w in m.get("warps", []):
+                wx, wy = w[0], w[1]
+                for nx, ny in ((wx, wy + 1), (wx, wy - 1), (wx - 1, wy), (wx + 1, wy)):
+                    if 0 <= nx < m["width"] and 0 <= ny < m["height"] and m["grid"][ny][nx] == "1":
+                        cells.append((nx, ny))
+                        break
+        if len(cells) < 2:
+            return None
         cells.sort(key=lambda c: (c[1], c[0]))
-        ends = (cells[0], cells[-1])
-        target = ends[0] if getattr(self, "_recruit_flip", False) else ends[1]
-        d = self._truth_walk(state, {target}, "recruit roam")
-        if d is None:  # standing on (or cut off from) this end: turn around
-            self._recruit_flip = not getattr(self, "_recruit_flip", False)
-            return "a"
-        return d
+        # PATROL all anchors round-robin, advancing past any that is unreachable or underfoot,
+        # in the same turn. Two hard-won rules live here: never answer a standstill with "a"
+        # (it fed the stuck machinery until a backtrack undid the approach), and never yield a
+        # roamable map to its destination driver — the roam-on-60/dungeon-on-61 alternation
+        # re-created the inter-floor spring the dungeon drive had killed (measured: the lane
+        # bounced 60<->61 for 10,000+ turns). Bodies are not walls in here: press into them,
+        # the fights a roam triggers are the point of a roam.
+        i = getattr(self, "_recruit_i", 0) % len(cells)
+        for _ in range(len(cells)):
+            target = cells[i]
+            if (state.x, state.y) == target:
+                i = (i + 1) % len(cells)
+                continue
+            d = self._truth_walk(state, {target}, "recruit roam", use_learned=False, use_sprites=False)
+            if d is not None:
+                self._recruit_i = i
+                return d
+            i = (i + 1) % len(cells)
+        self._recruit_i = i
+        return None  # nothing reachable from this pocket: the map's own driver takes the turn
 
     def _badge2_action(self, state: OverworldState) -> str | None:
         """Badge 1 in hand, Badge 2 not: drive Cerulean's gym and Misty. ``None`` elsewhere.
