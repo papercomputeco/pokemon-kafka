@@ -217,6 +217,39 @@ def build_battle_outcome_event(
     )
 
 
+def build_encounter_event(
+    turn: int,
+    species: str,
+    level: int,
+    enemy_type: str,
+    battle_type: int,
+    map_id: int,
+    x: int,
+    y: int,
+    disposition: str,
+    party_size: int,
+) -> dict:
+    """One labeled encounter for the roster catalog: who was met, WHERE (map and tile), and how
+    it ended — ``caught`` / ``won`` / ``escaped_or_lost``. This is the row the roster optimizer
+    aggregates (scripts/encounters.py): which species live where, at what levels, with which
+    observed types — measured from our own runs, never recalled from a guide."""
+    return _envelope(
+        "encounter",
+        turn,
+        {
+            "species": species,
+            "level": level,
+            "enemy_type": enemy_type,
+            "battle_type": battle_type,
+            "map_id": map_id,
+            "x": x,
+            "y": y,
+            "disposition": disposition,
+            "party_size": party_size,
+        },
+    )
+
+
 def build_map_change_event(turn: int, prev_map: int, new_map: int, x: int, y: int) -> dict:
     return _envelope(
         "map_change",
@@ -396,6 +429,23 @@ class GameEventCollector:
             build_battle_end_event(
                 turn, won, battle_turns, battle_type, map_id, opponent_species, opponent_level, party
             )
+        )
+
+    def encounter(
+        self,
+        turn: int,
+        species: str,
+        level: int,
+        enemy_type: str,
+        battle_type: int,
+        map_id: int,
+        x: int,
+        y: int,
+        disposition: str,
+        party_size: int,
+    ):
+        self._emit(
+            build_encounter_event(turn, species, level, enemy_type, battle_type, map_id, x, y, disposition, party_size)
         )
 
     def overworld(

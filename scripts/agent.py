@@ -36,6 +36,7 @@ except ImportError:
     Image = None
 
 import advice
+import quartermaster
 from game_events import GameEventCollector
 from game_profile import RED_BLUE, YELLOW, detect_profile
 from memory_file import MemoryFile
@@ -124,6 +125,13 @@ MT_MOON_DUNGEON_MAPS = (MT_MOON_1F_MAP, MT_MOON_B1F_MAP, MT_MOON_B2F_MAP)
 ROUTE_3_MAP = 14  # the road between Pewter and Mt. Moon (empty warp table: t14 probe, 2026-08-18)
 ROUTE_4_MAP = 15  # west stub feeds Mt. Moon's door; the east half (x >= 22) is the road to Cerulean
 CERULEAN_CITY_MAP = 3
+CERULEAN_GYM_MAP = 65  # door mat at city (30,19); Misty on the top platform, talked to from (5,2)
+ROUTE_24_MAP = 35  # Nugget Bridge: seven trainers up the x=10/11 column, grass past them
+ROUTE_25_MAP = 36  # nine more trainers along the y=2..9 path to Bill's
+BILLS_COTTAGE_MAP = 88  # the Route 25 sweep can wander in through its door; exit mats (2,7)/(3,7)
+# Solo L24 Charmeleon potion-treadmills at 1 HP against Starmie (measured); the bridge gauntlet
+# is the XP that turns the fight. Below this level the badge-2 driver grinds instead of challenging.
+BADGE2_GRIND_LEVEL = 27
 PEWTER_BUILDING_MAPS = (PEWTER_CITY_MAP, PEWTER_GYM_MAP, 52, 56, PEWTER_CENTER_MAP)
 
 # Max fight turns the agent will spend in a single wild battle WITHOUT the enemy's HP dropping
@@ -781,6 +789,8 @@ class PokemonAgent:
         self.rom_path = rom_path
         self.pyboy = PyBoy(rom_path, window="null")
         self.controller = GameController(self.pyboy)
+        # Species ids the quartermaster may spend balls on (--catch); empty = never throw.
+        self.catch_wanted: set[int] = set()
         overrides = {"red_blue": RED_BLUE, "yellow": YELLOW}
         self.profile = overrides.get(game or "") or detect_profile(self.pyboy)
         self.memory = MemoryReader(self.pyboy, self.profile)
@@ -1209,6 +1219,22 @@ class PokemonAgent:
         if heal is not None:
             return heal
 
+        # A recruit run (--stop-on-party) ROAMS for encounters before any destination driver
+        # gets the map: the catch hook needs battles, and battles live where the ROM's own
+        # wild tables say they do.
+        recruit = self._recruit_action(state)
+        if recruit is not None:
+            return recruit
+
+        # Badge 1 in hand, Badge 2 not: Cerulean is gym ground, not a corridor. Runs before the
+        # Mt. Moon driver so the city never falls to its dead-end wander.
+        badge2 = self._badge2_action(state)
+        if badge2 is not None:
+            if state.map_id == CERULEAN_GYM_MAP:
+                # No restores in a gym, for Brock's reason: a backtrack undoes a correct climb.
+                self._quest_nav_active = True
+            return badge2
+
         # Badge 1 in hand: the way to Mt. Moon. Takes the exit of whichever map the lane is on —
         # the only door on 54, the east edge on 2, the cave warps on 14 — before the pre-badge
         # Pewter machinery or the waypoint navigator can steer it at the Gym door again.
@@ -1568,6 +1594,144 @@ class PokemonAgent:
                 f"ratio={ratio:.2f} -> Center door {PEWTER_CENTER_DOOR} (trip {trips + 1})"
             )
         return d
+
+    def _recruit_action(self, state: OverworldState) -> str | None:
+        """Roam for encounters while a --stop-on-party target is unmet. ``None`` otherwise.
+
+        Where to roam comes from the ROM, not from lore: on a map with grass, ping-pong between
+        the extracted grass extremes; in a cave (no grass tiles, but the map's wild table has a
+        nonzero rate — encounters fire on every floor tile there), ping-pong the open corners of
+        the reachable area. The catch hook owns every battle this walk triggers."""
+        tgt = getattr(self, "_recruit_target", None)
+        if not tgt or not self.catch_wanted or state.party_count >= tgt or not self._truth_ready():
+            return None
+        m = self._truth["maps"].get(str(state.map_id))
+        wilds = self._truth.get("wilds", {}).get(str(state.map_id))
+        if m is None or not wilds or not wilds.get("grass_rate"):
+            return None
+        # Roam only where the ROM's own pool holds a wanted species — otherwise Route 3's grass
+        # would eat a Paras hunt forever on the way to the mountain that actually has one.
+        if not ({sp for _, sp in wilds.get("grass", [])} & self.catch_wanted):
+            return None
+        cells = [tuple(c) for c in m.get("grass", [])]
+        if not cells:
+            # A cave: every floor tile rolls encounters. Anchor on tiles BESIDE the warps —
+            # the one neighborhood the clear proved reachable — never ON them: warp-tile
+            # anchors turned the roam into a floor-to-floor teleport loop that rolled no
+            # encounters at all (10 fights in 30,000 turns, measured). Approach a ladder,
+            # turn, walk the corridor to the next.
+            for w in m.get("warps", []):
+                wx, wy = w[0], w[1]
+                for nx, ny in ((wx, wy + 1), (wx, wy - 1), (wx - 1, wy), (wx + 1, wy)):
+                    if 0 <= nx < m["width"] and 0 <= ny < m["height"] and m["grid"][ny][nx] == "1":
+                        cells.append((nx, ny))
+                        break
+        if len(cells) < 2:
+            return None
+        cells.sort(key=lambda c: (c[1], c[0]))
+        # PATROL all anchors round-robin, advancing past any that is unreachable or underfoot,
+        # in the same turn. Two hard-won rules live here: never answer a standstill with "a"
+        # (it fed the stuck machinery until a backtrack undid the approach), and never yield a
+        # roamable map to its destination driver — the roam-on-60/dungeon-on-61 alternation
+        # re-created the inter-floor spring the dungeon drive had killed (measured: the lane
+        # bounced 60<->61 for 10,000+ turns). Bodies are not walls in here: press into them,
+        # the fights a roam triggers are the point of a roam.
+        i = getattr(self, "_recruit_i", 0) % len(cells)
+        for _ in range(len(cells)):
+            target = cells[i]
+            if (state.x, state.y) == target:
+                i = (i + 1) % len(cells)
+                continue
+            d = self._truth_walk(state, {target}, "recruit roam", use_learned=False, use_sprites=False)
+            if d is not None:
+                self._recruit_i = i
+                return d
+            i = (i + 1) % len(cells)
+        self._recruit_i = i
+        return None  # nothing reachable from this pocket: the map's own driver takes the turn
+
+    def _badge2_action(self, state: OverworldState) -> str | None:
+        """Badge 1 in hand, Badge 2 not: drive Cerulean's gym and Misty. ``None`` elsewhere.
+
+        Truth-planned like Route 4 east. The city walk targets the gym door mat (30,19) — a
+        building door warps on entry — and the interior walk targets (4,3), the tile under the
+        top platform, then presses UP into Misty: walking into a leader (or a trainer's line of
+        sight on the way) opens the fight, the battle turn owns it from there, and the Cascade
+        bit turning on switches this driver off."""
+        if not (state.badges & 0x01) or (state.badges & 0x02):
+            return None
+        grind_maps = (CERULEAN_CITY_MAP, CERULEAN_GYM_MAP, ROUTE_24_MAP, ROUTE_25_MAP, BILLS_COTTAGE_MAP)
+        if state.map_id not in grind_maps or not self._truth_ready():
+            return None
+        if self.memory._read(self.memory.PARTY_BASE + 33) < BADGE2_GRIND_LEVEL:
+            g = self._badge2_grind_action(state)
+            if g is not None:
+                return g
+        # At challenge level, everything north of the city is just the road home: out of
+        # Bill's cottage (round 2 ended parked in it — no driver owned map 88), west off
+        # Route 25, south off the bridge, then the gym.
+        if state.map_id == BILLS_COTTAGE_MAP:
+            d = self._truth_walk(state, {(2, 7), (3, 7)}, "leave bill's")
+            return d if d is not None else "down"  # interior mats hand over on the step DOWN
+        if state.map_id == ROUTE_25_MAP:
+            m = self._truth["maps"][str(ROUTE_25_MAP)]
+            west = {(0, y) for y in range(m["height"]) if m["grid"][y][0] == "1"}
+            d = self._truth_walk(state, west, "route 25 home")
+            return d if d is not None else "left"
+        if state.map_id == ROUTE_24_MAP:
+            m = self._truth["maps"][str(ROUTE_24_MAP)]
+            south = {(x, m["height"] - 1) for x in range(m["width"]) if m["grid"][m["height"] - 1][x] == "1"}
+            d = self._truth_walk(state, south, "bridge home")
+            return d if d is not None else "down"
+        if state.map_id == CERULEAN_CITY_MAP:
+            return self._truth_walk(state, {(30, 19)}, "cerulean gym door")
+        if state.map_id == CERULEAN_GYM_MAP:
+            # Misty stands at (4,2) on the fenced platform; the talkable tile is (5,2), HER
+            # EAST SIDE, reached (5,3) -> up (screenshot-verified: "Hi, you're a new face!").
+            # (4,3), her south side, is usually parked on by the defeated swimmer's body — a
+            # beaten Gen 1 trainer never despawns (the B2F Rocket lesson, indoors) — so it is
+            # the fallback, not the plan. The alternating face/A is one press to turn, one to
+            # talk; the battle flag takes the turn over once her speech ends.
+            if (state.x, state.y) == (5, 2):
+                return "left" if self.turn_count % 2 == 0 else "a"
+            if (state.x, state.y) == (5, 3):
+                return "up"
+            if (state.x, state.y) == (4, 3):
+                return "up" if self.turn_count % 2 == 0 else "a"
+            return self._truth_walk(state, {(5, 3)}, "misty approach")
+
+    def _badge2_grind_action(self, state: OverworldState) -> str | None:
+        """Below BADGE2_GRIND_LEVEL: ping-pong the Nugget Bridge gauntlet for XP (and whatever
+        the --catch list recruits from the Route 24/25 grass). The walk only carries the lane
+        past sight lines — every fight it triggers belongs to the battle engine. A white-out
+        self-corrects: the Center revives the lane in Cerulean at full HP with its XP kept."""
+        if state.map_id == CERULEAN_CITY_MAP:
+            m = self._truth["maps"][str(CERULEAN_CITY_MAP)]
+            row0 = {(x, 0) for x in range(m["width"]) if m["grid"][0][x] == "1"}
+            d = self._truth_walk(state, row0, "to nugget bridge")
+            return d if d is not None else "up"  # an edge hands the lane over on the step OFF it
+        if state.map_id == ROUTE_24_MAP:
+            if getattr(self, "_grind_flip", False):
+                d = self._truth_walk(state, {(10, 16), (11, 16)}, "bridge head")
+                if d is None:
+                    self._grind_flip = False
+                return d if d is not None else "up"
+            m = self._truth["maps"][str(ROUTE_24_MAP)]
+            east = {(m["width"] - 1, y) for y in range(m["height"]) if m["grid"][y][m["width"] - 1] == "1"}
+            d = self._truth_walk(state, east, "to route 25")
+            return d if d is not None else "right"
+        if state.map_id == ROUTE_25_MAP:
+            if getattr(self, "_grind_flip", False):
+                m = self._truth["maps"][str(ROUTE_25_MAP)]
+                west = {(0, y) for y in range(m["height"]) if m["grid"][y][0] == "1"}
+                d = self._truth_walk(state, west, "back to route 24")
+                return d if d is not None else "left"
+            d = self._truth_walk(state, {(40, 4), (40, 3)}, "route 25 sweep")
+            if d is None:
+                self._grind_flip = True
+                return "left"
+            return d
+        return None
 
     def _mtmoon_action(self, state: OverworldState) -> str | None:
         """With Badge 1 in hand, drive the current map's own exit toward Mt. Moon. ``None`` elsewhere.
@@ -2352,8 +2516,44 @@ class PokemonAgent:
         if not menu_up and battle.battle_type == 0:
             self.turn_count += 1
             return  # the battle ended while settling (the outer loop records the outcome)
+        if not menu_up and battle.battle_type != 0 and battle.enemy_hp == 0:
+            # The enemy is down but the battle lingers: KO text, level-up — or the four-move
+            # LEARN prompt, which parked the Misty fight for 2,400 turns (screenshot-diagnosed:
+            # "AAAAAAAAA is trying to learn..."). Refuse-and-advance: B answers NO to the
+            # delete-a-move menu, A confirms the text either way. Move management is a later
+            # engine; a known move is never gambled away to a menu mash mid-fight.
+            self.controller.press("b")
+            self.controller.wait(20)
+            self.controller.press("a")
+            self.controller.wait(20)
+            self.turn_count += 1
+            return
         bag_healing = self.memory.find_healing_item()
-        action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
+        # The quartermaster's catch policy outranks the fight: a wanted, weakened wild with a
+        # ball in the bag is a roster slot, and the ball throw is the same battle-menu path the
+        # potion action already drives (scripts/quartermaster.py). CAPPED at 3 throws per enemy:
+        # the hook bypasses choose_action, which means it also bypasses the battle STALL GUARD —
+        # the roster bench's x=64 lane threw at one wedged-menu Rattata for 2,900 turns because
+        # nothing ever pressed the unstick. Past the cap the strategy takes the turn back and its
+        # own machinery (unstick, fight, flee) owns the battle.
+        catch = None
+        if self.catch_wanted:
+            if battle.enemy_species != getattr(self, "_catch_enemy", None):
+                self._catch_enemy = battle.enemy_species
+                self._catch_throws = 0
+            if self._catch_throws < 3:
+                catch = quartermaster.should_catch(
+                    battle, self.memory.read_party_species(), self.memory.read_bag_items(), self.catch_wanted
+                )
+        if catch is not None:
+            self._catch_throws += 1
+            action = {"action": "item", "item": "ball", "bag_index": catch[0]}
+            self.log(
+                f"CATCH | ball (bag {catch[0]}) at L{battle.enemy_level} {battle.enemy_species_name} "
+                f"{battle.enemy_hp}/{battle.enemy_max_hp}"
+            )
+        else:
+            action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
 
         act_desc = action["action"]
         if act_desc == "fight":
@@ -2486,9 +2686,19 @@ class PokemonAgent:
         elif action["action"] == "item":
             self._select_battle_menu("item")
             self.controller.wait(20)
-            # Navigate to the correct item slot (the bag is a vertical list)
             bag_index = action.get("bag_index", 0)
-            self.controller.navigate_menu(bag_index)
+            # The battle bag REMEMBERS its cursor between opens, so the blind
+            # navigate_menu(bag_index) walk drifted one row per reopen until it lived on
+            # CANCEL — 88,000 turns parked over a wild NidoranF (screenshot-diagnosed,
+            # 2026-08-26). Walk to the ABSOLUTE row instead: scroll offset + cursor, read
+            # live each step, the same verified-walk discipline as the battle menu itself.
+            for _ in range(16):
+                pos = self.memory._read(0xCC36) + self.memory._read(0xCC26)  # wListScrollOffset + cursor
+                if pos == bag_index:
+                    break
+                self.controller.press("down" if pos < bag_index else "up")
+                self.controller.wait(12)
+            self.controller.press("a")
             self.controller.wait(120)
             self.controller.mash_a(5, delay=30)
 
@@ -2629,16 +2839,42 @@ class PokemonAgent:
         The screen is stuck in a submenu/text state that the run/fight selections cannot leave
         (see BATTLE_WEDGE_TURNS). Back out with B, repeated so it registers past nested menus,
         then idle briefly so the top battle menu is redrawn before this turn's action selects
-        from it. B only — an A here would re-enter whatever the remembered cursor points at.
+        from it. B first — an A on an open battle menu would re-enter whatever the remembered
+        cursor points at. But if FIGHT is still not drawn after the volley, the screen is
+        B-PROOF and there is no remembered cursor to fear: the four-move learn flow cycles
+        "trying to learn -> delete a move? -> abandon learning?" forever under pure B (measured:
+        8,000 turns parked in the Misty fight), and only an A on the abandon confirm leaves it.
         """
         self.log(
             f"WEDGE | battle frozen (attempt {self._battle_wedge_attempts}/{BATTLE_WEDGE_MAX_ATTEMPTS}) — "
-            "recovery: B x8, wait 120"
+            "recovery: B x8, wait 120, A if still no menu"
         )
         for _ in range(8):
             self.controller.press("b")
             self.controller.wait(8)
         self.controller.wait(120)
+        if not self.memory.battle_menu_visible():
+            # B-proof screen: the four-move LEARN flow. Pure B cycles it forever (measured 8,000
+            # turns in the Misty fight) and blind B,A pairs lose to its multi-box text. Resolve
+            # by LEARNING into the worst slot: press A until the forget picker is up (its menu
+            # extent reads 3 — the four-move list), give up the lowest-power move, mash the
+            # rest. On another B-proof screen (a forced switch) the A presses select a party
+            # mon, which is the needed action there too.
+            for _ in range(8):
+                if self.memory._read(0xCC28) == 3:  # wMaxMenuItem: the 4-move picker is drawn
+                    moves = [self.memory._read(self.memory.PARTY_BASE + 8 + j) for j in range(4)]
+                    powers = [MOVE_DATA.get(m, (None, None, 0, 0))[2] for m in moves]
+                    slot = powers.index(min(powers))
+                    self.log(f"WEDGE | learn flow: giving up slot {slot + 1} (move {moves[slot]:#04x})")
+                    for _ in range(slot):
+                        self.controller.press("down")
+                        self.controller.wait(12)
+                    self.controller.press("a")
+                    self.controller.wait(60)
+                    self.controller.mash_a(4, delay=30)
+                    break
+                self.controller.press("a")
+                self.controller.wait(60)
 
     def _resolve_brock_badge(self, won: bool) -> bool:
         """Whether Brock is really beaten = the Boulder Badge bit. It is awarded during Brock's
@@ -2946,7 +3182,7 @@ class PokemonAgent:
         }
 
     @staticmethod
-    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None) -> bool:
+    def _stop_condition_met(ow, stop_on_map=None, stop_on_badge=None, stop_min_x=None, stop_on_party=None) -> bool:
         """True once the overworld state satisfies a --stop-on-* condition.
 
         ``stop_min_x`` narrows a map condition to x >= that column. Needed when arriving on the
@@ -2957,6 +3193,9 @@ class PokemonAgent:
         if stop_on_map is not None and ow.map_id == stop_on_map and (stop_min_x is None or ow.x >= stop_min_x):
             return True
         if stop_on_badge is not None and bin(ow.badges).count("1") >= stop_on_badge:
+            return True
+        # The recruit condition: the quartermaster's catch hook grew the party to the target.
+        if stop_on_party is not None and ow.party_count >= stop_on_party:
             return True
         return False
 
@@ -3074,6 +3313,7 @@ class PokemonAgent:
         stop_on_map=None,
         stop_on_badge=None,
         stop_min_x=None,
+        stop_on_party=None,
         stop_state=None,
         fitness_every: int = 0,
         fitness_path: str | None = None,
@@ -3096,6 +3336,8 @@ class PokemonAgent:
             brock-battle-learning skill).
         """
         self.log("Agent starting.")
+        # A --stop-on-party run is a RECRUIT run: the roam driver activates until the target.
+        self._recruit_target = stop_on_party
         self.collector.session(0, "start")
 
         if load_state:
@@ -3147,6 +3389,8 @@ class PokemonAgent:
                     self._battle_start_turn = self.turn_count
                     self._battle_type = battle.battle_type
                     self._battle_map_id = self.memory._read(self.memory.ADDR_MAP_ID)
+                    prev_ow = self.last_overworld_state
+                    self._battle_pos = (prev_ow.x, prev_ow.y) if prev_ow is not None else (-1, -1)
                     self._battle_opponent_species = battle.enemy_species_name
                     self._battle_opponent_level = battle.enemy_level
                     # Whether the Boulder Badge was already in hand when this fight started. Brock
@@ -3156,7 +3400,8 @@ class PokemonAgent:
                     # and whether a heal item is on hand.
                     self._battle_my_hp_start = battle.player_hp
                     self._battle_my_max_hp = battle.player_max_hp
-                    self._battle_enemy_type = battle.enemy_type_name
+                    t1, t2 = battle.enemy_type_name, TYPE_ID_MAP.get(battle.enemy_type2, "")
+                    self._battle_enemy_type = t1 if not t2 or t2 == t1 else f"{t1}/{t2}"
                     self._battle_my_move_types = [MOVE_DATA.get(m, ("", "none", 0, 0))[1] for m in battle.moves if m]
                     self.log(
                         f"BATTLE START | type={self._battle_type} map={self._battle_map_id} "
@@ -3283,6 +3528,28 @@ class PokemonAgent:
                         self.memory.read_party(),
                     )
 
+                    # The labeled ENCOUNTER row — the roster catalog's unit: who, where (map AND
+                    # tile), and how it ended. "caught" is party growth across the battle, the
+                    # only disposition the win flag can't express.
+                    party_after = self.memory.read_party()
+                    if len(party_after) > len(self._pre_battle_species):
+                        disposition = "caught"
+                    elif won:
+                        disposition = "won"
+                    else:
+                        disposition = "escaped_or_lost"
+                    self.collector.encounter(
+                        self.turn_count,
+                        self._battle_opponent_species,
+                        self._battle_opponent_level,
+                        getattr(self, "_battle_enemy_type", ""),
+                        self._battle_type,
+                        self._battle_map_id,
+                        *getattr(self, "_battle_pos", (-1, -1)),
+                        disposition,
+                        len(party_after),
+                    )
+
                     # Emit the labeled WIN-PROBABILITY row: start-of-battle features + result.
                     self.collector.battle_outcome(
                         self.turn_count,
@@ -3317,9 +3584,9 @@ class PokemonAgent:
                             self.pyboy.save_state(f)
                         self._map_state_saved = True
                         self.log(f"Saved map-{save_map_target} state to {save_map_path}")
-                if stop_on_map is not None or stop_on_badge is not None:
+                if stop_on_map is not None or stop_on_badge is not None or stop_on_party is not None:
                     ow = self.memory.read_overworld_state()
-                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x):
+                    if self._stop_condition_met(ow, stop_on_map, stop_on_badge, stop_min_x, stop_on_party):
                         if stop_state:
                             self._save_settled_stop_state(stop_state)
                         else:
@@ -3554,6 +3821,11 @@ def main():
     parser.add_argument("--viewer-url", default="ws://127.0.0.1:8200", help="Viewer WebSocket base URL")
     parser.add_argument("--label", default="", help="Human-readable label shown on the viewer's run tile")
     parser.add_argument("--load-state", default=None, help="Load a PyBoy save state and skip the intro")
+    parser.add_argument(
+        "--catch",
+        default="",
+        help='Species the quartermaster may spend balls on, e.g. "Oddish,Spearow" (names or internal ids)',
+    )
     parser.add_argument("--save-state-on-battle", default=None, help="Dump a save state at the first detected battle")
     parser.add_argument("--save-state-on-map", default=None, help='Dump a state at a map, as "MAPID:PATH"')
     parser.add_argument(
@@ -3577,6 +3849,12 @@ def main():
         type=int,
         default=None,
         help="With --stop-on-map: only stop when x >= this column (east-exit vs west-entrance disambiguation)",
+    )
+    parser.add_argument(
+        "--stop-on-party",
+        type=int,
+        default=None,
+        help="End the run once the party holds this many Pokemon (the recruit segments' condition)",
     )
     parser.add_argument(
         "--stop-on-badge",
@@ -3700,6 +3978,7 @@ def main():
     agent.in_run_heal_notes = args.in_run_heal_notes
     agent.advice_inbox_dir = args.advice_inbox
     agent.advice_poll_turns = max(1, args.advice_poll_turns)
+    agent.catch_wanted = quartermaster.parse_catch(args.catch)
     agent.sideloop_parallel = max(1, args.sideloop_parallel)
     agent.sideloop_every = max(0, args.sideloop_every)
 
@@ -3744,6 +4023,7 @@ def main():
             save_state_on_trainer=args.save_state_on_trainer,
             save_state_every=args.save_state_every,
             stop_on_map=args.stop_on_map,
+            stop_on_party=args.stop_on_party,
             stop_min_x=args.stop_min_x,
             stop_on_badge=args.stop_on_badge,
             stop_state=args.stop_state,

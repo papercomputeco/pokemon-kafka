@@ -26,6 +26,8 @@ from world_map import WorldMap
 
 WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
 LEDGES_OFF = 0x0D00
+STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
+WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -65,6 +67,23 @@ def build_rom() -> bytearray:
         + [0x00, WALK, 0x06, 0x80]  # down over the left-ledge tile
         + [0xFF]
     )
+
+    # Wild-encounter data at its real shape: a per-map pointer table (bank 1) where every map
+    # shares one grass block — ten (level, Rhydon) pairs at rate 8, no water table.
+    rom[WILD_BLOCK : WILD_BLOCK + 22] = bytes([8] + [3, 1] * 10 + [0])
+    for i in range(248):
+        rom[WILD_PTRS + 2 * i : WILD_PTRS + 2 * i + 2] = bytes([0x00, 0x48])
+
+    # Species tables, at their real shapes, found by the same content signatures as on the real
+    # ROM: base stats open with Bulbasaur's row, the dex-order table opens with Rhydon's 112, and
+    # the name table is found via RHYDON at internal id 1. Only id 1 resolves to a name here.
+    rom[STATS_OFF : STATS_OFF + 10] = bytes([1, 45, 49, 49, 45, 65, 0x16, 0x03, 45, 64])
+    rom[DEX_OFF : DEX_OFF + 9] = bytes([112, 115, 32, 35, 21, 100, 34, 80, 2])
+    name = bytes(0x80 + ord(c) - ord("A") for c in "RHYDON") + bytes([0x50] * 4)
+    rom[NAMES_OFF : NAMES_OFF + 10] = name
+    # Id 2 exercises the special-character branch: NIDORAN + the male symbol (0xEF).
+    nido = bytes(0x80 + ord(c) - ord("A") for c in "NIDORAN") + bytes([0xEF, 0x50, 0x50])
+    rom[NAMES_OFF + 10 : NAMES_OFF + 20] = nido
 
     for mid, hdr in ((0, HDR0), (1, HDR1), (2, HDR2), (3, HDR3)):
         rom[MAP_HEADER_BANKS + mid] = 0
@@ -362,3 +381,51 @@ def test_route4_east_reaches_cerulean_over_ledges():
     assert path is not None
     hops = [1 for a, b in zip(path, path[1:]) if abs(a[0] - b[0]) + abs(a[1] - b[1]) == 2]
     assert hops, "the east road is only connected over ledges"
+
+
+def test_species_table_extracts_names_dex_types_and_catch_rate(rom):
+    _, data = rom
+    table = rom_truth.species_table(data)
+    assert table["1"]["name"] == "Rhydon" and table["1"]["dex"] == 112
+    assert table["1"]["types"] == ["normal"]  # the fixture's zeroed stats row decodes to normal
+    assert table["2"]["name"] == "NidoranM"  # the male symbol decodes through _NAME_CHARS
+    assert "3" not in table  # unnamed ids are MISSINGNO slots
+    with pytest.raises(ValueError, match="species tables"):
+        rom_truth.species_table(bytes(0x8000))
+
+
+def test_wild_encounters_extracts_pools_by_structure(rom):
+    _, data = rom
+    wilds = rom_truth.wild_encounters(data, {1, 2})
+    assert len(wilds) == 248  # every fixture map shares the one block
+    assert wilds["51"]["grass_rate"] == 8
+    assert wilds["51"]["grass"] == [[3, 1]] * 10
+    assert wilds["51"]["water"] == []
+    with pytest.raises(ValueError, match="wild encounter"):
+        rom_truth.wild_encounters(bytes(0x8000), {1})
+
+
+def test_extract_carries_the_wild_tables(rom):
+    truth = parse_rom(rom[0], map_ids=[2])
+    assert truth["wilds"]["51"]["grass_rate"] == 8
+
+
+def test_wild_encounters_rejects_malformed_tables(rom):
+    _, data = rom
+    # Species filter: a table whose blocks name unknown species is not the table.
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(data, {2})
+    # An absurd rate disqualifies the block.
+    bad = bytearray(data)
+    bad[WILD_BLOCK] = 200
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(bad), {1})
+    # A block at the very last byte runs off the ROM on its water pass.
+    edge = bytearray(0x8000)
+    for i in range(248):
+        edge[0x4600 + 2 * i : 0x4600 + 2 * i + 2] = bytes([0xFF, 0x7F])
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(edge), {1})
+    # A ROM shorter than its own pointer table.
+    with pytest.raises(ValueError):
+        rom_truth.wild_encounters(bytes(0x5000), {1})

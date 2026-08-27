@@ -210,6 +210,125 @@ def loaded_ledges(truth: dict) -> set[tuple[str, int, int]]:
     return {(d, s, le) for d, s, le in truth.get("ledges", ())}
 
 
+# Gen 1 type constants (pokered): the hand-typed copy of this map once swapped grass<->electric
+# and psychic<->ice, mis-typing battle scoring for months — hence extraction over recall here too.
+TYPE_NAMES = {
+    0x00: "normal",
+    0x01: "fighting",
+    0x02: "flying",
+    0x03: "poison",
+    0x04: "ground",
+    0x05: "rock",
+    0x07: "bug",
+    0x08: "ghost",
+    0x14: "fire",
+    0x15: "water",
+    0x16: "grass",
+    0x17: "electric",
+    0x18: "psychic",
+    0x19: "ice",
+    0x1A: "dragon",
+}
+_NAME_CHARS = {0xE1: "Pk", 0xE2: "Mn", 0xEF: "M", 0xF5: "F", 0xE8: "."}
+
+
+def species_table(rom: bytes) -> dict[str, dict]:
+    """Internal species id -> {name, dex, types, catch_rate}, from the ROM's own three tables:
+    the name table (10 bytes/entry, internal order — found by RHYDON at id 1), the internal->dex
+    order table, and the dex-order base stats (28 bytes/entry: types at +6/+7, catch rate at +8).
+    All located by content signature, never by address. MISSINGNO slots are skipped; a dex entry
+    past the stats table (Mew, stored separately in Red) keeps name/dex with empty types."""
+
+    def enc(s: str) -> bytes:
+        return bytes(0x80 + ord(c) - ord("A") for c in s)
+
+    names_base = rom.find(enc("RHYDON"))
+    dex_base = rom.find(bytes([112, 115, 32, 35, 21, 100, 34, 80, 2]))
+    stats_base = rom.find(bytes([1, 45, 49, 49, 45, 65, 0x16, 0x03, 45, 64]))
+    if min(names_base, dex_base, stats_base) < 0:
+        raise ValueError("species tables not found in ROM")
+    out: dict[str, dict] = {}
+    for iid in range(1, 191):
+        raw = rom[names_base + 10 * (iid - 1) : names_base + 10 * iid]
+        name = ""
+        for b in raw:
+            if 0x80 <= b <= 0x99:
+                name += chr(ord("A") + b - 0x80)
+            elif b in _NAME_CHARS:
+                name += _NAME_CHARS[b]
+            elif b == 0x50:
+                break
+        if not name or "MISSINGNO" in name:
+            continue
+        name = {"NIDORANM": "NidoranM", "NIDORANF": "NidoranF"}.get(name, name.title())
+        dex = rom[dex_base + iid - 1]
+        entry = {"name": name, "dex": dex, "types": [], "catch_rate": None}
+        if 1 <= dex <= 150:  # Mew (151) lives outside the table in Red
+            e = stats_base + (dex - 1) * 28
+            t1, t2 = TYPE_NAMES.get(rom[e + 6], "?"), TYPE_NAMES.get(rom[e + 7], "?")
+            entry["types"] = [t1] if t2 == t1 else [t1, t2]
+            entry["catch_rate"] = rom[e + 8]
+        out[str(iid)] = entry
+    return out
+
+
+def wild_encounters(rom: bytes, species_ids: set[int]) -> dict[str, dict]:
+    """Per-map wild pools from the ROM's own encounter tables — the answer to "what spawns
+    where" that neither sampled telemetry nor recalled game lore can be trusted for (versions
+    differ; recall hallucinates — the species-id and type-map bugs both came from recall).
+
+    Format on cartridge: a per-map pointer table into one bank; each block is a grass rate byte
+    (0 = none, else 10 (level, species) pairs follow) then the same for water. The table is
+    located by STRUCTURE, never by address: the only run of 248 in-window pointers whose blocks
+    all parse with plausible rates, levels, and known species ids. Returns
+    ``{map_id: {"grass_rate": r, "grass": [[level, species], ...], "water_rate": r, "water": [...]}}``
+    for maps with any encounters."""
+
+    def parse_block(a: int):
+        out = {}
+        for kind in ("grass", "water"):
+            if a >= len(rom):
+                return None
+            rate = rom[a]
+            a += 1
+            out[kind + "_rate"] = rate
+            pairs = []
+            if rate:
+                if rate > 100 or a + 20 > len(rom):
+                    return None
+                for k in range(10):
+                    lv, sp = rom[a + 2 * k], rom[a + 2 * k + 1]
+                    if not (1 <= lv <= 80) or sp not in species_ids:
+                        return None
+                    pairs.append([lv, sp])
+                a += 20
+            out[kind] = pairs
+        return out
+
+    def try_base(base: int, bank: int):
+        lo = bank * 0x4000
+        blocks = {}
+        for mid in range(NUM_MAPS):
+            # base is bounded to whole banks, so off + 1 is always in range
+            off = base + 2 * mid
+            p = rom[off] | (rom[off + 1] << 8)
+            if not (0x4000 <= p < 0x8000):
+                return None
+            parsed = parse_block(lo + (p - 0x4000))
+            if parsed is None:
+                return None
+            if parsed["grass_rate"] or parsed["water_rate"]:
+                blocks[str(mid)] = parsed
+        return blocks if len(blocks) >= 20 else None  # a real overworld has dozens of wild maps
+
+    for bank in range(len(rom) // 0x4000):
+        for base in range(bank * 0x4000, (bank + 1) * 0x4000 - 2 * NUM_MAPS):
+            found = try_base(base, bank)
+            if found:
+                return found
+    raise ValueError("wild encounter tables not found in ROM")
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -217,10 +336,13 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         m = parse_map(rom, mid)
         if m is not None:
             maps[str(mid)] = m
+    species = species_table(rom)
     return {
         "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "tile_pairs": [list(t) for t in sorted(tile_pairs(rom))],
         "ledges": [list(t) for t in ledge_hops(rom)],
+        "species": species,
+        "wilds": wild_encounters(rom, {int(k) for k in species}),
         "maps": maps,
     }
 

@@ -1916,18 +1916,24 @@ class TestRunBattleTurn:
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Super Potion", "bag_index": 3})
         ag.controller = MagicMock()
         ag._select_battle_menu = MagicMock(return_value=True)
+        # The bag walk verifies against the live scroll+cursor registers (the menu REMEMBERS
+        # its position between opens); reads step the absolute row 0 -> 1 -> 2 -> 3.
+        rows = [0, 0, 1, 1, 2, 2, 3, 3]
+        ag.memory._read = MagicMock(side_effect=lambda a: rows.pop(0) // 2 if a in (0xCC26, 0xCC36) and rows else 0)
         ag.run_battle_turn()
-        # ITEM is selected via the 2x2 battle menu, then the bag list is a vertical navigate_menu.
         ag._select_battle_menu.assert_called_once_with("item")
-        assert ag.controller.navigate_menu.call_args_list == [call(3)]
+        pressed = [c.args[0] for c in ag.controller.press.call_args_list]
+        assert pressed.count("down") >= 1 and pressed[-1] == "a"
 
     def test_item_action_default_bag_index(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "item", "item": "Potion"})
         ag.controller = MagicMock()
         ag._select_battle_menu = MagicMock(return_value=True)
+        ag.memory._read = MagicMock(return_value=0)
         ag.run_battle_turn()
         ag._select_battle_menu.assert_called_once_with("item")
-        assert ag.controller.navigate_menu.call_args_list == [call(0)]
+        # Row 0 is already the cursor's absolute position: no walk, straight to A.
+        assert [c.args[0] for c in ag.controller.press.call_args_list][-1] == "a"
 
     def test_switch_action(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "switch", "slot": 2})
@@ -2837,6 +2843,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_on_party=None,
             stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,
@@ -2877,6 +2884,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_on_party=None,
             stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,
@@ -2906,6 +2914,7 @@ class TestMain:
             save_state_on_trainer=None,
             save_state_every=None,
             stop_on_map=None,
+            stop_on_party=None,
             stop_min_x=None,
             stop_on_badge=None,
             stop_state=None,

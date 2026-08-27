@@ -388,3 +388,20 @@ def test_collector_generates_distinct_run_ids_when_absent():
     assert a.run_id and b.run_id and a.run_id != b.run_id
     a.milestone(0, "x")
     assert a.events[0]["run_id"] == a.run_id
+
+
+def test_build_encounter_event_labels_who_where_and_how_it_ended():
+    from game_events import build_encounter_event
+
+    event = build_encounter_event(880, "Spearow", 10, "normal/flying", 1, 15, 70, 10, "caught", 2)
+    assert event["event_type"] == "encounter"
+    d = event["data"]
+    assert d["species"] == "Spearow" and d["map_id"] == 15 and (d["x"], d["y"]) == (70, 10)
+    assert d["disposition"] == "caught" and d["party_size"] == 2 and d["enemy_type"] == "normal/flying"
+
+
+def test_collector_encounter_emits():
+    collector = GameEventCollector()
+    collector.encounter(880, "Paras", 9, "bug/grass", 1, 60, 12, 8, "won", 2)
+    assert collector.events[0]["event_type"] == "encounter"
+    assert collector.events[0]["data"]["disposition"] == "won"

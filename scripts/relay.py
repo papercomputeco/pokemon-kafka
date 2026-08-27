@@ -98,6 +98,9 @@ class Segment:
     # exit lands at (24,5), so without the column check the first bounce back out of the west
     # entrance would score as a clear (the 59<->15 spring, demo-runs/README.md).
     stop_min_x: int | None = None
+    # The recruit condition: the leg ends when the party holds this many Pokemon (the
+    # quartermaster's catch hook is what grows it; the lane's --catch list is in extra_args).
+    stop_on_party: int | None = None
 
 
 @dataclass
@@ -130,6 +133,19 @@ SEGMENTS = (
     # the Cascade Badge however the lane earns it — Nugget Bridge detours included.
     Segment("route4_to_cerulean", MAPS["CERULEAN_CITY"], None, 4000, NAV_SPREAD),
     Segment("cerulean_to_badge2", None, 2, 6000, BATTLE_SPREAD),
+    # The recruit leg: grow the party by catching. The --catch list is the encounter catalog's
+    # answer for Misty (encounters.py recommend --vs water, 2026-08-26: Paras first); the leg
+    # ends when the party holds 3. Runs from a SUPPLIED baton — balls come from the
+    # quartermaster errand between legs, never from mid-leg shopping.
+    Segment(
+        "cerulean_recruit",
+        None,
+        None,
+        6000,
+        NAV_SPREAD,
+        extra_args=("--catch", "Paras,Oddish,Pikachu,Mankey,Sandshrew"),
+        stop_on_party=3,
+    ),
 )
 
 
@@ -252,6 +268,8 @@ def build_agent_cmd(rom, seg, variant, vdir, baton, run_dir, sideloop_every=0, s
             cmd += ["--stop-min-x", str(seg.stop_min_x)]
     if seg.stop_on_badge is not None:
         cmd += ["--stop-on-badge", str(seg.stop_on_badge)]
+    if seg.stop_on_party is not None:
+        cmd += ["--stop-on-party", str(seg.stop_on_party)]
     cmd += [a.format(run_dir=run_dir) for a in seg.extra_args]
     return cmd, {"EVOLVE_PARAMS": json.dumps(genome)}
 
@@ -278,6 +296,8 @@ def segment_success(fitness, seg):
         return seg.stop_min_x is None or fitness.get("final_x", -1) >= seg.stop_min_x
     if seg.stop_on_badge is not None:
         return bin(int(fitness.get("badges", 0))).count("1") >= seg.stop_on_badge
+    if seg.stop_on_party is not None:
+        return int(fitness.get("party_size", 0)) >= seg.stop_on_party
     return False
 
 

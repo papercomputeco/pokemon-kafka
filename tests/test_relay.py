@@ -38,6 +38,7 @@ def test_segments_cover_the_road_to_cerulean():
         "mtmoon_clear",
         "route4_to_cerulean",
         "cerulean_to_badge2",
+        "cerulean_recruit",
     ]
     assert SEGMENTS[0].stop_on_map == 51
     assert SEGMENTS[1].stop_on_map == 2
@@ -45,6 +46,7 @@ def test_segments_cover_the_road_to_cerulean():
     assert SEGMENTS[3].stop_on_map == 59
     assert SEGMENTS[6].stop_on_map == 3
     assert SEGMENTS[7].stop_on_badge == 2
+    assert SEGMENTS[8].stop_on_party == 3 and "--catch" in SEGMENTS[8].extra_args
 
 
 def test_build_agent_cmd_emits_stop_flags_and_isolated_paths(tmp_path):
@@ -90,6 +92,9 @@ def test_segment_success_by_map_and_badge():
     assert segment_success({"badges": 1}, badge_seg)
     assert not segment_success({"badges": 0}, badge_seg)
     assert not segment_success({}, map_seg)
+    party_seg = Segment("p", stop_on_map=None, stop_on_badge=None, max_turns=1, variants=(), stop_on_party=3)
+    assert segment_success({"party_size": 3}, party_seg)
+    assert not segment_success({"party_size": 2}, party_seg)
 
 
 def _result(label, success, lead_hp, turns):
@@ -957,3 +962,11 @@ def test_stop_min_x_reaches_the_lane_command_line():
     nav = next(s for s in SEGMENTS if s.name == "mtmoon_1f_to_b1f")
     cmd2, _ = relay.build_agent_cmd("rom.gb", nav, {"label": "v"}, Path("v"), baton, Path("run"))
     assert "--stop-min-x" not in " ".join(cmd2)  # a plain map stop stays plain
+
+
+def test_build_agent_cmd_emits_stop_on_party_and_catch_list(tmp_path):
+    seg = next(s for s in SEGMENTS if s.name == "cerulean_recruit")
+    cmd, _ = build_agent_cmd("rom.gb", seg, seg.variants[0], tmp_path / "v", _baton(tmp_path), tmp_path)
+    joined = " ".join(cmd)
+    assert "--stop-on-party 3" in joined
+    assert "--catch Paras,Oddish,Pikachu,Mankey,Sandshrew" in joined

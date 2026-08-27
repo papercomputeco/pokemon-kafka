@@ -38,6 +38,22 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   the same 880 turns). See `benchmarks/2026-08-22-skill-matrix.md` for how six models failed
   this leg and collectively wrote the fix.
 
+- `beat13-oddish-recruit` — **the first recruit, on camera**: 17 turns in the Route 24
+  grass pocket, a wild L12 Oddish (the roster optimizer's #2 water counter), three Poke Balls,
+  and the party grows to two — carrying the new labeled `encounter` events (`disposition:
+  "caught"`) in its committed stream. Recorded from the badge-2 lineage
+  (`--stop-on-party 2 --catch Oddish`); the roam driver walks the ROM's own extracted grass
+  cells. The Paras twin
+  came from starting EARLIER instead (the operator's call): the badge-1 lineage still stands
+  west of the one-way ledges.
+
+- `beat14-paras-recruit` — **the Paras hunt**: the roster optimizer's #1 water counter,
+  caught where the ROM's own wild tables put it. From the Brock-victory seed: Pewter Mart
+  errand (6 balls), Route 3, into Mt. Moon, and the recruit patrol walks ladder-to-ladder
+  until a wild L10 Paras appears on B1F — two balls, turn 555, sixteen fights of XP on the
+  way. The patrol's three measured lessons (never anchor ON a warp, never yield a roamable
+  floor to the ladder-hunter, never answer a standstill with "a") are in the agent.
+
 ### Why beat 11 needed a fix first
 
 `badge_to_mtmoon` had never landed — six genome lanes × 12,000 turns all wedged on

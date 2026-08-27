@@ -1,0 +1,28 @@
+{
+  "turns": 555,
+  "battles_won": 16,
+  "maps_visited": 8,
+  "final_map_id": 60,
+  "final_x": 25,
+  "final_y": 22,
+  "badges": 1,
+  "party_size": 2,
+  "lead_hp": 1,
+  "stuck_count": 29,
+  "max_stuck_streak": 15,
+  "backtrack_restores": 0,
+  "encounters": 16,
+  "level_ups": 2,
+  "evolutions": 0,
+  "battle_wedge_recoveries": 0,
+  "brock_turns": null,
+  "brock_won": null,
+  "brock_lead_species": null,
+  "brock_lead_level": null,
+  "params": {
+    "strategy": "low",
+    "rom": "rom/pokemon_red.gb",
+    "label": "14 \u00b7 Mt. Moon \u2014 the Paras hunt"
+  },
+  "run_id": "20260827-015340-92ec"
+}
