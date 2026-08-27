@@ -2707,6 +2707,7 @@ class PokemonAgent:
             enemy_hp_before = battle.enemy_hp
             player_hp_before = battle.player_hp
             pp_before = self.memory.read_move_pp()
+            map_before = self.memory._read(self.memory.ADDR_MAP_ID)
             # Execute the move RELIABLY, from the screen the game is actually on. The old fixed
             # sequence (up, left, A, down x idx, A, A, then A x8) assumed the turn starts on the
             # battle menu with the move-list cursor on slot 0 — neither holds: the trailing A-mash
@@ -2742,6 +2743,21 @@ class PokemonAgent:
             # a KO too (its fresh HP would otherwise read as "healed").
             enemy_swapped = self.memory._read(self.memory.ADDR_ENEMY_SPECIES) != battle.enemy_species
             fainted = battle_over or after_hp <= 0 or enemy_swapped
+            # OUR faint ends the battle too, and treating battle_over alone as a KO recorded the
+            # loss to Lt. Surge's Raichu as "Ember dmg=66/66 KO" — a phantom full-damage row that
+            # poisons the roster optimizer's move stats. A loss shows as: battle over AND (our
+            # battle HP reads 0, or the white-out already teleported us — the settle loop can B
+            # all the way through the Center heal, leaving full HP on a different map). Post-loss
+            # battle RAM is torn down mid-settle, so no delta from it is trustworthy: emit nothing
+            # rather than a guess. (A self-KO trade where both sides faint is also suppressed —
+            # conservative, and rarer than the loss it guards against.)
+            our_hp_after = (self.memory._read(self.memory.ADDR_PLAYER_HP_HI) << 8) | self.memory._read(
+                self.memory.ADDR_PLAYER_HP_LO
+            )
+            we_lost = battle_over and (our_hp_after == 0 or self.memory._read(self.memory.ADDR_MAP_ID) != map_before)
+            if we_lost:
+                fainted = False
+                after_hp = enemy_hp_before  # no trustworthy delta
             enemy_hp_after = 0 if fainted else after_hp
             dmg = max(0, enemy_hp_before - enemy_hp_after)
             # Record only a real landed hit: enemy was alive and HP actually dropped (or it fainted).
