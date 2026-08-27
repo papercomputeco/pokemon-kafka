@@ -2608,9 +2608,19 @@ class PokemonAgent:
         elif action["action"] == "item":
             self._select_battle_menu("item")
             self.controller.wait(20)
-            # Navigate to the correct item slot (the bag is a vertical list)
             bag_index = action.get("bag_index", 0)
-            self.controller.navigate_menu(bag_index)
+            # The battle bag REMEMBERS its cursor between opens, so the blind
+            # navigate_menu(bag_index) walk drifted one row per reopen until it lived on
+            # CANCEL — 88,000 turns parked over a wild NidoranF (screenshot-diagnosed,
+            # 2026-08-26). Walk to the ABSOLUTE row instead: scroll offset + cursor, read
+            # live each step, the same verified-walk discipline as the battle menu itself.
+            for _ in range(16):
+                pos = self.memory._read(0xCC36) + self.memory._read(0xCC26)  # wListScrollOffset + cursor
+                if pos == bag_index:
+                    break
+                self.controller.press("down" if pos < bag_index else "up")
+                self.controller.wait(12)
+            self.controller.press("a")
             self.controller.wait(120)
             self.controller.mash_a(5, delay=30)
 

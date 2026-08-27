@@ -24,6 +24,7 @@ def _wild_battle(species=SPEAROW):
 
 def _battle_agent(tmp_path, battle):
     ag = _make_agent(tmp_path)
+    ag.memory._read = MagicMock(return_value=0)
     ag._await_battle_menu = MagicMock(return_value=True)
     ag._select_battle_menu = MagicMock(return_value=True)
     ag.controller = MagicMock()
@@ -41,7 +42,8 @@ def test_catch_hook_outranks_the_fight(tmp_path):
     ag.run_battle_turn()
     assert any("CATCH" in e for e in ag.events)
     ag._select_battle_menu.assert_called_once_with("item")
-    ag.controller.navigate_menu.assert_called_once_with(1)  # the ball's bag slot
+    pressed = [c.args[0] for c in ag.controller.press.call_args_list]
+    assert pressed[-1] == "a"  # the verified bag walk ends on the throw
 
 
 def test_catch_hook_defers_to_the_strategy_when_not_wanted(tmp_path):

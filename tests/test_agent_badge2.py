@@ -222,3 +222,31 @@ def test_battle_turn_advances_ko_text_when_enemy_is_down(tmp_path):
 def test_leveled_lane_on_the_routes_defers_to_other_drivers(tmp_path):
     ag = _ag(tmp_path)  # at grind level: no grind, and the routes are not gym ground
     assert ag._badge2_action(_st(ROUTE_24_MAP, 11, 20)) is None
+
+
+def test_item_action_walks_the_bag_by_absolute_row(tmp_path):
+    """The battle bag remembers its cursor between opens: the blind walk drifted onto CANCEL
+    and parked 88,000 turns over a wild NidoranF. The walk now reads scroll+cursor live."""
+    from memory_reader import BattleState
+
+    ag = _make_agent(tmp_path)
+    ag.controller = MagicMock()
+    ag._await_battle_menu = MagicMock(return_value=True)
+    ag._select_battle_menu = MagicMock(return_value=True)
+    ag.memory.read_battle_state = MagicMock(
+        return_value=BattleState(battle_type=1, enemy_hp=20, enemy_max_hp=27, player_hp=14, player_max_hp=68)
+    )
+    ag.memory.find_healing_item = MagicMock(return_value=(3, 0x14))
+    ag.battle_strategy.choose_action = MagicMock(return_value={"action": "item", "item": "Potion", "bag_index": 3})
+    # cursor parked at absolute row 4 (CANCEL): reads walk it 4 -> up -> 3
+    reads = {0xCC36: [2, 2, 2], 0xCC26: [2, 1, 1]}
+
+    def read(addr):
+        if addr in reads and reads[addr]:
+            return reads[addr].pop(0)
+        return 0
+
+    ag.memory._read = MagicMock(side_effect=read)
+    ag.run_battle_turn()
+    pressed = [c.args[0] for c in ag.controller.press.call_args_list]
+    assert pressed.count("up") == 1 and pressed[-1] == "a"  # one verified step up, then use
