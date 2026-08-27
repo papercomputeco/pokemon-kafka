@@ -68,3 +68,32 @@ catch list from `encounters.py recommend`, choose `cerulean_recruit` before `cer
 That is a RESOURCE column for the skill matrix: same harness for every model, one slot per
 model, `vllm-sr/auto` as the routed row. Segments exist; the slot needs only a mission prompt
 and a chain script.
+
+## Postscript, same day: THE CASCADE BADGE
+
+The 2-hour validation mandate ended with **Badge 2 in hand** — the furthest this project has
+ever been. The full chain, every link an engine capability built or fixed today:
+
+1. **Round 1** (2 h): wedged at turn ~2,000 for 88,000 turns — the battle bag REMEMBERS its
+   cursor between opens, and the blind heal-item walk drifted onto CANCEL over a wild NidoranF.
+   Fixed: the bag walks by ABSOLUTE row (wListScrollOffset + cursor, read live). Verified on
+   the wedged checkpoint itself: HP 14 → 34, potion spent, battle resumed.
+2. **Round 2** (resumed from the wedge): the freed lane ground the bridge to **L27, 63 wins**
+   — and parked in Bill's cottage, because above grind level no driver owned the northern maps.
+   Fixed: the come-home branch (cottage door → Route 25 west → bridge south → gym).
+3. **The errand chain home**: potions bought; the mart exit was body-blocked by a customer
+   parked on ONE of the two exit mats — the walk now drops a blocked target when another
+   remains and vetoes non-target bodies (the parked-body class, third appearance today).
+4. **The challenge**: from L27 at 76/76 — a first loss white-outed to the Center, the driver
+   ground back, rechallenged, and **won at L33: `badges: 0b11`, turn 2,556 of the final
+   segment, baton settled**. The self-correction loop carried the badge without a single
+   human intervention after launch.
+
+Baton: `demo-runs/states/cerulean_seeds/badge2_hp38.state` — Cerulean Gym (5,2), Badge 1+2,
+Charmeleon L33 at 38/92 (Scratch/Rage/Ember/Leer), 5 balls, TM11 in the bag, ₽2,079. The road
+to Vermilion — and the Paras/Oddish roster work — starts from here.
+
+Six engine bugs found and fixed by one validation mandate, every one screenshot-diagnosed and
+regression-tested: the learn flow, the bag cursor, the gym approach geometry, the grind
+threshold, the northern-maps gap, and the exit-mat body. The benchmark did exactly what
+benchmarks are for.

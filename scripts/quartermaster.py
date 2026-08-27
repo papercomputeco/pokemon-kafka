@@ -66,7 +66,7 @@ class Shop:
     counter_xy: tuple[int, int]
     face: str
     stock: tuple[int, ...]
-    exit_xy: tuple[int, int]
+    exit_mats: tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
@@ -76,18 +76,18 @@ class Center:
     interior_map: int
     counter_xy: tuple[int, int]
     face: str
-    exit_xy: tuple[int, int]
+    exit_mats: tuple[tuple[int, int], ...]
 
 
 # Verified live 2026-08-26 (mart probe): door (25,25) lands at (3,7); the clerk is talked to from
 # (2,5) facing left; stock order Poke Ball, Potion, ... (indexes past 1 unpurchased so far).
 SHOPS = {
-    3: Shop(3, (25, 25), 67, (2, 5), "left", (POKE_BALL, POTION), (3, 7)),
+    3: Shop(3, (25, 25), 67, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
 }
 # Cerulean Center: door (19,17) in the city; the nurse (3,1) is talked to across the counter
 # from (3,3) facing up — the same geometry as Pewter's flow.
 CENTERS = {
-    3: Center(3, (19, 17), 64, (3, 3), "up", (3, 7)),
+    3: Center(3, (19, 17), 64, (3, 3), "up", ((3, 7), (4, 7))),
 }
 
 
@@ -259,13 +259,15 @@ def flee_battle(io, cap: int = 25) -> None:
     raise QuartermasterError(f"flee: still in battle after {cap} attempts")
 
 
-def walk_to(io, truth, pairs, map_id: int, target: tuple[int, int], cap: int = 400) -> None:
+def walk_to(io, truth, pairs, map_id: int, target, cap: int = 400) -> None:
     """Truth-planned walk on ``map_id`` to ``target`` (or off it, via a warp). Each step is
     position-verified; the first press after a turn only rotates, so a stalled press retries —
     and a step that STAYS stalled presses B first: a lingering menu or dialog eats d-pad input
     silently (``wTextBoxID`` reads stale after a menu closes, so it cannot be trusted as a
     "menus are gone" signal — the position is the only honest detector)."""
     import rom_truth as rt
+
+    targets = {target} if isinstance(target, tuple) and target and isinstance(target[0], int) else set(target)
 
     def moved(before) -> bool:
         # Poll until the position settles instead of reading once: a LEDGE hop's animation
@@ -279,18 +281,19 @@ def walk_to(io, truth, pairs, map_id: int, target: tuple[int, int], cap: int = 4
         return False
 
     stalled = 0
+    veto: set = set()  # tiles the engine refused repeatedly this walk: a parked body, not a wall
     for _ in range(cap):
         if io.read(ADDR_IN_BATTLE):
             flee_battle(io)
             continue
         mp, x, y = read_pos(io)
-        if mp != map_id or (x, y) == target:
+        if mp != map_id or (x, y) in targets:
             io.wait(60)  # let a warp transition finish before the caller reads position
             return
         if stalled:
             io.press("b")
             io.wait(12)
-        path = rt.path_on_map(truth, pairs, map_id, (x, y), {target}, blocked=rt.sprite_tiles(truth, map_id))
+        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=rt.sprite_tiles(truth, map_id) | veto)
         if not path or len(path) < 2:
             raise QuartermasterError(f"walk: no path on map {map_id} from {(x, y)} to {target}")
         (x0, y0), (x1, y1) = path[0], path[1]
@@ -301,8 +304,20 @@ def walk_to(io, truth, pairs, map_id: int, target: tuple[int, int], cap: int = 4
             io.press(d)  # the first press against a new facing only turns in place
             ok = moved((mp, x, y))
         stalled = 0 if ok else stalled + 1
-        if stalled > 12:
-            raise QuartermasterError(f"walk: wedged at {(x, y)} on map {map_id} heading {d}")
+        if stalled >= 3:
+            # A refused step with a clear grid is usually a BODY — a wandering NPC parked on
+            # the tile (the mart's exit mat, live-measured). Bodies move on their own cadence
+            # (~2-4 s); give them the time instead of burning strikes at press speed.
+            io.wait(180)
+        if stalled >= 6:
+            # It is not moving: route around it. A blocked TARGET is dropped when another
+            # remains (the customer parked on one of the mart's two exit mats); otherwise the
+            # tile is vetoed for this walk and the next plan detours.
+            if (x1, y1) in targets and len(targets) > 1:
+                targets = targets - {(x1, y1)}
+            else:
+                veto.add((x1, y1))
+            stalled = 0
     raise QuartermasterError(f"walk: {cap} steps without reaching {target} on map {map_id}")
 
 
@@ -397,6 +412,14 @@ def run_errand(io, truth, buy_plan: list[tuple[int, int]] | None, do_heal: bool)
 
     pairs = rt.loaded_pairs(truth)
     mp, _, _ = read_pos(io)
+    # A retried errand can resume INSIDE a known interior (the wreck state is saved on a wedge —
+    # e.g. an NPC body parked on the mart's exit mat): leave it before planning city phases.
+    for table in (SHOPS, CENTERS):
+        for spec in table.values():
+            if spec.interior_map == mp:
+                walk_to(io, truth, pairs, mp, spec.exit_mats)
+                leave_interior(io, mp)
+                mp, _, _ = read_pos(io)
     report: dict = {"city": mp, "bought": [], "healed": False}
     if buy_plan:
         shop = SHOPS.get(mp)
@@ -405,7 +428,7 @@ def run_errand(io, truth, buy_plan: list[tuple[int, int]] | None, do_heal: bool)
         walk_to(io, truth, pairs, shop.city_map, shop.door_xy)
         walk_to(io, truth, pairs, shop.interior_map, shop.counter_xy)
         report["bought"] = buy(io, shop, buy_plan)
-        walk_to(io, truth, pairs, shop.interior_map, shop.exit_xy)
+        walk_to(io, truth, pairs, shop.interior_map, shop.exit_mats)
         leave_interior(io, shop.interior_map)
     if do_heal:
         center = CENTERS.get(read_pos(io)[0])
@@ -415,7 +438,7 @@ def run_errand(io, truth, buy_plan: list[tuple[int, int]] | None, do_heal: bool)
         walk_to(io, truth, pairs, center.interior_map, center.counter_xy)
         heal(io, center)
         report["healed"] = True
-        walk_to(io, truth, pairs, center.interior_map, center.exit_xy)
+        walk_to(io, truth, pairs, center.interior_map, center.exit_mats)
         leave_interior(io, center.interior_map)
     report["money"] = read_money(io)
     report["bag"] = read_bag(io)

@@ -128,6 +128,7 @@ CERULEAN_CITY_MAP = 3
 CERULEAN_GYM_MAP = 65  # door mat at city (30,19); Misty on the top platform, talked to from (5,2)
 ROUTE_24_MAP = 35  # Nugget Bridge: seven trainers up the x=10/11 column, grass past them
 ROUTE_25_MAP = 36  # nine more trainers along the y=2..9 path to Bill's
+BILLS_COTTAGE_MAP = 88  # the Route 25 sweep can wander in through its door; exit mats (2,7)/(3,7)
 # Solo L24 Charmeleon potion-treadmills at 1 HP against Starmie (measured); the bridge gauntlet
 # is the XP that turns the fight. Below this level the badge-2 driver grinds instead of challenging.
 BADGE2_GRIND_LEVEL = 27
@@ -1597,13 +1598,29 @@ class PokemonAgent:
         bit turning on switches this driver off."""
         if not (state.badges & 0x01) or (state.badges & 0x02):
             return None
-        grind_maps = (CERULEAN_CITY_MAP, CERULEAN_GYM_MAP, ROUTE_24_MAP, ROUTE_25_MAP)
+        grind_maps = (CERULEAN_CITY_MAP, CERULEAN_GYM_MAP, ROUTE_24_MAP, ROUTE_25_MAP, BILLS_COTTAGE_MAP)
         if state.map_id not in grind_maps or not self._truth_ready():
             return None
         if self.memory._read(self.memory.PARTY_BASE + 33) < BADGE2_GRIND_LEVEL:
             g = self._badge2_grind_action(state)
             if g is not None:
                 return g
+        # At challenge level, everything north of the city is just the road home: out of
+        # Bill's cottage (round 2 ended parked in it — no driver owned map 88), west off
+        # Route 25, south off the bridge, then the gym.
+        if state.map_id == BILLS_COTTAGE_MAP:
+            d = self._truth_walk(state, {(2, 7), (3, 7)}, "leave bill's")
+            return d if d is not None else "down"  # interior mats hand over on the step DOWN
+        if state.map_id == ROUTE_25_MAP:
+            m = self._truth["maps"][str(ROUTE_25_MAP)]
+            west = {(0, y) for y in range(m["height"]) if m["grid"][y][0] == "1"}
+            d = self._truth_walk(state, west, "route 25 home")
+            return d if d is not None else "left"
+        if state.map_id == ROUTE_24_MAP:
+            m = self._truth["maps"][str(ROUTE_24_MAP)]
+            south = {(x, m["height"] - 1) for x in range(m["width"]) if m["grid"][m["height"] - 1][x] == "1"}
+            d = self._truth_walk(state, south, "bridge home")
+            return d if d is not None else "down"
         if state.map_id == CERULEAN_CITY_MAP:
             return self._truth_walk(state, {(30, 19)}, "cerulean gym door")
         if state.map_id == CERULEAN_GYM_MAP:
@@ -1620,7 +1637,6 @@ class PokemonAgent:
             if (state.x, state.y) == (4, 3):
                 return "up" if self.turn_count % 2 == 0 else "a"
             return self._truth_walk(state, {(5, 3)}, "misty approach")
-        return None
 
     def _badge2_grind_action(self, state: OverworldState) -> str | None:
         """Below BADGE2_GRIND_LEVEL: ping-pong the Nugget Bridge gauntlet for XP (and whatever

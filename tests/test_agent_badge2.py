@@ -219,9 +219,26 @@ def test_battle_turn_advances_ko_text_when_enemy_is_down(tmp_path):
     assert [c.args[0] for c in ag.controller.press.call_args_list] == ["b", "a"]
 
 
-def test_leveled_lane_on_the_routes_defers_to_other_drivers(tmp_path):
-    ag = _ag(tmp_path)  # at grind level: no grind, and the routes are not gym ground
-    assert ag._badge2_action(_st(ROUTE_24_MAP, 11, 20)) is None
+def test_leveled_lane_on_the_routes_drives_home(tmp_path):
+    """Round 2 ended parked in Bill's cottage: above grind level, everything north of the
+    city is just the road home — cottage door, Route 25 west, bridge south, then the gym."""
+    from agent import BILLS_COTTAGE_MAP
+
+    ag = _ag(tmp_path)
+    assert ag._badge2_action(_st(ROUTE_24_MAP, 11, 20)) == "up"
+    assert ag._truth_walk.call_args[0][2] == "bridge home"
+    ag._truth_walk = MagicMock(return_value=None)
+    assert ag._badge2_action(_st(ROUTE_24_MAP, 1, 1)) == "down"  # standing on the south edge
+    ag._truth_walk = MagicMock(return_value="left")
+    assert ag._badge2_action(_st(ROUTE_25_MAP, 10, 4)) == "left"
+    assert ag._truth_walk.call_args[0][2] == "route 25 home"
+    ag._truth_walk = MagicMock(return_value=None)
+    assert ag._badge2_action(_st(ROUTE_25_MAP, 0, 1)) == "left"
+    ag._truth_walk = MagicMock(return_value="up")
+    assert ag._badge2_action(_st(BILLS_COTTAGE_MAP, 4, 4)) == "up"
+    assert ag._truth_walk.call_args[0][1] == {(2, 7), (3, 7)}
+    ag._truth_walk = MagicMock(return_value=None)
+    assert ag._badge2_action(_st(BILLS_COTTAGE_MAP, 2, 7)) == "down"  # mats hand over on the step DOWN
 
 
 def test_item_action_walks_the_bag_by_absolute_row(tmp_path):

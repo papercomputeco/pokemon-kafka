@@ -273,7 +273,8 @@ def test_walk_to_raises_on_no_path_and_wedge_and_cap():
     }
     with pytest.raises(qm.QuartermasterError, match="no path"):
         qm.walk_to(_walking_io(), blocked_map, set(), 5, (3, 0))
-    with pytest.raises(qm.QuartermasterError, match="wedged"):
+    # A persistently refused step is VETOED (a parked body), and a 1-row map has no detour:
+    with pytest.raises(qm.QuartermasterError, match="no path"):
         qm.walk_to(_walking_io(refuse=(1, 0)), OPEN_MAP, set(), 5, (3, 0))
     bouncy = _walking_io(warp_at=None)
 
@@ -413,12 +414,12 @@ def test_run_errand_composes_mart_then_center(monkeypatch):
         ("walk", 3, shop.door_xy),
         ("walk", 67, shop.counter_xy),
         ("buy", [(qm.POKE_BALL, 2)]),
-        ("walk", 67, shop.exit_xy),
+        ("walk", 67, shop.exit_mats),
         ("leave", 67),
         ("walk", 3, center.door_xy),
         ("walk", 64, center.counter_xy),
         ("heal",),
-        ("walk", 64, center.exit_xy),
+        ("walk", 64, center.exit_mats),
         ("leave", 64),
     ]
     assert report["bought"] == [(qm.POKE_BALL, 2)] and report["healed"] and report["money"] == 367
@@ -525,3 +526,51 @@ def test_shop_and_center_tables_are_coherent():
     for city, center in qm.CENTERS.items():
         assert center.city_map == city and center.face in ("up", "down", "left", "right")
     json.dumps({"shops": len(qm.SHOPS), "centers": len(qm.CENTERS)})  # tables stay serializable
+
+
+def test_walk_to_reroutes_around_a_parked_body():
+    """A customer parked on one of the mart's two exit mats (live-measured): the blocked
+    TARGET is dropped after six stalls, the tile is vetoed, and the walk detours over the
+    second row to the free mat."""
+    two_row = {
+        "maps": {
+            "5": {
+                "width": 4,
+                "height": 2,
+                "tileset": 0,
+                "grid": ["1111", "1111"],
+                "tiles": ["2c2c2c2c", "2c2c2c2c"],
+                "sprites": [],
+            }
+        }
+    }
+
+    state = {"facing": None}
+
+    def on_press(io, btn):
+        d = {"right": (1, 0), "left": (-1, 0), "down": (0, 1), "up": (0, -1)}.get(btn)
+        if not d:
+            return
+        nx, ny = io.mem[qm.ADDR_X] + d[0], io.mem[qm.ADDR_Y] + d[1]
+        if (nx, ny) == (2, 0):
+            return  # the body
+        io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y] = nx, ny
+
+    io = FakeIO(on_press=on_press)
+    set_pos(io, 5, 0, 0)
+    qm.walk_to(io, two_row, set(), 5, {(2, 0), (3, 0)})
+    assert qm.read_pos(io) == (5, 3, 0)
+    _ = state
+
+
+def test_run_errand_leaves_a_known_interior_first(monkeypatch):
+    calls = []
+    monkeypatch.setattr(qm, "walk_to", lambda io, t, p, m, xy, cap=400: calls.append(("walk", m, xy)))
+    monkeypatch.setattr(qm, "leave_interior", lambda io, m: (calls.append(("leave", m)), set_pos(io, 3, 25, 26)))
+    monkeypatch.setattr(qm, "heal", lambda io, c: calls.append(("heal",)))
+    io = FakeIO()
+    set_pos(io, 67, 3, 6)  # a wedge save left us INSIDE the mart
+    set_party(io, [(0xB2, 27, 76, 76)])
+    report = qm.run_errand(io, {"maps": {}, "tile_pairs": []}, None, True)
+    assert calls[0] == ("walk", 67, qm.SHOPS[3].exit_mats) and calls[1] == ("leave", 67)
+    assert report["healed"]
