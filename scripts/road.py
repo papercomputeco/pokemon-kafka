@@ -82,7 +82,7 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
     warp_block: set[tuple[int, int]] = set()
     if avoid_warps:
         warp_block = {(w[0], w[1]) for w in truth["maps"][str(map_id)]["warps"]} - targets
-    stalls = cycles = 0
+    stalls = cycles = body_waits = 0
     for _ in range(cap):
         if io.read(ADDR_IN_BATTLE):
             battle(io)
@@ -97,7 +97,13 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
             if not path or len(path) < 2:
                 return "no-path"
             if tuple(path[1]) in live_bodies(io):
-                return "body-blocked"
+                # Bodies are not walls: wanderers move — wait them out before giving up
+                # (a parked story-body earns the verdict only after real patience).
+                body_waits += 1
+                if body_waits > 20:
+                    return "body-blocked"
+                io.wait(60)
+                continue
         nx, ny = path[1]
         _step(io, "right" if nx > x else "left" if nx < x else "down" if ny > y else "up")
         if read_pos(io) == (mp, x, y) and not io.read(ADDR_IN_BATTLE):
