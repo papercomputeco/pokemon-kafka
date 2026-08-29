@@ -18,6 +18,11 @@ def main() -> None:
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--alerts", default="pokedex/memory/alerts.jsonl")
     parser.add_argument("--port", type=int, default=8200)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address; 0.0.0.0 exposes the viewer on the LAN/tailnet for watching from a phone",
+    )
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
 
@@ -28,7 +33,7 @@ def main() -> None:
     )
     if not args.no_open:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{args.port}")).start()
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

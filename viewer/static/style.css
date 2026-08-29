@@ -478,3 +478,73 @@ h1 {
   border: 2px solid #1f7d45; border-radius: 6px; background: #08130c;
   font-size: 0.78em; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
+
+/* ══ Mobile: the phone check-in layout ═══════════════════════════
+   The clamshell is projector furniture; on a phone the run itself is the
+   whole point. Shared rules drop the decorative chrome; then PORTRAIT stacks
+   everything with a full-width screen, and LANDSCAPE rotates into a
+   screen-beside-feed split sized by the viewport height. */
+@media (max-width: 900px), (max-height: 520px) {
+  body.pokedex { align-items: flex-start; }
+
+  #grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+    gap: 14px;
+    padding: 12px;
+    width: 100vw;
+  }
+  .tile .meta { font-size: 0.95rem; }
+  .tile .meta .run-label { font-size: 1.25rem; }
+  .tile .tile-noframe { height: 160px; }
+
+  .pokedex-shell {
+    width: 100vw;
+    gap: 12px;
+    padding: 10px;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* Chrome that earns nothing on a small screen */
+  .dex-hinge, .dex-topbar, .screen-dots, .screen-vents, .ctrl-left, .dpad { display: none; }
+
+  .dex-left { gap: 10px; }
+  .screen-frame { padding: 8px; }
+  .screen-bezel { padding: 6px; }
+
+  .dex-controls { padding: 0; justify-content: center; }
+  .heal-ctrl { max-width: none; }
+  .scrub-container { padding: 10px 12px; }
+  .scrub-container label { font-size: 0.7rem; }
+  #scrub { height: 28px; }
+
+  .dex-right { padding: 10px; gap: 10px; }
+  h1 { font-size: 1.2rem; letter-spacing: 2px; }
+  #back-btn { padding: 8px 14px; font-size: 0.95rem; }
+  .filter-chips { gap: 6px; }
+  .chip { padding: 8px 12px; font-size: 0.78rem; }
+  #feed li.entry { font-size: 0.95rem; padding: 8px 10px; line-height: 1.4; }
+}
+
+/* Portrait phone: one thumb-scrolled column, the screen full width. */
+@media (max-width: 900px) and (orientation: portrait) {
+  .pokedex-shell { flex-direction: column; }
+  #screen { width: 100%; max-width: 100%; height: auto; }
+  #feed { max-height: 44vh; }
+  #state-panel { width: 100%; margin-left: 0; max-height: 32vh; padding: 12px; }
+}
+
+/* Landscape phone: rotate the layout, not the content — screen sized by the
+   short axis, the feed beside it using the rest of the width. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .pokedex-shell { flex-direction: row; align-items: stretch; }
+  .dex-left { flex: 0 0 auto; justify-content: center; }
+  #screen { height: min(62vh, 340px); width: auto; max-width: 48vw; }
+  .dex-controls { display: none; }  /* HEAL is a desk job; keep landscape for watching */
+  .scrub-container { padding: 6px 10px; }
+  .scrub-container label { font-size: 0.6rem; }
+  .dex-right { flex: 1; min-width: 0; }
+  #feed { max-height: 58vh; }
+  #state-panel { display: none; }
+}
