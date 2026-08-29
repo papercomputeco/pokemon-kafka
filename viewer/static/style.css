@@ -478,3 +478,61 @@ h1 {
   border: 2px solid #1f7d45; border-radius: 6px; background: #08130c;
   font-size: 0.78em; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
+
+/* ══ Mobile: the phone check-in layout ═══════════════════════════
+   The clamshell is projector furniture; on a phone the run itself is the
+   whole point. Stack everything, give the game screen the full width, drop
+   the decorative chrome, and keep the touch surfaces (scrubber, chips,
+   HEAL) finger-sized. */
+@media (max-width: 900px) {
+  body.pokedex { align-items: flex-start; }
+
+  #grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 12px;
+    width: 100vw;
+  }
+  .tile .meta { font-size: 0.95rem; }
+  .tile .meta .run-label { font-size: 1.25rem; }
+  .tile .tile-noframe { height: 160px; }
+
+  .pokedex-shell {
+    flex-direction: column;
+    width: 100vw;
+    gap: 12px;
+    padding: 10px;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* Chrome that earns nothing on a small screen */
+  .dex-hinge, .dex-topbar, .screen-dots, .screen-vents, .ctrl-left, .dpad { display: none; }
+
+  .dex-left { gap: 10px; }
+  .screen-frame { padding: 8px; }
+  .screen-bezel { padding: 6px; }
+  #screen { width: 100%; max-width: 100%; height: auto; }
+
+  .dex-controls { padding: 0; justify-content: center; }
+  .heal-ctrl { max-width: none; }
+  .scrub-container { padding: 10px 12px; }
+  .scrub-container label { font-size: 0.7rem; }
+  #scrub { height: 28px; }
+
+  .dex-right { padding: 10px; gap: 10px; }
+  h1 { font-size: 1.2rem; letter-spacing: 2px; }
+  #back-btn { padding: 8px 14px; font-size: 0.95rem; }
+  .filter-chips { gap: 6px; }
+  .chip { padding: 8px 12px; font-size: 0.78rem; }
+  #feed { max-height: 44vh; }
+  #feed li.entry { font-size: 0.95rem; padding: 8px 10px; line-height: 1.4; }
+
+  #state-panel {
+    width: 100%;
+    margin-left: 0;
+    max-height: 32vh;
+    padding: 12px;
+  }
+}
