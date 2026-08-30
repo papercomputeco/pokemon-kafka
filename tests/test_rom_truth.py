@@ -29,6 +29,7 @@ LEDGES_OFF = 0x0D00
 STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
 WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
 EVOS_PTRS, EVOS_BLOCK, EVOS_BLOCK2 = 0x5000, 0x5200, 0x5220  # bank 1: addr == file offset
+TYPECHART_OFF = 0x0A00
 
 # Home-bank layout for the synthetic image (all pointers < 0x4000 so bank math stays simple;
 # _faddr's banked branch is covered by the >= 0x4000 blockset pointer below).
@@ -74,6 +75,21 @@ def build_rom() -> bytearray:
     rom[WILD_BLOCK : WILD_BLOCK + 22] = bytes([8] + [3, 1] * 10 + [0])
     for i in range(248):
         rom[WILD_PTRS + 2 * i : WILD_PTRS + 2 * i + 2] = bytes([0x00, 0x48])
+
+    # TypeEffects at its real shape: (attacker, defender, mult*10) triples, 0xFF-terminated.
+    # 20=fire 21=water 22=grass 17=electric 04=ground; fire->grass 2x, electric->ground 0x.
+    tc = []
+    for a, d, e in (
+        (0x14, 0x16, 0x14),
+        (0x15, 0x14, 0x14),
+        (0x16, 0x15, 0x14),
+        (0x17, 0x04, 0x00),
+        (0x14, 0x15, 0x05),
+        (0x15, 0x16, 0x05),
+    ) * 6:
+        tc += [a, d, e]
+    rom[TYPECHART_OFF : TYPECHART_OFF + len(tc)] = bytes(tc)
+    rom[TYPECHART_OFF + len(tc)] = 0xFF
 
     # Evolutions/learnsets at their real shape: 190 same-bank pointers, one block per species —
     # a level evolution + learnset shared by ids 1..189, and an item + trade pair for id 190.
@@ -152,6 +168,20 @@ def test_evolutions_table_found_by_signature(rom):
     assert len(evo) == 190
     assert evo["1"] == {"evolutions": [["level", 16, 2]], "learnset": [[9, 52], [15, 43]]}
     assert evo["190"] == {"evolutions": [["item", 10, 5], ["trade", 1, 6]], "learnset": []}
+
+
+def test_type_chart_found_by_signature(rom):
+    _, data = rom
+    chart = rom_truth.type_chart(data)
+    assert chart["fire"]["grass"] == 2.0
+    assert chart["electric"]["ground"] == 0.0
+    assert chart["fire"]["water"] == 0.5
+    assert "rock" not in chart.get("fire", {})  # absent pairs stay neutral
+
+
+def test_type_chart_missing_raises():
+    with pytest.raises(ValueError, match="type-effectiveness"):
+        rom_truth.type_chart(bytes(0x4000))
 
 
 def test_evolutions_table_missing_raises():
