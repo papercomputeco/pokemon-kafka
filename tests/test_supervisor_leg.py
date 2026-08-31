@@ -834,3 +834,8 @@ def test_a_floor_with_no_trainers_says_so_rather_than_claiming_a_clear(tmp_path)
     )
     runner.run()
     assert any("lists no trainers" in n for n in runner.notes)
+
+
+def test_the_lift_tour_is_registered_with_its_own_arguments():
+    with pytest.raises(SystemExit):
+        supervisor.main(["lift-tour", "--help"])

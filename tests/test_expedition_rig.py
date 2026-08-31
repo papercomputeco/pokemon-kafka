@@ -188,3 +188,33 @@ def test_make_room_refuses_when_every_slot_is_a_single_item(tmp_path):
     r = _bag_rig([(74, 1), (72, 1), (73, 1)])
     r.telemetry_root = tmp_path
     assert r.make_room() is False  # nothing here is expendable; say so rather than tossing a key
+
+
+class LiftRig:
+    """A lift car whose panel prints a scrolling floor list, like Silph's and the Hideout's."""
+
+    def __init__(self, floors, target_row=0):
+        self.floors = floors
+        self.cursor = 0
+        self.presses = []
+        self.left = False
+
+    def window_row(self, row):
+        i = (row - 4) // 2
+        return self.floors[i] if 0 <= i < len(self.floors) else ""
+
+
+def test_the_floor_labels_are_read_off_the_panel_not_indexed():
+    """Which floor sits at which index is exactly the sort of fact this project has been burned
+    by recalling, so the label under the cursor is decoded from the window layer."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.window_row = lambda row: {4: "1F", 6: "2F", 8: "3F"}.get(row, "")
+    assert r.elevator_floors() == ["1F", "2F", "3F"]
+
+
+def test_a_car_without_a_sign_is_reported_not_guessed(capsys):
+    r = rig.Rig.__new__(rig.Rig)
+    r.mem = {0xD35E: 236, 0xD362: 1, 0xD361: 2}
+    r.truth = {"maps": {"236": {"warps": [], "signs": []}}}
+    assert r.ride_elevator("5F") is False
+    assert "no sign to use as a lift panel" in capsys.readouterr().out

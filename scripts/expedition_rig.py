@@ -489,6 +489,78 @@ class Rig:
             self.ctl.wait(25)
         return " | ".join(pages[-4:])
 
+    # ---- the lift ---------------------------------------------------------------------------
+
+    def window_row(self, row: int) -> str:
+        """One decoded row of the window layer — where menus render (the background stays blank)."""
+        from text_decoder import decode_row
+
+        tm = self.pb.tilemap_window
+        return decode_row([tm.tile_identifier(x, row) for x in range(20)]).strip()
+
+    def elevator_floors(self) -> list[str]:
+        """The floor labels the panel is currently showing, top to bottom."""
+        return [self.window_row(4 + 2 * i) for i in range(3)]
+
+    def ride_elevator(self, floor: str) -> bool:
+        """Ride a lift car to a named floor, choosing from the panel's own list.
+
+        The car is a small room on tileset 18 whose control panel is a **sign, not an NPC** —
+        measured in the Rocket Hideout (panel at (1,1)) and again in Silph Co (panel at (3,0)),
+        which is why talking to bodies never found it. The floor list scrolls exactly like the
+        ITEM list: ``0xCC26`` is the cursor inside a three-row window and ``0xCC36`` the scroll
+        offset. The label under the cursor is *read off the screen* rather than an index being
+        assumed — which floor sits at which index is precisely the kind of fact this project has
+        been burned by recalling.
+
+        Returns True when the car has left for another map.
+        """
+        mp, _x, _y = self.pos()
+        m = self.truth["maps"].get(str(mp), {})
+        signs = m.get("signs") or []
+        if not signs:
+            print(f"  map {mp} has no sign to use as a lift panel", flush=True)
+            return False
+        sx, sy = signs[0]
+        if not self.approach({(sx, sy + 1)}):
+            return False
+        self.ctl.press("up")
+        self.ctl.wait(25)
+        for _ in range(2):  # A opens the panel, A again brings up the floor list
+            self.ctl.press("a")
+            self.ctl.wait(70)
+        target = floor.strip().upper()
+        for _ in range(24):
+            cursor = self.mem[qm.ADDR_MENU_CUR]
+            if self.window_row(4 + 2 * cursor).upper() == target:
+                break
+            if target in [f.upper() for f in self.elevator_floors()]:
+                self.ctl.press("down" if self.window_row(4).upper() != target else "up")
+            else:
+                self.ctl.press("down")
+            self.ctl.wait(20)
+        else:
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            print(f"  the lift panel never showed a floor called {floor!r}", flush=True)
+            return False
+        for _ in range(3):
+            self.ctl.press("a")
+            self.ctl.wait(60)
+        for _ in range(4):
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        doors = {(w[0], w[1]) for w in m.get("warps", [])}
+        if doors:
+            self.approach(doors)
+            for direction in ("down", "up", "left", "right"):
+                self.io.press(direction, hold=8, release=8)
+                self.io.wait(60)
+                if self.pos()[0] != mp:
+                    return True
+        return self.pos()[0] != mp
+
     # ---- the oracle -------------------------------------------------------------------------
 
     def oracle_goto(self, goal_test, max_states: int = 500) -> bool:

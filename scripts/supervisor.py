@@ -811,6 +811,54 @@ def parse_goals(text: str) -> list[int]:
     return [int(part) for part in str(text).replace(" ", "").split(",") if part]
 
 
+def cmd_lift_tour(args) -> int:
+    """Ride a lift car to each named floor, clearing and looting what the lift can reach.
+
+    A lift is not a hop in the connection graph, and that is exactly why it matters here: it
+    deposits you *inside* pockets the walking routes cannot enter. Measured in Silph — riding to
+    5F lands on map 210 at (20,1), while every walked approach to 210 arrives at (8,15) on the
+    other side of a card-key door. So the tour returns to the car between floors by reloading it,
+    rather than trying to walk back through doors that are shut.
+    """
+    import io as _io
+
+    from expedition_rig import BattleWedge, Rig
+
+    rig = Rig(args.state, live_label=args.live_label)
+    floors = [f.strip() for f in args.floors.split(",") if f.strip()]
+    print(f"start {rig.settled_pos()} in the car; touring {floors}", flush=True)
+    car = _io.BytesIO()
+    rig.pb.save_state(car)
+    results = []
+    for floor in floors:
+        car.seek(0)
+        rig.pb.load_state(car)
+        print(f"\n=== {floor} ===", flush=True)
+        if not rig.ride_elevator(floor):
+            print(f"  the lift would not take us to {floor}", flush=True)
+            results.append({"floor": floor, "ok": False})
+            continue
+        where = rig.settled_pos()
+        runner = LegRunner(rig, goal=where[0], consult=lambda *a: (None, "", "none"), log=print)
+        try:
+            cleared = runner.engage_trainers()
+            gained = runner.sweep_items()
+        except BattleWedge as exc:
+            print(f"  battle wedge on {floor}: {exc}", flush=True)
+            results.append({"floor": floor, "ok": False})
+            continue
+        print(f"  {floor} -> map {where[0]} at {where[1:]}; cleared={cleared} gained={gained}", flush=True)
+        rig.emit("supervisor.lift_floor", floor=floor, map=where[0], gained=gained)
+        results.append({"floor": floor, "ok": True, "map": where[0], "gained": gained})
+        if args.bank:
+            rig.bank(f"{args.bank}-{floor}")
+        car.seek(0)  # bank the *current* car-return point: the world moved on (fights, pickups)
+        rig.pb.save_state(car)
+    print(json.dumps({"floors": results, "bag": rig.bag_named(), "run_id": rig.run_id}))
+    rig.finish(outcome="lift-tour")
+    return 0
+
+
 def cmd_run(args) -> int:
     """Boot a baton and drive the supervised leg chain. This is the loop body the skill promises.
 
@@ -888,11 +936,18 @@ def main(argv: list[str] | None = None) -> int:
     ce.add_argument("--harness-death", type=int, default=0)
     ce.add_argument("--load-ok", type=int, default=1)
     ce.add_argument("--lane-log", type=Path, action="append", default=[])
+    lt = sub.add_parser("lift-tour", help="ride a lift car to each floor, clearing and looting each")
+    lt.add_argument("--state", required=True, help="a baton standing inside the lift car")
+    lt.add_argument("--floors", required=True, help="comma-separated labels exactly as the panel prints them")
+    lt.add_argument("--bank", default=None)
+    lt.add_argument("--live-label", default=None)
     rp = sub.add_parser("replay", help="what the supervisor would have said, from a run's lane logs")
     rp.add_argument("logs", type=Path, nargs="+")
     args = ap.parse_args(argv)
     if args.cmd == "run":
         return cmd_run(args)
+    if args.cmd == "lift-tour":
+        return cmd_lift_tour(args)
     if args.cmd == "replay":
         springs: Counter = Counter()
         for p in args.logs:
