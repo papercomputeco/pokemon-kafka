@@ -319,22 +319,52 @@ def cut_facing(io, face: str) -> None:
 
     The lead must know Cut — its field submenu then opens with CUT on row 0 (measured on
     Charmeleon and Charizard alike). Opens both cuttable tile classes: 0x3D bushes and
-    0x50 trees."""
+    0x50 trees.
+
+    Cadence note: the menu phases here run at 60/25 frames, not the 15/45 that reads as "fast
+    enough". `quartermaster` measured the shop dialog swallowing fixed-timing scripts, and
+    `Rig.toss_stack` lost an evening to exactly that — the same presses freed a bag slot at 60
+    and silently did nothing at 45, which the caller reported as the game refusing. Where a
+    phase has a predicate, wait on the predicate; where it does not, be generous.
+    """
     io.press(face)
     io.wait(25)
     io.press("start")
-    io.wait(40)
+    io.wait(50)
     for _ in range(6):
         if io.read(ADDR_MENU_CUR) == 1:
             break
         io.press("down" if io.read(ADDR_MENU_CUR) < 1 else "up")
-        io.wait(15)
+        io.wait(20)
     for _ in range(3):
         io.press("a")
         io.wait(60)
     for _ in range(5):
         io.press("b")
         io.wait(30)
+
+
+def cut_until_open(io, truth, pairs, face: str, tries: int = 3) -> bool:
+    """Cut, then *prove it* by stepping — the predicate the bare flow never had.
+
+    ``cut_facing`` fires the menu and returns whether or not anything was cut. Callers then
+    stepped hopefully and read a refusal as terrain. The step is the predicate: if we moved, the
+    growth is gone; if not, cut again. The Vermilion yard bush regrows on map reload, so one
+    attempt was never a safe assumption anyway.
+    """
+    delta = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[face]
+    for _ in range(tries):
+        before = read_pos(io)
+        _step(io, face)
+        if read_pos(io) != before:
+            return True
+        cut_facing(io, face)
+        before = read_pos(io)
+        _step(io, face)
+        if read_pos(io) != before:
+            return True
+    _ = delta
+    return False
 
 
 def drive_to(io, truth, pairs, dst: int, *, battle=_default_battle, max_hops: int = 25, log=None) -> bool:

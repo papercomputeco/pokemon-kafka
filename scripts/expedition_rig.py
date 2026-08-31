@@ -629,6 +629,87 @@ class Rig:
                     return True
         return self.pos()[0] != mp
 
+    # ---- field moves ------------------------------------------------------------------------
+
+    def field_moves(self, rows: int = 8) -> list[str]:
+        """The field submenu's entries, decoded from the window layer, top to bottom."""
+        return [self.window_row(4 + 2 * i) for i in range(rows)]
+
+    def use_field_move(self, name: str, face: str | None = None, member: int = 0) -> bool:
+        """Use a field move by *name*, choosing it off the menu the game draws.
+
+        `road.cut_facing` hardcodes "CUT is row 0 of the lead's field submenu", which is true for
+        Cut on this party and is exactly the kind of assumption that has cost this project runs.
+        Which move sits on which row depends on the mon and what it has learned, so the row is
+        read rather than assumed — the same fix the lift panel needed for its floor list.
+
+        Returns whether the move was selected. Whether it *worked* is the caller's predicate:
+        Cut is proved by stepping into the growth, Surf by ending up on water. Nothing here
+        reports success from a menu having been navigated.
+        """
+        if face:
+            self.ctl.press(face)
+            self.ctl.wait(25)
+        for _ in range(6):  # close anything already open before opening ours
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.press("start")
+        self.ctl.wait(50)
+        for _ in range(8):  # POKeMON is the row above ITEM
+            if self.mem[qm.ADDR_MENU_CUR] == 1:
+                break
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < 1 else "up")
+            self.ctl.wait(20)
+        self.ctl.press("a")
+        self.ctl.wait(60)
+        for _ in range(8):  # the party list, then the member whose move we want
+            if self.mem[qm.ADDR_MENU_CUR] == member:
+                break
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < member else "up")
+            self.ctl.wait(20)
+        self.ctl.press("a")
+        self.ctl.wait(60)
+        target = name.strip().upper()
+        for _ in range(10):
+            cursor = self.mem[qm.ADDR_MENU_CUR]
+            if self.window_row(4 + 2 * cursor).upper().startswith(target):
+                self.ctl.press("a")
+                self.ctl.wait(60)
+                return True
+            if target not in " ".join(self.field_moves()).upper():
+                break
+            self.ctl.press("down")
+            self.ctl.wait(20)
+        print(f"  no field move called {name!r} on party member {member}", flush=True)
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return False
+
+    def surf_onto(self, face: str) -> bool:
+        """Ride onto water. The predicate is the position, never the menu."""
+        before = self.pos()
+        if not self.use_field_move("SURF", face=face):
+            return False
+        for _ in range(4):
+            self.ctl.press("a")
+            self.ctl.wait(50)
+        self.io.press(face, hold=8, release=8)
+        self.io.wait(45)
+        return self.pos() != before
+
+    def strength_push(self, face: str) -> bool:
+        """Enable Strength, then shove the boulder. Proved by the boulder's tile opening up."""
+        if not self.use_field_move("STRENGTH", face=face):
+            return False
+        for _ in range(4):
+            self.ctl.press("a")
+            self.ctl.wait(50)
+        before = self.pos()
+        self.io.press(face, hold=8, release=8)
+        self.io.wait(45)
+        return self.pos() != before
+
     # ---- surveying --------------------------------------------------------------------------
 
     def survey_pocket(self, max_cells: int = 400, log=print) -> dict:

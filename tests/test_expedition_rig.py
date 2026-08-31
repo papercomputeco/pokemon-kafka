@@ -262,3 +262,44 @@ def test_text_from_returns_only_what_the_action_produced():
     r.dialogue = lambda: state["text"]
     assert r.text_from(lambda: None) == ""  # a sticky buffer is not this action's message
     assert r.text_from(lambda: state.update(text="Darn! It needs a CARD KEY!")) == "Darn! It needs a CARD KEY!"
+
+
+class FieldMenuRig:
+    """A party field submenu whose rows are whatever the mon happens to know."""
+
+    def __init__(self, moves):
+        self.moves = moves
+        self.cursor = 0
+        self.chosen = None
+        self.presses = []
+
+    def window_row(self, row):
+        i = (row - 4) // 2
+        return self.moves[i] if 0 <= i < len(self.moves) else ""
+
+
+def test_a_field_move_is_found_by_name_not_by_a_remembered_row():
+    """`cut_facing` hardcodes CUT on row 0. Which move sits on which row depends on the mon."""
+    r = rig.Rig.__new__(rig.Rig)
+    menu = FieldMenuRig(["FLY", "SURF", "STRENGTH", "CUT"])
+    r.window_row = menu.window_row
+    assert r.field_moves(4) == ["FLY", "SURF", "STRENGTH", "CUT"]
+
+
+def test_a_move_the_party_does_not_know_is_reported_not_guessed(capsys):
+    r = rig.Rig.__new__(rig.Rig)
+    menu = FieldMenuRig(["CUT", "FLASH"])
+    r.window_row = menu.window_row
+    r.field_moves = lambda rows=8: menu.moves
+    r.mem = {0xCC26: 0}
+
+    class Ctl:
+        def press(self, b):
+            pass
+
+        def wait(self, n=0):
+            pass
+
+    r.ctl = Ctl()
+    assert r.use_field_move("SURF") is False
+    assert "no field move called 'SURF'" in capsys.readouterr().out
