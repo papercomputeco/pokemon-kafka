@@ -218,6 +218,9 @@ class Rig:
         if found is None:
             return False
         slot, qty = found
+        for _ in range(6):  # never press START onto an already-open menu: close first, then open
+            self.ctl.press("b")
+            self.ctl.wait(25)
         self.ctl.press("start")
         self.ctl.wait(40)
         for _ in range(8):  # ITEM sits below POKeMON in the field menu; walk the cursor onto it
@@ -391,6 +394,15 @@ class Rig:
     def flush_text(self, tries: int = 6) -> bool:
         """Close whatever box is on screen, so the next message is unambiguously the next message.
 
+        .. warning::
+           Every screen-derived signal on this cartridge is sticky. The dialogue buffer, the
+           window tilemap and the text-id register at 0xD125 all keep their last contents until
+           something overwrites them, and none of them is cleared when a box closes. A baton was
+           diagnosed as "banked with the START menu open" on the strength of 0xD125 == 13 and a
+           window layer still showing POKeDEX/ITEM/SAVE — and then a plain step moved the player
+           one tile, proving no menu was open at all. Trust position, bag and badges; treat
+           anything read off the screen as a hint that needs corroborating.
+
         Comparing the buffer before and after a step is not enough on its own: a snapshot taken
         while a box was up *contains* that box, so loading it restores the stale line and the
         comparison sees no change. That is how a survey of map 208 came back with zero doors on a
@@ -418,10 +430,17 @@ class Rig:
                 continue
             if self.probe_step():
                 return True
-            self.ctl.press("a")
-            self.ctl.wait(40)
+            # B before A. A *commits*, and on the field menu committing opens a submenu — a
+            # settle that leads with A can open the very thing it is trying to clear, which is
+            # how a baton came to be banked with the START menu up and the cursor sitting on
+            # ITEM, breaking every menu flow that booted from it. B closes; A is only for
+            # advancing a box that B will not dismiss.
             self.ctl.press("b")
             self.ctl.wait(30)
+            if self.probe_step():
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(40)
         return self.probe_step()
 
     def battle(self, io=None) -> None:
