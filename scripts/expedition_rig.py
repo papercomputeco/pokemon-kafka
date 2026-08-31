@@ -733,6 +733,7 @@ class Rig:
         deltas = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
         mp, sx, sy = self.settled_pos()
         m = self.truth["maps"][str(mp)]
+        ungated = {k: v for k, v in m.items() if k != "gates"}
         bodies = self.bodies()
         origin = _io.BytesIO()
         self.pb.save_state(origin)
@@ -787,7 +788,15 @@ class Rig:
                     # walkable and passable, no body is standing there, and the engine still says
                     # no. That is exactly an unmodelled gate, and it is what the collision grid
                     # cannot see. Any text present is recorded as evidence, never as the test.
-                    if rt.passable(m, self.pairs, cell[0], cell[1], target[0], target[1]) and target not in bodies:
+                    # Judge against the *grid*, not against what we already believe. `passable`
+                    # is gate-aware now, so testing with it would skip every known gate and a
+                    # false positive — a wanderer that moved, a trainer freeze — would become
+                    # permanent, never re-probed. Surveys must be able to disagree with the file
+                    # they feed.
+                    if (
+                        rt.passable(ungated, self.pairs, cell[0], cell[1], target[0], target[1])
+                        and target not in bodies
+                    ):
                         said = self.dialogue()
                         doors[f"{cell[0]},{cell[1]},{direction}"] = said or ""
                         log(f'  GATE at {cell} {direction} -> {target}   [buffer: "{(said or "")[:70]}"]')
