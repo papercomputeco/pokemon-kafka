@@ -106,6 +106,13 @@ class FakeRig:
             self._pos = (mp, *sorted(targets)[0])
         return True
 
+    def approach(self, cells):
+        self.calls.append(("approach", sorted(cells)))
+        if not cells:
+            return False
+        self._pos = (self._pos[0], *sorted(cells)[0])
+        return True
+
     def talk(self, face):
         self.calls.append(("talk", face))
         return self.said

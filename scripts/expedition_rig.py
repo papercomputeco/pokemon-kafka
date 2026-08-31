@@ -307,9 +307,8 @@ class Rig:
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
             near = road.reachable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
-            if not near:
+            if not near or not self.approach(near):
                 return False
-            self.walk(mp, near, cap=400)
             mp, x, y = self.pos()
             if (x, y) not in adjacent:
                 return False
@@ -429,6 +428,28 @@ class Rig:
     def cross(self, cur: int, nxt: int, **kw):
         kw.setdefault("battle", self.battle)
         return road.cross_edge(self.io, self.truth, self.pairs, cur, nxt, **kw)
+
+    def approach(self, cells) -> bool:
+        """Get onto one of ``cells`` on this map. Walk first; on a facility floor, use the oracle.
+
+        Silph's top floor refused every planned step: `walk` reported "refused" from (10,9) to a
+        cell four tiles away that the grid says is plainly connected, because tileset 22's tiles
+        decide where you end up. Planning a path there is the same category error that held
+        Rocket Hideout B4 — so the fallback is the facing-keyed oracle, which is the engine's own
+        answer for these floors and is already what gets legs *onto* them.
+        """
+        cells = set(cells)
+        mp, x, y = self.pos()
+        if (x, y) in cells:
+            return True
+        self.walk(mp, cells, cap=400)
+        here = self.pos()
+        if here[0] == mp and here[1:] in cells:
+            return True
+        if self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET:
+            self.oracle_goto(lambda p: p[0] == mp and (p[1], p[2]) in cells)
+        here = self.pos()
+        return here[0] == mp and here[1:] in cells
 
     def traverse(self, interior: int, **kw):
         """Leave a swallowed-hop interior by the mats on another side (a gate room, a house)."""

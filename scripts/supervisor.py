@@ -228,11 +228,6 @@ ACTIONS = (
     "GIVE_UP",  # end the leg now; the operator gets the written record
 )
 
-# Tileset 22 is the facility floor set — Rocket Hideout and Silph Co. Its tiles decide where you
-# end up (spin arrows, teleport pads), so a planned walk is a category error there and the oracle
-# is the mover. The tileset is read from the map, never assumed: tile-id meanings measured in one
-# tileset have already been shown not to carry into another.
-FACILITY_TILESET = 22
 
 MENUS: dict[str, tuple[str, ...]] = {
     "no-route": ("BACK_OUT_AND_REENTER", "TALK_TO_BLOCKER", "USE_GATE_WARP", "GIVE_UP"),
@@ -647,11 +642,10 @@ class LegRunner:
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
             near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
-            if not near:
+            if not near or not self.rig.approach(near):
                 return False
-            self.rig.walk(mp, near, cap=400)
-            mp2, x, y = self.rig.pos()
-            if mp2 != mp or (x, y) not in adjacent:
+            mp, x, y = self.rig.pos()
+            if (x, y) not in adjacent:
                 return False
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
         self.log(f"  engaged the trainer at {spot}: {said[:140]}")
@@ -716,6 +710,7 @@ class LegRunner:
     # ---- the leg -----------------------------------------------------------------------------
 
     def run(self) -> dict:
+        import road
         import rom_truth as rt
 
         started = self.clock()
@@ -771,7 +766,7 @@ class LegRunner:
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"
-            facility = self.rig.truth["maps"].get(str(cur), {}).get("tileset") == FACILITY_TILESET
+            facility = self.rig.truth["maps"].get(str(cur), {}).get("tileset") == road.FACILITY_TILESET
             unlooted = [b for b in self.rig.item_balls(cur) if (cur, b) not in self.looted]
             menu = menu_for(
                 failure, edge_hop=bool(hop and hop["via"] == "edge"), facility=facility, items=bool(unlooted)
@@ -840,7 +835,10 @@ def cmd_run(args) -> int:
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
             engage=args.engage and index == len(goals),
             sweep=args.sweep_items,
-            clear_floor=args.clear_floor and index == len(goals),
+            # Unlike --engage, which watches for a badge and so belongs to the final gym, a
+            # floor clear is worth doing on every goal in the chain: the thing a story floor
+            # yields is usually carried by one of its trainers.
+            clear_floor=args.clear_floor,
             consult=consult,
         )
         try:

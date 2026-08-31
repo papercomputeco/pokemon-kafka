@@ -34,6 +34,11 @@ from quartermaster import ADDR_IN_BATTLE, ADDR_MENU_CUR, QuartermasterError, rea
 SPRITE_STATE_BASE = 0xC100
 SPRITE_DATA_BASE = 0xC200
 
+# Tileset 22 is the facility floor set (Rocket Hideout, Silph Co). Its tiles decide where you end
+# up — spin arrows, teleport pads — so a planned path is a category error there and the engine's
+# own answer is the facing-keyed oracle. Read from the map, never assumed.
+FACILITY_TILESET = 22
+
 _OPPOSITE = {"down": "up", "up": "down", "right": "left", "left": "right"}
 _OUTWARD = {"west": "left", "east": "right", "north": "up", "south": "down"}
 
