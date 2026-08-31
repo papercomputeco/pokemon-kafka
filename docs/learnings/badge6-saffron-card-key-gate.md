@@ -163,12 +163,45 @@ KEY line. `LegRunner.read_refusal` already captures exactly that sentence and ke
 x, y), so a boundary sweep would turn the invisible locks into data the graph can carry. Until
 that exists, no route inside Silph can be planned — only tried.
 
+## The measured door map, and the shape of what remains
+
+`supervisor.py survey` walked every floor by attempted steps. The grid over-reports on all ten:
+
+| floor | map | measured | grid claimed | gates |
+|---|---|---|---|---|
+| 2F | 207 | 239 | 319 | 4 |
+| 3F | 208 | 233 | 343 | 2 |
+| 4F | 209 | 205 | 303 | 4 |
+| 5F | 210 | 168 | 317 | 6 |
+| 6F | 211 | 200 | 238 | 2 |
+| 7F | 212 | 100 | 223 | 4 |
+| 8F | 213 | 263 | 274 | 4 |
+| 9F | 233 | 112 | 269 | 8 |
+| 10F | 234 | 114 | 168 | 2 |
+| 11F | 235 | 49 | 52 | 0 |
+
+**36 card-key gates**, each an exact `(x, y, direction)` in `survey-<map>.json`. Every reachable
+item ball in the building is now open; 10F's three yielded TM26, RARE CANDY and CARBOS. **No
+CARD KEY anywhere we can stand.**
+
+**The building is a graph of pockets, and we have surveyed one pocket per floor.** Cross-checking
+every warp landing against the surveyed pockets finds **51 landings that fall outside them** —
+i.e. 51 doorways into ground nobody has walked. Several are reachable right now: from 10F's
+pocket, the pads at (13,7) and (13,15) land on 209 at (17,11) and (3,15), neither of which is in
+209's surveyed 205-cell pocket. Riding (13,7) was verified live and lands in a different region.
+
+So the search is not exhausted, it is *unstructured*. What it needs is a **pocket-graph explorer**:
+nodes are (map, pocket), edges are the measured exits, and each newly entered pocket gets
+surveyed and swept before the frontier advances. Every piece of that exists — `survey_pocket`
+measures a pocket, `sweep_items` empties it, the exits are already in the survey JSON — but
+nothing walks the frontier, so exploration has been me picking doors by hand.
+
 ## What the next run needs
 
-1. **Ride the teleport pads.** Every floor has been visited and every reachable trainer fought;
-   the pads are the only untried way between pockets. Aim `oracle_goto` at a pad tile (an
-   intra-map warp, `dst == this map`) rather than at a destination cell, and let the game decide
-   where it puts you. `road.walk` will never do this — `avoid_warps` exists precisely to stop it.
+1. **Build the pocket-graph explorer.** Not another hand-picked door: a frontier walk over
+   (map, pocket) using the measured exits, surveying and sweeping each new pocket. 51 landings
+   are known to lead outside everything surveyed so far; that is the search space, and it is
+   finite and enumerated.
 2. **Fight the boss as an npc.** On 11F (map 235) the two npcs at (7,5) and (10,5) are Giovanni
    and the president. Whatever reaches them has to engage `kind: "npc"` sprites, which the
    current `--clear-floor` does not.
