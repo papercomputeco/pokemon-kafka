@@ -274,12 +274,24 @@ class Rig:
         stack is both the most expendable and the one whose loss costs the least.
         """
         stacks = [(qty, item) for item, qty in self.bag() if qty > 1]
-        if not stacks:
-            print("  bag is full and holds no stack to toss — every slot is a single item", flush=True)
+        candidates = [max(stacks)] if stacks else []
+        if not candidates:
+            # Every slot holds a single item. Rather than guess which are expendable, ask the
+            # cartridge: TMs are named TM<n> in the extracted item table, we are carrying eight,
+            # and they are the most redundant thing in the bag. The game itself is the backstop —
+            # it refuses to toss a key item, so a slot that does not come free tells us to move
+            # on to the next candidate instead of losing something irreplaceable.
+            candidates = [(1, item) for item, _q in self.bag() if self.item_name(item).startswith("TM")]
+        if not candidates:
+            print("  bag is full and nothing in it is expendable", flush=True)
             return False
-        qty, item = max(stacks)
-        print(f"  bag full: tossing {qty}x {self.item_name(item)} to free a slot", flush=True)
-        freed = self.toss_stack(item)
+        freed = False
+        for qty, item in candidates:
+            print(f"  bag full: tossing {qty}x {self.item_name(item)} to free a slot", flush=True)
+            freed = self.toss_stack(item)
+            if freed:
+                break
+            print(f"  the game would not part with {self.item_name(item)}", flush=True)
         # Backing out of the ITEM menu is not the same as the world accepting input again, and a
         # pickup that starts inside a half-closed menu sends its A presses to the menu. Measured:
         # a slot was freed on Silph 2F and the very next collect_item still came back empty.

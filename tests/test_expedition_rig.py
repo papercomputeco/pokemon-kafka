@@ -218,3 +218,39 @@ def test_a_car_without_a_sign_is_reported_not_guessed(capsys):
     r.truth = {"maps": {"236": {"warps": [], "signs": []}}}
     assert r.ride_elevator("5F") is False
     assert "no sign to use as a lift panel" in capsys.readouterr().out
+
+
+def test_make_room_falls_back_to_a_tm_when_nothing_is_stacked(tmp_path):
+    """Every slot a single item is not the same as nothing being expendable: TMs are named by
+    the cartridge, we carry eight, and the game refuses to toss anything it considers a key."""
+    r = _bag_rig([(74, 1), (72, 1), (207, 1)], items={"74": "LIFT KEY", "72": "SILPH SCOPE", "207": "TM07"})
+    r.telemetry_root = tmp_path
+    tried = []
+
+    def toss(item):
+        tried.append(item)
+        return True
+
+    r.toss_stack = toss
+    assert r.make_room() is True
+    assert tried == [207]  # the TM, never the LIFT KEY or the SILPH SCOPE
+
+
+def test_make_room_moves_on_when_the_game_refuses_a_toss(tmp_path):
+    r = _bag_rig([(207, 1), (210, 1)], items={"207": "TM07", "210": "TM10"})
+    r.telemetry_root = tmp_path
+    tried = []
+
+    def toss(item):
+        tried.append(item)
+        return item == 210  # the first one will not go
+
+    r.toss_stack = toss
+    assert r.make_room() is True
+    assert tried == [207, 210]
+
+
+def test_make_room_still_refuses_a_bag_of_only_key_items(tmp_path):
+    r = _bag_rig([(74, 1), (72, 1)], items={"74": "LIFT KEY", "72": "SILPH SCOPE"})
+    r.telemetry_root = tmp_path
+    assert r.make_room() is False
