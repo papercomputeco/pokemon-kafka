@@ -1,0 +1,311 @@
+"""The Rig — one booted cartridge, wired for a supervised leg.
+
+This is the scratchpad harness that won badges 4 and 5 (``data/local_runs/roster-bench/
+expedition.py``), promoted into ``scripts/`` because the doctrine says so: *fix the engine, do
+not fork the scratchpad*. A leg that lives in ``data/`` teaches the repo nothing, and six of
+them in a day is how 2026-08-30 went.
+
+What the Rig owns, and nothing else:
+
+* **Boot.** A baton ``.state`` loaded into ``PokemonAgent``'s PyBoy, plus the extracted truth
+  and its tile pairs. The agent supplies the battle turn (catch hook, potions, forced switch,
+  evolution guard) that ``road`` delegates to.
+* **Recording.** With ``live_label=`` every button press is a turn, every turn a frame, and the
+  ``runs/<id>/`` folder grows while we play — the viewer reads it live (no ``summary.json`` yet
+  means "running"). ``EmuIO.press`` and ``GameController.press`` have different signatures, so
+  the wrapper passes ``*a, **kw`` through; a wrapper that does not is the measured way to break
+  ``road``'s ``press(dir, hold=8, release=8)``.
+* **Telemetry.** Every leg emits to ``data/telemetry/game/<UTC-date>.jsonl`` under a stable
+  ``run_id``. A run that does not emit is unminable, which is the whole reason the sink exists.
+* **Reads.** Position, party, badges, dialogue — measured from RAM, never assumed.
+
+A battle that will not end is a ``BattleWedge``, not a ``sys.exit``: the supervisor owns what
+happens after a failure, and a harness that kills the process denies it that.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+WORKSPACE = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:  # the Rig is imported from repo root and from scripts/ alike
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import quartermaster as qm  # noqa: E402
+import road  # noqa: E402
+import rom_truth as rt  # noqa: E402
+
+ROM_DEFAULT = WORKSPACE / "rom" / "pokemon_red.gb"
+BATON_DIR = WORKSPACE / "data" / "local_runs" / "roster-bench"
+TELEMETRY_DIR = WORKSPACE / "data" / "telemetry" / "game"
+RUNS_DIR = WORKSPACE / "runs"
+VIEWER_WS = "ws://127.0.0.1:8201"
+
+ADDR_BADGES = 0xD356  # game_profile.RED_BLUE.addr_badges
+ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
+BATTLE_TURN_CAP = 200  # a battle past this is wedged, not long
+
+
+class BattleWedge(RuntimeError):
+    """A battle that would not end. The state is banked; the supervisor decides what next."""
+
+
+def telemetry_path(now: datetime | None = None, root: Path | None = None) -> Path:
+    """The sink line for today. One file per UTC date — the shape the benchmarks glob."""
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return (root or TELEMETRY_DIR) / f"{stamp}.jsonl"
+
+
+def emit_event(run_id: str, event: str, fields: dict | None = None, *, root: Path | None = None) -> dict:
+    """Append one expedition event to the game sink and return the record written."""
+    import expedition_crew as crew
+
+    record = crew.telemetry_record(run_id, event, fields)
+    path = telemetry_path(root=root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+    return record
+
+
+class Rig:
+    """A loaded cartridge plus the road engine, recording and emitting as it plays."""
+
+    def __init__(
+        self,
+        state: str | Path,
+        *,
+        live_label: str | None = None,
+        frame_interval: int = 1,
+        viewer_ws: str = VIEWER_WS,
+        rom: str | Path = ROM_DEFAULT,
+        run_id: str | None = None,
+        telemetry_root: Path | None = None,
+        settle_on_boot: bool = True,
+    ) -> None:
+        from agent import PokemonAgent
+
+        self.ag = PokemonAgent(str(rom))
+        with open(state, "rb") as fh:
+            self.ag.pyboy.load_state(fh)
+        self.pb = self.ag.pyboy
+        self.mem = self.pb.memory
+        self.ctl = self.ag.controller
+        self.mr = self.ag.memory
+        self.io = qm.EmuIO(self.pb)
+        self.truth = rt.load_truth()
+        self.pairs = rt.loaded_pairs(self.truth)
+        self.ag.catch_wanted = set()  # a leg is travel, not a hunt; the quartermaster arms catching
+        self.turn = 0
+        self.recorder = None
+        self.telemetry_root = telemetry_root
+        self.run_id = run_id or uuid.uuid4().hex[:12]
+        if live_label:
+            self._go_live(live_label, frame_interval, viewer_ws)
+        if settle_on_boot and not self.settle():
+            print("  WARNING: the baton would not settle — a textbox is still parking movement", flush=True)
+
+    # ---- wiring ---------------------------------------------------------------------------
+
+    def _go_live(self, label: str, frame_interval: int, viewer_ws: str) -> None:
+        from game_events import GameEventCollector
+        from live_producer import LiveProducer
+        from PIL import Image
+        from recorder import RunRecorder
+
+        run_id = RunRecorder.new_run_id(datetime.now(timezone.utc), uuid.uuid4().hex[:4])
+        self.run_id = run_id
+        producer = LiveProducer(f"{viewer_ws}/ws/produce/{run_id}", run_id)
+        self.recorder = RunRecorder(
+            run_id,
+            RUNS_DIR,
+            frame_grabber=lambda: Image.fromarray(self.pb.screen.ndarray),
+            frame_interval=frame_interval,
+            live=producer.send,
+        )
+        self.ag.collector = GameEventCollector(recorder=self.recorder, game=self.ag.profile.name, run_id=run_id)
+        self.recorder.start({"label": label, "rom": str(ROM_DEFAULT)})
+
+        def wrap(press_fn):
+            def press(button, *a, **kw):  # EmuIO.press and GameController.press differ — pass through
+                press_fn(button, *a, **kw)
+                self.turn += 1
+                self.ag.turn_count = self.turn  # events and frames share one clock
+                self.recorder.tick(self.turn)
+
+            return press
+
+        self.ctl.press = wrap(self.ctl.press)
+        self.io.press = wrap(self.io.press)
+        print(f"LIVE RUN {run_id} -> http://127.0.0.1:8201/run/{run_id}", flush=True)
+
+    def emit(self, event: str, **fields) -> dict:
+        return emit_event(self.run_id, event, fields, root=self.telemetry_root)
+
+    def finish(self, **summary) -> None:
+        if self.recorder is not None:
+            summary.setdefault("turns", self.turn)
+            summary.setdefault("party", str(self.party()))
+            summary.setdefault("pos", str(self.pos()))
+            self.recorder.finish(summary)
+
+    # ---- measured reads -------------------------------------------------------------------
+
+    def pos(self) -> tuple[int, int, int]:
+        return self.mem[0xD35E], self.mem[0xD362], self.mem[0xD361]
+
+    def badges(self) -> int:
+        return self.mem[ADDR_BADGES]
+
+    def party(self) -> list[tuple[str, int, int]]:
+        from memory_reader import SPECIES_ID_MAP
+
+        base = ADDR_PARTY_STRUCTS
+        return [
+            (
+                SPECIES_ID_MAP.get(self.mem[base + PARTY_STRUCT_SIZE * i], "?"),
+                self.mem[base + PARTY_STRUCT_SIZE * i + 33],
+                (self.mem[base + PARTY_STRUCT_SIZE * i + 1] << 8) | self.mem[base + PARTY_STRUCT_SIZE * i + 2],
+            )
+            for i in range(self.mem[ADDR_PARTY_COUNT])
+        ]
+
+    def dialogue(self) -> str:
+        try:
+            return self.mr.read_dialogue().strip()
+        except Exception:  # a text buffer mid-redraw is not a leg failure
+            return ""
+
+    # ---- moving ---------------------------------------------------------------------------
+
+    def probe_step(self) -> bool:
+        """One step and its undo — the only honest proof the world is accepting input.
+
+        A textbox does not always leave text in the buffer (the buffer stays *stale* after boxes
+        close, measured), so "is there dialogue" cannot answer "can we move". Actually moving can.
+        """
+        for direction, back in (("down", "up"), ("up", "down"), ("left", "right"), ("right", "left")):
+            before = self.pos()
+            self.io.press(direction, hold=8, release=8)
+            self.io.wait(30)
+            after = self.pos()
+            if after != before:
+                if after[0] == before[0]:  # a map change is progress, not something to undo
+                    self.io.press(back, hold=8, release=8)
+                    self.io.wait(30)
+                return True
+        return False
+
+    def settle(self, max_rounds: int = 16) -> bool:
+        """Flush a parked textbox so a baton can move.
+
+        A state banked mid-dialogue cannot walk: every direction is swallowed while the box is
+        up. Measured on ``BADGE5.state`` — banked on Koga's TM line ("Make space for this,
+        child!"), it refused all four steps, and a leg booted from it fingerprinted a wall that
+        was never in the world. The recovery is the measured one: A advances the pages, B closes
+        whatever A opened, and a probe step is the proof.
+        """
+        for _ in range(max_rounds):
+            if self.mem[qm.ADDR_IN_BATTLE]:
+                self.battle()
+                continue
+            if self.probe_step():
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(40)
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return self.probe_step()
+
+    def battle(self, io=None) -> None:
+        """The agent's full battle turn until the fight ends; a stuck fight is a wedge."""
+        self.ag._catch_enemy = None
+        self.ag._catch_throws = 0
+        turns = 0
+        while self.mem[qm.ADDR_IN_BATTLE] and turns < BATTLE_TURN_CAP:
+            self.ag.run_battle_turn()
+            turns += 1
+            if turns in (60, 110, 160):
+                self.ag._recover_battle_wedge()
+        if self.mem[qm.ADDR_IN_BATTLE]:
+            self.bank("wedge")
+            self.emit("battle.wedge", pos=list(self.pos()), turns=turns)
+            raise BattleWedge(f"battle did not end in {turns} turns; banked wedge.state")
+
+    def walk(self, map_id: int, targets, **kw):
+        kw.setdefault("battle", self.battle)
+        return road.walk(self.io, self.truth, self.pairs, map_id, targets, **kw)
+
+    def drive(self, dst: int, **kw):
+        kw.setdefault("battle", self.battle)
+        kw.setdefault("log", lambda msg: print("  " + msg, flush=True))
+        return road.drive_to(self.io, self.truth, self.pairs, dst, **kw)
+
+    def warp(self, map_id: int, wx: int, wy: int, **kw):
+        kw.setdefault("battle", self.battle)
+        return road.through_warp(self.io, self.truth, self.pairs, map_id, wx, wy, **kw)
+
+    def cross(self, cur: int, nxt: int, **kw):
+        kw.setdefault("battle", self.battle)
+        return road.cross_edge(self.io, self.truth, self.pairs, cur, nxt, **kw)
+
+    def traverse(self, interior: int, **kw):
+        """Leave a swallowed-hop interior by the mats on another side (a gate room, a house)."""
+        kw.setdefault("battle", self.battle)
+        return road.traverse_interior(self.io, self.truth, self.pairs, interior, **kw)
+
+    def gate(self, cur: int, goal_cells, **kw):
+        """Cross a route severed by its own gate building, validating each candidate door."""
+        kw.setdefault("battle", self.battle)
+        return road.pass_gate(self.io, self.truth, self.pairs, cur, goal_cells, **kw)
+
+    def bodies(self) -> set[tuple[int, int]]:
+        return road.live_bodies(self.io)
+
+    def talk(self, face: str) -> str:
+        """Face and read: the pages a body gives up. What the game says IS the instruction stream."""
+        self.ctl.press(face)
+        self.ctl.wait(25)
+        self.ctl.press("a")
+        pages: list[str] = []
+        for _ in range(80):
+            self.pb.tick()
+            text = self.dialogue()
+            if text and (not pages or text != pages[-1]):
+                pages.append(text)
+        for _ in range(3):
+            self.ctl.press("a")
+            self.ctl.wait(45)
+            text = self.dialogue()
+            if text and (not pages or text != pages[-1]):
+                pages.append(text)
+            if self.mem[qm.ADDR_IN_BATTLE]:
+                self.battle()
+                break
+        for _ in range(4):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        return " | ".join(pages[-4:])
+
+    # ---- banking --------------------------------------------------------------------------
+
+    def bank(self, name: str, *, directory: Path | None = None) -> Path:
+        path = (directory or BATON_DIR) / f"{name}.state"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as fh:
+            self.pb.save_state(fh)
+        print(f"  banked {path.name} at {self.pos()}", flush=True)
+        return path
+
+    def shot(self, path: str | Path) -> Path:
+        from PIL import Image
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(self.pb.screen.ndarray).save(out)
+        return out
