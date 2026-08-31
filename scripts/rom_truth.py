@@ -126,8 +126,18 @@ def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: in
     if m["grid"][y0][x0] != "1" or m["grid"][y1][x1] != "1":
         return False
     gates = m.get("gates")
-    if gates and gates.get(f"{x0},{y0},{_DIR_OF.get((x1 - x0, y1 - y0), '?')}") is not None:
-        return False  # measured: the engine refuses this step whatever the grid says
+    if gates:
+        forward = _DIR_OF.get((x1 - x0, y1 - y0), "?")
+        back = _DIR_OF.get((x0 - x1, y0 - y1), "?")
+        # Both ends. A gate is recorded from whichever side somebody stood on, but a shut door is
+        # shut from both — measured on 234's (10,8), refused from (10,9) going up and from (10,7)
+        # going down. Honouring only the recorded direction makes connectivity *asymmetric*,
+        # which is impossible for a flood fill and produced exactly that: 234 cells reachable
+        # from one side of a 233 gate and 109 from the other, so `pockets` merged two places the
+        # world keeps apart and `route_pockets` planned straight through the join. Over-blocking
+        # costs a route we might have had; under-blocking costs a run, and has, repeatedly.
+        if gates.get(f"{x0},{y0},{forward}") is not None or gates.get(f"{x1},{y1},{back}") is not None:
+            return False
     tiles = m.get("tiles")
     if not tiles:
         return True
