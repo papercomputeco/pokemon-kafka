@@ -183,19 +183,33 @@ class Rig:
 
     # ---- moving ---------------------------------------------------------------------------
 
+    def warp_tiles(self, map_id: int) -> set[tuple[int, int]]:
+        return {(w[0], w[1]) for w in self.truth["maps"].get(str(map_id), {}).get("warps", [])}
+
     def probe_step(self) -> bool:
         """One step and its undo — the only honest proof the world is accepting input.
 
         A textbox does not always leave text in the buffer (the buffer stays *stale* after boxes
         close, measured), so "is there dialogue" cannot answer "can we move". Actually moving can.
+
+        A door is not a floor. The badge-6 leg booted a baton standing one tile below Fuchsia
+        gym's mat, probed *up* onto it, and warped straight back into the gym it had just left —
+        the same doctrine ``road.walk(avoid_warps=True)`` already follows, missing here. Warp
+        neighbours are the last resort, and only because a state wedged in a doorway still has to
+        be able to prove it accepts input.
         """
-        for direction, back in (("down", "up"), ("up", "down"), ("left", "right"), ("right", "left")):
+        mp, x, y = self.pos()
+        warps = self.warp_tiles(mp)
+        deltas = {"down": (0, 1), "up": (0, -1), "left": (-1, 0), "right": (1, 0)}
+        order = [("down", "up"), ("up", "down"), ("left", "right"), ("right", "left")]
+        floors = [(d, b) for d, b in order if (x + deltas[d][0], y + deltas[d][1]) not in warps]
+        for direction, back in floors + [p for p in order if p not in floors]:
             before = self.pos()
             self.io.press(direction, hold=8, release=8)
             self.io.wait(30)
             after = self.pos()
             if after != before:
-                if after[0] == before[0]:  # a map change is progress, not something to undo
+                if after[0] == before[0]:  # a map change is a warp we could not avoid: leave it be
                     self.io.press(back, hold=8, release=8)
                     self.io.wait(30)
                 return True
@@ -295,6 +309,18 @@ class Rig:
     # ---- banking --------------------------------------------------------------------------
 
     def bank(self, name: str, *, directory: Path | None = None) -> Path:
+        """Bank a baton the next leg can actually boot.
+
+        Two states are worthless as batons and both were paid for: one banked mid-dialogue (every
+        step swallowed) and one banked standing ON a warp mat, which boots back through the door
+        it just came out of. Settle first, step off the door if we are on it, then save.
+        """
+        self.settle()
+        mp, x, y = self.pos()
+        if (x, y) in self.warp_tiles(mp):
+            self.probe_step()  # step off the mat; the undo is skipped when the step warps
+            if self.pos()[:1] == (mp,) and self.pos()[1:] != (x, y):
+                print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
         path = (directory or BATON_DIR) / f"{name}.state"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as fh:

@@ -33,12 +33,17 @@ def test_the_sink_directory_is_created_on_first_write(tmp_path):
 
 
 class FakeIO:
-    """A world that swallows every step until `parked` rounds of A/B have been spent."""
+    """A world that swallows every step until `parked` rounds of A/B have been spent.
 
-    def __init__(self, rig, *, parked=0, walls=()):
+    Stepping onto a warp tile moves us to another map, exactly as the cartridge does — which is
+    how the badge-6 leg warped itself back into the gym it had just left.
+    """
+
+    def __init__(self, rig, *, parked=0, walls=(), warp_to=None):
         self.rig = rig
         self.parked = parked
         self.walls = set(walls)
+        self.warp_to = warp_to  # {(x, y): destination map id}
         self.presses: list[str] = []
 
     def press(self, button, hold=8, release=8):
@@ -49,18 +54,21 @@ class FakeIO:
         if self.parked or button in self.walls:
             return
         dx, dy = {"down": (0, 1), "up": (0, -1), "left": (-1, 0), "right": (1, 0)}[button]
-        self.rig.mem[0xD362] += dx
-        self.rig.mem[0xD361] += dy
+        nx, ny = self.rig.mem[0xD362] + dx, self.rig.mem[0xD361] + dy
+        self.rig.mem[0xD362], self.rig.mem[0xD361] = nx, ny
+        if self.warp_to and (nx, ny) in self.warp_to:
+            self.rig.mem[0xD35E] = self.warp_to[(nx, ny)]
 
     def wait(self, frames=30):
         pass
 
 
-def _stub_rig(*, parked=0, walls=()):
+def _stub_rig(*, parked=0, walls=(), warps=(), warp_to=None, at=(4, 11)):
     """A Rig with only the pieces settle() touches — no cartridge, no PyBoy."""
     r = rig.Rig.__new__(rig.Rig)
-    r.mem = {0xD35E: 157, 0xD362: 4, 0xD361: 11, rig.ADDR_BADGES: 0b11111, 0xD057: 0}
-    r.io = FakeIO(r, parked=parked, walls=walls)
+    r.mem = {0xD35E: 157, 0xD362: at[0], 0xD361: at[1], rig.ADDR_BADGES: 0b11111, 0xD057: 0}
+    r.truth = {"maps": {"157": {"warps": [[wx, wy, 7, 0] for wx, wy in warps]}}}
+    r.io = FakeIO(r, parked=parked, walls=walls, warp_to=warp_to)
     r.ctl = r.io
     return r
 
@@ -88,6 +96,21 @@ def test_settle_flushes_a_parked_textbox_and_proves_it_with_a_step():
 def test_settle_gives_up_honestly_rather_than_claiming_a_flush():
     r = _stub_rig(parked=99)
     assert r.settle(max_rounds=3) is False
+
+
+def test_the_probe_refuses_to_thread_a_door():
+    """Measured: a baton banked one tile below Fuchsia gym's mat probed *up* and warped inside."""
+    r = _stub_rig(at=(5, 28), warps=[(5, 27)], warp_to={(5, 27): 999})
+    assert r.probe_step() is True
+    assert r.pos()[0] == 157  # the probe proved input without going through the door
+    assert "up" not in r.io.presses[:1]
+
+
+def test_the_probe_uses_a_door_only_when_there_is_nothing_else():
+    """A state wedged in a doorway still has to be able to prove it accepts input."""
+    r = _stub_rig(at=(5, 28), warps=[(5, 27), (5, 29), (4, 28), (6, 28)], warp_to={(5, 29): 999})
+    assert r.probe_step() is True
+    assert r.pos()[0] == 999  # it went through, because every neighbour was a door
 
 
 def test_the_rig_points_at_this_repos_rom_and_baton_shelf():

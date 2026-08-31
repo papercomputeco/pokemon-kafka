@@ -35,6 +35,17 @@ TAPES_CHAT_URL = "http://localhost:42345/v1/chat/completions"
 # How many navigation-tier attempts a hop gets before the job is treated as a puzzle.
 NAV_ATTEMPTS = 2
 
+# Two of the three seats are thinking models: they spend the token budget on ``reasoning`` and
+# only then write ``content``. Measured on the badge-6 leg, a 240-token cap bought four
+# consultations that were pure truncated chain-of-thought and not one ACTION line — the seats
+# looked exhausted when they had simply never been given room to answer.
+ANSWER_TOKENS = 1600
+
+# A bare menu word is only trusted this near the end of a reply. Mid-thought a model names every
+# option it is weighing ("RETRY_SAME ... doesn't make sense"), so scraping the whole text hands
+# back the action it was arguing *against* — a hollow decision wearing a real one's clothes.
+CONCLUSION_LINES = 6
+
 GROUND_TRUTH_PREAMBLE = (
     "Every fact below was MEASURED from the running game or extracted from this cartridge. "
     "Pokemon Red exists in several versions and recalled details are frequently wrong for this "
@@ -66,7 +77,7 @@ def build_prompt(facts: str, menu: list[str]) -> str:
     )
 
 
-def chat_body(model: str, prompt: str, max_tokens: int = 240) -> dict[str, Any]:
+def chat_body(model: str, prompt: str, max_tokens: int = ANSWER_TOKENS) -> dict[str, Any]:
     """OpenAI-shaped request body; the caller posts it at TAPES_CHAT_URL."""
     return {
         "model": model,
@@ -112,11 +123,11 @@ def parse_decision(text: str, menu: list[str]) -> tuple[str | None, str]:
                 action = upper_menu[candidate]
         elif stripped.upper().startswith("WHY:"):
             why = stripped.split(":", 1)[1].strip().lstrip("*`_ ").strip()
-    if action is None:  # some models answer with the bare action word
-        for name in menu:
-            if name.upper() in text.upper():
-                action = name
-                break
+    if action is None:  # some models answer with the bare action word — but only trust the tail
+        tail = "\n".join(text.strip().splitlines()[-CONCLUSION_LINES:]).upper()
+        named = [name for name in menu if name.upper() in tail]
+        if len(named) == 1:  # two options named in the conclusion is a deliberation, not a choice
+            action = named[0]
     return action, why
 
 
