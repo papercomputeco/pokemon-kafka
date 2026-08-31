@@ -827,6 +827,7 @@ def cmd_lift_tour(args) -> int:
     rig = Rig(args.state, live_label=args.live_label)
     floors = [f.strip() for f in args.floors.split(",") if f.strip()]
     print(f"start {rig.settled_pos()} in the car; touring {floors}", flush=True)
+    car_map = rig.settled_pos()[0]
     car = _io.BytesIO()
     rig.pb.save_state(car)
     results = []
@@ -852,8 +853,22 @@ def cmd_lift_tour(args) -> int:
         results.append({"floor": floor, "ok": True, "map": where[0], "gained": gained})
         if args.bank:
             rig.bank(f"{args.bank}-{floor}")
-        car.seek(0)  # bank the *current* car-return point: the world moved on (fights, pickups)
-        rig.pb.save_state(car)
+        # Carry this floor's fights and pickups forward by re-snapshotting the car — but only
+        # once we are actually back inside it. Snapshotting here while still standing on the
+        # floor is how the first tour rode 2F and then reported "the lift would not take us to
+        # 3F" nine times: it was reloading a state that had never been in the car.
+        doors = {(w[0], w[1]) for w in rig.truth["maps"].get(str(where[0]), {}).get("warps", []) if w[2] == car_map}
+        returned = False
+        for door in sorted(doors):
+            if rig.warp(where[0], *door) is True or rig.settled_pos()[0] == car_map:
+                returned = rig.settled_pos()[0] == car_map
+                if returned:
+                    break
+        if returned:
+            car.seek(0)
+            rig.pb.save_state(car)
+        else:
+            print(f"  could not get back into the car from {floor}; the next floor starts fresh", flush=True)
     print(json.dumps({"floors": results, "bag": rig.bag_named(), "run_id": rig.run_id}))
     rig.finish(outcome="lift-tour")
     return 0
