@@ -376,6 +376,21 @@ class Rig:
                 return True
         return False
 
+    def flush_text(self, tries: int = 6) -> bool:
+        """Close whatever box is on screen, so the next message is unambiguously the next message.
+
+        Comparing the buffer before and after a step is not enough on its own: a snapshot taken
+        while a box was up *contains* that box, so loading it restores the stale line and the
+        comparison sees no change. That is how a survey of map 208 came back with zero doors on a
+        floor whose very first westward step prints "Darn! It needs a CARD KEY!". Clear, then read.
+        """
+        for _ in range(tries):
+            if not self.dialogue():
+                return True
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return not self.dialogue()
+
     def settle(self, max_rounds: int = 16) -> bool:
         """Flush a parked textbox so a baton can move.
 
@@ -560,6 +575,107 @@ class Rig:
                 if self.pos()[0] != mp:
                     return True
         return self.pos()[0] != mp
+
+    # ---- surveying --------------------------------------------------------------------------
+
+    def survey_pocket(self, max_cells: int = 400, log=print) -> dict:
+        """Walk the pocket for real and write down every wall that talks.
+
+        The extracted collision grid cannot see a script gate. Inside Silph it calls a card-key
+        door plain walkable floor, so *every* static region measured in that building over-reports
+        — the 343 cells on 208 and the 128 on 235 both included ground behind locks. A route
+        planned on those numbers is planned on a map of a different building.
+
+        So this measures the pocket the way the only reliable statement about it can be made: a
+        flood fill of **attempted steps**. Press, look at what happened, and when the step is
+        refused, capture the sentence the game prints. The result is the pocket's true shape plus
+        a door map keyed by (x, y, direction) — the locks turned into data.
+
+        Each cell costs a save/load per direction, so this is deliberate, not cheap.
+        """
+        import io as _io
+        from collections import deque
+
+        deltas = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+        mp, sx, sy = self.settled_pos()
+        m = self.truth["maps"][str(mp)]
+        bodies = self.bodies()
+        origin = _io.BytesIO()
+        self.pb.save_state(origin)
+
+        def snap():
+            self.flush_text()  # a snapshot holding an open box poisons every probe made from it
+            buf = _io.BytesIO()
+            self.pb.save_state(buf)
+            return buf
+
+        def load(buf):
+            buf.seek(0)
+            self.pb.load_state(buf)
+
+        cells = {(sx, sy)}
+        doors: dict[str, str] = {}
+        exits: dict[str, int] = {}
+        battles: list[str] = []
+        queue = deque([((sx, sy), snap())])
+        probes = 0
+        while queue and len(cells) < max_cells:
+            cell, state = queue.popleft()
+            for direction, (dx, dy) in deltas.items():
+                target = (cell[0] + dx, cell[1] + dy)
+                if target in cells:
+                    continue
+                load(state)
+                self.io.press(direction, hold=8, release=8)
+                self.io.wait(40)
+                probes += 1
+                if self.mem[qm.ADDR_IN_BATTLE]:
+                    battles.append(f"{cell[0]},{cell[1]},{direction}")
+                    continue  # a fight is not a wall; the next load undoes it
+                now = self.pos()
+                if now[0] != mp:
+                    exits[f"{cell[0]},{cell[1]},{direction}"] = now[0]
+                    continue
+                if (now[1], now[2]) == cell:
+                    # A press can turn in place before it walks, so give it a second one before
+                    # calling the step refused.
+                    self.io.press(direction, hold=8, release=8)
+                    self.io.wait(40)
+                    now = self.pos()
+                if now[0] != mp:
+                    exits[f"{cell[0]},{cell[1]},{direction}"] = now[0]
+                    continue
+                if (now[1], now[2]) == cell:
+                    # A door is a *discrepancy*, not a message. The text buffer cannot carry this
+                    # judgement: it is not cleared by closing a box, only overwritten when
+                    # something new is drawn, so it reads the same before and after a refusal.
+                    # The reliable signal is structural — the extracted grid says this step is
+                    # walkable and passable, no body is standing there, and the engine still says
+                    # no. That is exactly an unmodelled gate, and it is what the collision grid
+                    # cannot see. Any text present is recorded as evidence, never as the test.
+                    if rt.passable(m, self.pairs, cell[0], cell[1], target[0], target[1]) and target not in bodies:
+                        said = self.dialogue()
+                        doors[f"{cell[0]},{cell[1]},{direction}"] = said or "(refused silently)"
+                        log(f'  GATE at {cell} {direction} -> {target}: "{(said or "no message")[:90]}"')
+                    continue
+                landed = (now[1], now[2])
+                if landed not in cells:
+                    cells.add(landed)
+                    queue.append((landed, snap()))
+        load(origin)
+        result = {
+            "map": mp,
+            "start": [sx, sy],
+            "cells": sorted(cells),
+            "doors": doors,
+            "exits": exits,
+            "battles": battles,
+            "probes": probes,
+            "truncated": len(cells) >= max_cells,
+        }
+        log(f"  surveyed map {mp}: {len(cells)} cells measured, {len(doors)} talking walls, {probes} probes")
+        self.emit("supervisor.surveyed", map=mp, cells=len(cells), doors=len(doors), probes=probes)
+        return result
 
     # ---- the oracle -------------------------------------------------------------------------
 

@@ -499,9 +499,12 @@ class LegRunner:
         except (StopIteration, KeyError):
             return ""
         before = self.rig.pos()
+        baseline = self.rig.dialogue()  # the buffer is stale after a box closes; only a CHANGE is ours
         self.rig.io.press(direction, hold=8, release=8)
         self.rig.io.wait(40)
         said = self.rig.dialogue()
+        if said == baseline:
+            said = ""
         after = self.rig.pos()
         if after != before and after[0] == before[0]:  # it was not refused after all: undo
             opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}[direction]
@@ -872,6 +875,32 @@ def parse_goals(text: str) -> list[int]:
     return [int(part) for part in str(text).replace(" ", "").split(",") if part]
 
 
+def cmd_survey(args) -> int:
+    """Measure a pocket's true shape and write down every wall that talks.
+
+    The output is the thing Silph has been missing all along: which steps the game refuses and
+    what it says when it does. A static region cannot answer that, because the collision grid
+    calls a card-key door plain floor.
+    """
+    from expedition_rig import Rig
+
+    rig = Rig(args.state, live_label=args.live_label)
+    print(f"surveying from {rig.settled_pos()}", flush=True)
+    survey = rig.survey_pocket(max_cells=args.max_cells)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(survey, indent=2) + "\n")
+        print(f"wrote {out}", flush=True)
+    talking = sorted(set(survey["doors"].values()))
+    for said in talking:
+        where = [k for k, v in survey["doors"].items() if v == said]
+        print(f'  "{said[:90]}" at {where}', flush=True)
+    print(json.dumps({k: v for k, v in survey.items() if k != "cells"}))
+    rig.finish(outcome="survey")
+    return 0
+
+
 def cmd_lift_tour(args) -> int:
     """Ride a lift car to each named floor, clearing and looting what the lift can reach.
 
@@ -1012,6 +1041,11 @@ def main(argv: list[str] | None = None) -> int:
     ce.add_argument("--harness-death", type=int, default=0)
     ce.add_argument("--load-ok", type=int, default=1)
     ce.add_argument("--lane-log", type=Path, action="append", default=[])
+    sv = sub.add_parser("survey", help="measure a pocket by attempted steps and record every wall that talks")
+    sv.add_argument("--state", required=True)
+    sv.add_argument("--max-cells", type=int, default=400)
+    sv.add_argument("--out", default=None, help="write the survey as JSON here")
+    sv.add_argument("--live-label", default=None)
     lt = sub.add_parser("lift-tour", help="ride a lift car to each floor, clearing and looting each")
     lt.add_argument("--state", required=True, help="a baton standing inside the lift car")
     lt.add_argument("--floors", required=True, help="comma-separated labels exactly as the panel prints them")
@@ -1024,6 +1058,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(args)
     if args.cmd == "lift-tour":
         return cmd_lift_tour(args)
+    if args.cmd == "survey":
+        return cmd_survey(args)
     if args.cmd == "replay":
         springs: Counter = Counter()
         for p in args.logs:

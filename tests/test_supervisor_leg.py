@@ -856,9 +856,11 @@ class TalkingWallRig(FakeRig):
         self.wall_text = said
         self.moves = moves
         self.presses: list[str] = []
+        self.pressed = False
 
     def press(self, button, hold=8, release=8):
         self.presses.append(button)
+        self.pressed = True
         if self.moves:
             self._pos = (self._pos[0], self._pos[1] + 1, self._pos[2])
 
@@ -866,7 +868,9 @@ class TalkingWallRig(FakeRig):
         pass
 
     def dialogue(self):
-        return self.wall_text
+        # The real buffer is stale until something prints into it, and only a *change* is this
+        # step's message — a constant buffer is last battle's line, not this wall's.
+        return self.wall_text if self.pressed else ""
 
 
 def test_a_refusal_that_prints_a_sentence_records_it(tmp_path):
@@ -934,3 +938,14 @@ def test_seats_that_disagree_are_not_reported_as_a_diagnosis(tmp_path):
     runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
     runner.run()
     assert not any("both seats explain" in n for n in runner.notes)
+
+
+def test_a_stale_buffer_is_not_mistaken_for_a_door(tmp_path):
+    """`road`'s docstring says the text buffer survives the box that wrote it. The first survey
+    ignored that and labelled 54 ordinary walls as doors, all quoting a battle three minutes
+    old — so a message only counts when it *changed* across the step."""
+    rig = TalkingWallRig(said="AAAAAAA got 750 for winning!")
+    rig.pressed = True  # the line was already sitting there before we tried anything
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert runner.gates == {}
