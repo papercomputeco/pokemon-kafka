@@ -383,6 +383,7 @@ class LegRunner:
         max_hops: int = DEFAULT_MAX_HOPS,
         engage: bool = False,
         sweep: bool = False,
+        clear_floor: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
     ) -> None:
@@ -395,6 +396,7 @@ class LegRunner:
         self.max_hops = max_hops
         self.engage = engage
         self.sweep = sweep
+        self.clear_floor = clear_floor
         self.engage_rounds = engage_rounds
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
@@ -607,6 +609,55 @@ class LegRunner:
             self.notes.append(f"collected {gained} from map {mp}'s item balls")
         return gained
 
+    def engage_trainers(self) -> bool:
+        """Fight every trainer the cartridge lists for this map. The story floors need this.
+
+        ``_engage_until_badge`` watches the BADGES byte, which is right for a gym and useless
+        for a floor like Silph's top, where the fight that matters changes no badge at all. Here
+        the objective is the roster: the extraction names every trainer sprite on the map, so
+        "cleared" means each of them has been walked up to and engaged.
+        """
+        mp = self.rig.pos()[0]
+        trainers = [
+            (s["x"], s["y"])
+            for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", [])
+            if s["kind"] == "trainer"
+        ]
+        if not trainers:
+            self.notes.append(f"map {mp} lists no trainers to clear")
+            return False
+        badges_before = self.rig.badges()
+        for spot in trainers:
+            if spot in self.engaged:
+                continue
+            self.engaged.add(spot)
+            if not self._go_and_talk(spot):
+                self.notes.append(f"could not reach the trainer at {spot} on map {mp}")
+                continue
+            if self.rig.badges() != badges_before:
+                return True
+        return True
+
+    def _go_and_talk(self, spot: tuple[int, int]) -> bool:
+        """Walk to a cell beside ``spot`` (body-aware) and face it. Battles resolve on the way."""
+        import road
+
+        bx, by = spot
+        mp, x, y = self.rig.pos()
+        adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
+        if (x, y) not in adjacent:
+            near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
+            if not near:
+                return False
+            self.rig.walk(mp, near, cap=400)
+            mp2, x, y = self.rig.pos()
+            if mp2 != mp or (x, y) not in adjacent:
+                return False
+        said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        self.log(f"  engaged the trainer at {spot}: {said[:140]}")
+        self.rig.emit("supervisor.trainer_engaged", map=mp, at=list(spot), said=said[:300])
+        return True
+
     def _engage_until_badge(self) -> bool:
         """On the goal map, talk bodies down until the BADGES byte changes.
 
@@ -679,6 +730,8 @@ class LegRunner:
                 # exist, and "arrived" is the one verdict that must never be reported from it.
                 cur = self.rig.settled_pos()[0]
             if cur == self.goal:
+                if self.clear_floor:
+                    self.engage_trainers()
                 if self.sweep:
                     self.sweep_items()
                 if self.engage and not self._engage_until_badge():
@@ -787,6 +840,7 @@ def cmd_run(args) -> int:
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
             engage=args.engage and index == len(goals),
             sweep=args.sweep_items,
+            clear_floor=args.clear_floor and index == len(goals),
             consult=consult,
         )
         try:
@@ -817,6 +871,9 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--engage", action="store_true", help="on arrival, engage bodies until the BADGES byte changes")
     rn.add_argument(
         "--sweep-items", action="store_true", help="on arrival, open every item ball the cartridge lists for the map"
+    )
+    rn.add_argument(
+        "--clear-floor", action="store_true", help="on the last goal, fight every trainer the cartridge lists there"
     )
     rn.add_argument("--no-consult", action="store_true", help="deterministic only — never call a model")
     ce = sub.add_parser("classify-exit", help="decide resume/continue/next/retry/escalate after an operator exit")

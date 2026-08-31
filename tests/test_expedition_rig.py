@@ -154,6 +154,7 @@ def _bag_rig(bag, items=None):
     r.truth = {"items": items or {"60": "FRESH WATER", "74": "LIFT KEY", "40": "RARE CANDY"}}
     r.run_id = "t"
     r.telemetry_root = None
+    r.settle = lambda *a, **kw: True  # the real one presses buttons; nothing to press here
     return r
 
 

@@ -280,6 +280,10 @@ class Rig:
         qty, item = max(stacks)
         print(f"  bag full: tossing {qty}x {self.item_name(item)} to free a slot", flush=True)
         freed = self.toss_stack(item)
+        # Backing out of the ITEM menu is not the same as the world accepting input again, and a
+        # pickup that starts inside a half-closed menu sends its A presses to the menu. Measured:
+        # a slot was freed on Silph 2F and the very next collect_item still came back empty.
+        self.settle()
         self.emit("supervisor.tossed", item=self.item_name(item), qty=qty, freed=freed)
         return freed
 

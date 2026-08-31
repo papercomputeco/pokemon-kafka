@@ -766,3 +766,64 @@ def test_arriving_with_sweep_on_opens_the_floor(tmp_path):
     )
     assert runner.run()["ok"]
     assert rig.bag() == [(48, 1)]
+
+
+# ------------------------------------------------------------------- clearing a story floor
+
+
+def _top_floor():
+    grid = ["1" * 16 for _ in range(18)]
+    return {
+        "maps": {
+            "234": {
+                "width": 16,
+                "height": 18,
+                "tileset": 22,
+                "grid": grid,
+                "warps": [],
+                "connections": {},
+                "sprites": [
+                    {"kind": "trainer", "x": 1, "y": 9},
+                    {"kind": "trainer", "x": 10, "y": 2},
+                    {"kind": "npc", "x": 9, "y": 15},
+                    {"kind": "item", "x": 2, "y": 12},
+                ],
+            }
+        }
+    }
+
+
+def test_clearing_a_floor_fights_every_trainer_the_cartridge_lists(tmp_path):
+    """Silph's top floor changes no badge, so the badge-watching engage is the wrong instrument."""
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    runner = LegRunner(
+        rig, goal=234, clear_floor=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    assert runner.run()["ok"]
+    assert runner.engaged == {(1, 9), (10, 2)}  # both trainers, and neither the npc nor the ball
+    assert len([e for e in rig.events if e["event"] == "supervisor.trainer_engaged"]) == 2
+
+
+def test_clearing_a_floor_stops_early_when_a_badge_actually_lands():
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    original = rig.talk
+
+    def talk(face):
+        rig._badges = 0b111111
+        return original(face)
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=234, clear_floor=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["ok"]
+    assert len(runner.engaged) == 1  # the first fight flipped the byte; no need for the second
+
+
+def test_a_floor_with_no_trainers_says_so_rather_than_claiming_a_clear(tmp_path):
+    truth = _top_floor()
+    truth["maps"]["234"]["sprites"] = [{"kind": "npc", "x": 9, "y": 15}]
+    rig = FakeRig(start=(234, 8, 8), truth=truth)
+    runner = LegRunner(
+        rig, goal=234, clear_floor=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    runner.run()
+    assert any("lists no trainers" in n for n in runner.notes)
