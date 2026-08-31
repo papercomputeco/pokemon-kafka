@@ -465,3 +465,53 @@ def test_two_bodies_in_one_corridor_are_terrain_not_a_gate():
     truth, pairs = _corridor_truth(), set()
     bodies = {(3, 2), (3, 3), (2, 3)}
     assert road.blocking_body(truth, pairs, 1, (0, 5), {(2, 0), (3, 0)}, bodies) is None
+
+
+class CutIO:
+    """A bush that opens after `cuts` applications of the field-Cut flow."""
+
+    def __init__(self, cuts=1):
+        self.cuts, self.applied, self.pos = cuts, 0, (1, 5, 5)
+        self.presses = []
+
+    def press(self, btn, hold=8, release=8):
+        self.presses.append(btn)
+        if btn == "a":
+            self.applied += 1
+        if btn == "up" and self.applied >= self.cuts:
+            self.pos = (1, 5, 4)
+
+    def wait(self, frames=30):
+        pass
+
+    def read(self, addr):
+        return 1  # the field submenu cursor sits where cut_facing wants it
+
+
+def test_cut_until_open_proves_the_cut_by_stepping(monkeypatch):
+    """`cut_facing` fires the menu whether or not anything was cut; the step is the predicate."""
+    io = CutIO(cuts=3)
+    monkeypatch.setattr(road, "read_pos", lambda i: i.pos)
+    assert road.cut_until_open(io, {}, set(), "up") is True
+    assert "up" in io.presses
+
+
+def test_cut_until_open_gives_up_after_its_tries():
+    io = CutIO(cuts=99)
+    import rom_truth  # noqa: F401  (road.read_pos is imported at module scope)
+
+    road.read_pos = lambda i: i.pos
+    assert road.cut_until_open(io, {}, set(), "up", tries=2) is False
+
+
+def test_cut_until_open_succeeds_on_the_step_after_the_cut():
+    io = CutIO(cuts=1)
+    road.read_pos = lambda i: i.pos
+    assert road.cut_until_open(io, {}, set(), "up") is True
+
+
+def test_cut_until_open_returns_at_once_when_the_way_is_already_clear():
+    io = CutIO(cuts=0)
+    road.read_pos = lambda i: i.pos
+    assert road.cut_until_open(io, {}, set(), "up") is True
+    assert "a" not in io.presses  # no menu was opened; the step just worked

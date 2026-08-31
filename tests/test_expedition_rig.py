@@ -303,3 +303,141 @@ def test_a_move_the_party_does_not_know_is_reported_not_guessed(capsys):
     r.ctl = Ctl()
     assert r.use_field_move("SURF") is False
     assert "no field move called 'SURF'" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------- the plain reads and delegations
+
+
+def _reader_rig(mem=None, truth=None):
+    r = rig.Rig.__new__(rig.Rig)
+    r.mem = mem if mem is not None else {}
+    r.truth = truth if truth is not None else {"maps": {}}
+    r.pairs = set()
+    r.io = object()
+    return r
+
+
+def test_badges_is_read_straight_from_ram():
+    assert _reader_rig({rig.ADDR_BADGES: 0b11111}).badges() == 31
+
+
+def test_party_is_decoded_from_the_struct_table():
+    mem = {rig.ADDR_PARTY_COUNT: 1}
+    base = rig.ADDR_PARTY_STRUCTS
+    mem[base] = 1  # whatever species id 1 is in this ROM's internal order
+    mem[base + 33] = 99
+    mem[base + 1], mem[base + 2] = 1, 0x2C  # 300 hp, big-endian across two bytes
+    species, level, hp = _reader_rig(mem).party()[0]
+    assert (level, hp) == (99, 300) and isinstance(species, str)
+
+
+def test_dialogue_survives_a_buffer_read_that_throws():
+    r = _reader_rig()
+
+    class Reader:
+        def read_dialogue(self):
+            raise RuntimeError("mid-redraw")
+
+    r.mr = Reader()
+    assert r.dialogue() == ""  # a text buffer mid-redraw is not a leg failure
+
+
+def test_item_balls_come_from_the_extraction():
+    truth = {"maps": {"9": {"sprites": [{"kind": "item", "x": 1, "y": 2}, {"kind": "npc", "x": 3, "y": 4}]}}}
+    assert _reader_rig(truth=truth).item_balls(9) == [(1, 2)]
+    assert _reader_rig(truth=truth).item_balls(404) == []
+
+
+def test_warp_tiles_come_from_the_extraction():
+    truth = {"maps": {"9": {"warps": [[1, 2, 3, 0], [4, 5, 6, 0]]}}}
+    assert _reader_rig(truth=truth).warp_tiles(9) == {(1, 2), (4, 5)}
+
+
+def test_settled_pos_gives_up_after_its_tries_rather_than_spinning():
+    r = _stub_rig(at=(4, 11))
+    r.truth = {"maps": {"157": {"width": 10, "height": 18, "warps": []}}}
+    moves = iter(range(100))
+    r.io.wait = lambda frames=30: r.mem.__setitem__(0xD362, next(moves))  # never settles
+    assert r.settled_pos(tries=3)[0] == 157
+
+
+def test_flush_text_reports_whether_the_buffer_actually_emptied():
+    r = _stub_rig()
+    r.dialogue = lambda: ""
+    assert r.flush_text() is True
+    r.dialogue = lambda: "still here"
+    assert r.flush_text(tries=2) is False
+
+
+def test_settle_resolves_a_battle_before_probing():
+    r = _stub_rig(parked=1)
+    r.mem[0xD057] = 1
+    fought = []
+
+    def battle():
+        fought.append(True)
+        r.mem[0xD057] = 0
+
+    r.battle = battle
+    assert r.settle() is True
+    assert fought == [True]
+
+
+def test_the_road_delegations_pass_the_battle_handler_through(monkeypatch):
+    """Every mover hands the agent's battle turn to `road`; a delegation that forgets it raises."""
+    import road as road_mod
+
+    r = _reader_rig()
+    r.battle = lambda io=None: None
+    seen = {}
+
+    def spy(*a, **kw):
+        seen[kw.get("battle")] = True
+        return "ok"
+
+    for name, call in [
+        ("walk", lambda: r.walk(1, {(0, 0)})),
+        ("drive_to", lambda: r.drive(2)),
+        ("through_warp", lambda: r.warp(1, 0, 0)),
+        ("cross_edge", lambda: r.cross(1, 2)),
+        ("traverse_interior", lambda: r.traverse(1)),
+        ("pass_gate", lambda: r.gate(1, set())),
+    ]:
+        monkeypatch.setattr(road_mod, name, spy)
+        assert call() == "ok"
+    assert list(seen) == [r.battle]  # one handler, threaded through every one of them
+
+
+def test_bodies_delegates_to_the_live_sprite_table(monkeypatch):
+    import road as road_mod
+
+    monkeypatch.setattr(road_mod, "live_bodies", lambda io: {(1, 2)})
+    assert _reader_rig().bodies() == {(1, 2)}
+
+
+def test_window_row_decodes_the_layer_menus_render_to():
+    r = _reader_rig()
+
+    class Tile:
+        def tile_identifier(self, x, y):
+            return (0x80 + x) if y == 4 and x < 3 else 0x7F
+
+    class PB:
+        tilemap_window = Tile()
+
+    r.pb = PB()
+    assert r.window_row(4) == "ABC"
+    assert r.elevator_floors()[1] == ""
+
+
+def test_settle_succeeds_once_a_b_press_frees_the_world():
+    """The probe fails, B closes what was open, and the second probe proves it."""
+    r = _stub_rig(parked=1)
+    assert r.settle() is True
+    assert "b" in r.io.presses
+
+
+def test_settle_returns_immediately_when_the_world_already_moves():
+    r = _stub_rig(parked=0)
+    assert r.settle() is True
+    assert "b" not in r.io.presses  # nothing was blocking, so nothing was pressed at it

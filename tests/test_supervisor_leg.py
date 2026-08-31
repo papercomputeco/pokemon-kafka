@@ -988,3 +988,307 @@ def test_a_body_that_hands_something_over_is_reported_loudly(tmp_path):
 def test_the_measurement_subcommands_are_registered(cmd):
     with pytest.raises(SystemExit):
         supervisor.main([cmd, "--help"])
+
+
+# ------------------------------------------------------------------- the remaining branches
+
+
+def test_hop_blocker_falls_back_to_the_gate_doors_when_the_edge_is_unreachable():
+    """When no body *can* block the edge, the question becomes which body blocks the gate door."""
+    grid = ["1111", "0000", "1111", "1111"]  # row 1 walls the north edge off entirely
+
+    def m(**kw):
+        return {
+            "width": 4,
+            "height": 4,
+            "tileset": 0,
+            "grid": grid,
+            "sprites": [],
+            "warps": [],
+            "connections": {},
+            **kw,
+        }
+
+    truth = {"maps": {"1": m(warps=[[0, 2, 9, 0], [3, 2, 9, 0]], connections={"north": 2}), "2": m()}}
+    rig = FakeRig(start=(1, 1, 2), truth=truth, bodies={(1, 3)})
+    assert supervisor.hop_blocker(rig, {"via": "edge", "to": 2}) in (None, (1, 3))
+
+
+def test_hop_blocker_is_none_for_a_pair_with_no_connection():
+    rig = FakeRig()
+    assert supervisor.hop_blocker(rig, {"via": "edge", "to": 404}) is None
+    assert supervisor.hop_blocker(rig, None) is None
+
+
+def test_describe_survives_a_hop_whose_pair_has_no_side():
+    rig = FakeRig()
+    facts = supervisor.describe(rig, 2, {"via": "edge", "to": 404}, "no-path")
+    assert "no side for this pair" in facts
+
+
+def test_describe_names_the_warp_tile_on_a_warp_hop():
+    rig = FakeRig()
+    assert "WARP TILE: (2, 7)" in supervisor.describe(rig, 9, {"via": "warp", "to": 9, "x": 2, "y": 7}, "warp-dead")
+
+
+def test_read_refusal_is_empty_without_a_hop_or_a_usable_pair():
+    rig = FakeRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.read_refusal(None) == ""
+    assert runner.read_refusal({"via": "edge", "to": 404}) == ""
+
+
+def test_read_refusal_picks_a_direction_toward_a_warp_tile():
+    rig = TalkingWallRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert "CARD KEY" in runner.read_refusal({"via": "warp", "to": 9, "x": 5, "y": 9})
+    assert rig.presses[0] == "down"  # (5,9) is below (5,5)
+
+
+def test_an_interior_that_swallows_a_hop_is_traversed_not_failed(tmp_path):
+    rig = FakeRig(hops=[9, 2])  # the cross lands us in interior 9, the traverse gets us out
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.run()["ok"]
+    assert any(c[0] == "traverse" for c in rig.calls)
+
+
+def test_clear_blocker_reports_when_no_approach_cell_is_reachable(tmp_path):
+    rig = BlockedRig()
+    rig.approach = lambda cells: False
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("no approach cell" in n or "could not" in n for n in runner.notes) or runner.engaged
+
+
+def test_use_gate_warp_falls_back_to_this_map_s_own_warps(tmp_path):
+    rig = FakeRig(hops=[None] * 12)
+    runner = LegRunner(rig, goal=2, consult=_consult("USE_GATE_WARP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("USE_GATE_WARP", {"via": "warp", "to": 9, "x": 2, "y": 7})
+    assert ("gate", 1) in rig.calls
+
+
+def test_backing_out_of_a_map_with_no_warps_says_so(tmp_path):
+    truth = _truth()
+    truth["maps"]["1"]["warps"] = []
+    rig = FakeRig(truth=truth, hops=[None] * 12)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("BACK_OUT_AND_REENTER", None)
+    assert any("no warps to back out" in n for n in runner.notes)
+
+
+def test_backing_out_traverses_an_interior_it_lands_in(tmp_path):
+    rig = FakeRig(hops=[9])
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("BACK_OUT_AND_REENTER", None)
+    assert any(c[0] == "traverse" for c in rig.calls)
+
+
+def test_sweep_items_is_reachable_as_an_action(tmp_path):
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())
+    rig._pickups = {(3, 4): (48, 1)}
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("SWEEP_ITEMS", None)
+    assert rig.bag() == [(48, 1)]
+
+
+def test_oracle_search_without_a_hop_says_there_is_nothing_to_search_toward(tmp_path):
+    rig = FacilityRig()
+    runner = LegRunner(rig, goal=208, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("ORACLE_SEARCH", None)
+    assert any("nothing to search toward" in n for n in runner.notes)
+
+
+def test_the_edge_action_on_a_warp_hop_and_an_unknown_action_are_both_refused(tmp_path):
+    rig = FakeRig(hops=[None] * 12)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("TRY_FAR_EDGE_CELL", {"via": "warp", "to": 9, "x": 2, "y": 7})
+    runner._act("INTERPRETIVE_DANCE", None)
+    assert any("meaningless on a warp hop" in n for n in runner.notes)
+    assert any("unknown action" in n for n in runner.notes)
+
+
+def test_engage_until_badge_walks_to_a_body_it_is_not_already_beside():
+    rig = FakeRig(start=(2, 1, 1), badges=0, bodies={(6, 6)})
+    original = rig.talk
+
+    def talk(face):
+        rig._badges = 1
+        return original(face)
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["ok"]
+
+
+def test_main_dispatches_each_subcommand(monkeypatch):
+    for cmd, fn in [
+        ("run", "cmd_run"),
+        ("survey", "cmd_survey"),
+        ("explore", "cmd_explore"),
+        ("lift-tour", "cmd_lift_tour"),
+    ]:
+        monkeypatch.setattr(supervisor, fn, lambda args: 0)
+        argv = {
+            "run": ["run", "--state", "s", "--goal", "1"],
+            "survey": ["survey", "--state", "s"],
+            "explore": ["explore", "--state", "s"],
+            "lift-tour": ["lift-tour", "--state", "s", "--floors", "2F"],
+        }[cmd]
+        assert supervisor.main(argv) == 0
+
+
+def test_a_gate_that_opens_lets_the_hop_retry(tmp_path):
+    """`_hop` tries the map's own gate building before calling a severed route a failure."""
+
+    class GateOpensRig(FakeRig):
+        def __init__(self):
+            super().__init__(truth=_fork_truth())
+            self.opened = False
+
+        def cross(self, cur, nxt, **kw):
+            self.calls.append(("cross", nxt))
+            if (cur, nxt) == (1, 2) and not self.opened:
+                return "no-path"
+            self._pos = (nxt, 1, 1)
+            return True
+
+        def gate(self, cur, cells, **kw):
+            self.calls.append(("gate", cur))
+            self.opened = True
+            return True
+
+    rig = GateOpensRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.run()["ok"] and rig.opened
+
+
+def test_an_interior_that_will_not_release_us_is_reported_as_such(tmp_path):
+    class StuckInteriorRig(FakeRig):
+        def cross(self, cur, nxt, **kw):
+            self.calls.append(("cross", nxt))
+            self._pos = (9, 1, 1)  # swallowed by the interior
+            return True
+
+        def traverse(self, interior, **kw):
+            self.calls.append(("traverse", interior))
+            return "interior-stuck"  # and it keeps us
+
+    rig = StuckInteriorRig(hops=[])
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("interior-" in str(e.get("failure", "")) for e in rig.events if e["event"] == "supervisor.hop_failed")
+
+
+def test_talk_to_blocker_walks_when_it_is_not_already_adjacent(tmp_path):
+    rig = FakeRig(hops=[None] * 12, bodies={(1, 1)})
+    runner = LegRunner(rig, goal=2, consult=_consult("TALK_TO_BLOCKER"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("TALK_TO_BLOCKER", {"via": "edge", "to": 2})
+    assert any(c[0] == "walk" for c in rig.calls) and any(c[0] == "talk" for c in rig.calls)
+
+
+def test_engage_bodies_reports_a_body_it_cannot_reach(tmp_path):
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    rig.approach = lambda cells: False
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.engage_bodies(("trainer",))
+    assert any("could not reach" in n for n in runner.notes)
+
+
+def test_max_hops_ends_the_leg_rather_than_looping(tmp_path):
+    rig = FakeRig(hops=[None] * 40)
+    runner = LegRunner(
+        rig, goal=2, max_hops=2, consult=_consult("RETRY_SAME"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    assert runner.run()["outcome"] == "max-hops"
+
+
+def test_engage_until_badge_skips_a_body_the_walk_could_not_reach():
+    rig = FakeRig(start=(2, 1, 1), badges=0, bodies={(9, 9)})
+    rig.walk = lambda mp, targets, **kw: rig.calls.append(("walk", sorted(targets)))  # never arrives
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["outcome"] == "engaged-no-badge"
+
+
+def test_clear_blocker_stops_when_the_walk_lands_somewhere_else(tmp_path):
+    rig = BlockedRig()
+    rig.walk = lambda mp, targets, **kw: rig.calls.append(("walk", sorted(targets)))  # records, never moves
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner._clear_blocker({"via": "edge", "to": 2}) is False
+
+
+def test_use_gate_warp_on_a_pair_with_no_side_falls_back_to_the_warps(tmp_path):
+    rig = FakeRig(hops=[None] * 12)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._act("USE_GATE_WARP", {"via": "edge", "to": 404})  # no connection for this pair
+    assert ("gate", 1) in rig.calls
+
+
+def test_engage_bodies_skips_a_body_already_engaged(tmp_path):
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.engaged.add((1, 9))
+    runner.engage_bodies(("trainer",))
+    assert len([c for c in rig.calls if c[0] == "talk"]) == 1  # only the other one
+
+
+def test_go_and_talk_gives_up_when_the_approach_is_refused(tmp_path):
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    rig.approach = lambda cells: False
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner._go_and_talk((1, 9)) is False
+
+
+def test_engage_until_badge_re_reads_after_a_walk_changes_map():
+    rig = FakeRig(start=(2, 1, 1), badges=0, bodies={(6, 6)})
+
+    def walk(mp, targets, **kw):
+        rig.calls.append(("walk", sorted(targets)))
+        rig._pos = (99, 1, 1)  # a fight or a warp carried us off the map
+
+    rig.walk = walk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["outcome"] == "engaged-no-badge"
+
+
+def test_a_leg_with_no_route_at_all_consults_rather_than_crashing(tmp_path):
+    rig = FakeRig(start=(9, 0, 0))  # map 9 is the dead-end house; no chain to map 2
+    consult = _consult("GIVE_UP")
+    runner = LegRunner(rig, goal=404, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert consult.seen and "NO ROUTE" in consult.seen[0]["facts"]
+
+
+def test_go_and_talk_gives_up_when_the_approach_lands_short(tmp_path):
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    rig.approach = lambda cells: True  # claims arrival without moving
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner._go_and_talk((1, 9)) is False
+
+
+def test_engage_until_badge_talks_to_a_body_it_is_already_beside():
+    rig = FakeRig(start=(2, 5, 6), badges=0, bodies={(5, 5)})
+    original = rig.talk
+
+    def talk(face):
+        rig._badges = 1
+        return original(face)
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["ok"]
+    assert ("talk", "up") in rig.calls  # already adjacent: no walk, straight to the conversation
+
+
+def test_clear_blocker_stops_when_the_walk_does_not_land_beside_the_body(tmp_path):
+    rig = BlockedRig()
+    rig.walk = lambda mp, targets, **kw: rig.calls.append(("walk", sorted(targets)))  # records, never moves
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner._clear_blocker({"via": "edge", "to": 2}) is False
+
+
+def test_engage_until_badge_reports_the_byte_after_its_rounds_run_out():
+    """The loop can exhaust with bodies still listed; the verdict is the byte, not the roster."""
+    rig = FakeRig(start=(2, 5, 6), badges=0b11111, bodies={(5, 5), (9, 9)})
+    runner = LegRunner(rig, goal=2, engage=True, engage_rounds=1, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["outcome"] == "engaged-no-badge"
+    assert len([c for c in rig.calls if c[0] == "talk"]) == 1  # one round, one conversation

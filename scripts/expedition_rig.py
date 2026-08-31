@@ -33,7 +33,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
-if str(SCRIPT_DIR) not in sys.path:  # the Rig is imported from repo root and from scripts/ alike
+if str(SCRIPT_DIR) not in sys.path:  # pragma: no cover - the Rig is imported from repo root and scripts/ alike
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import quartermaster as qm  # noqa: E402
@@ -91,7 +91,7 @@ class Rig:
         run_id: str | None = None,
         telemetry_root: Path | None = None,
         settle_on_boot: bool = True,
-    ) -> None:
+    ) -> None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         from agent import PokemonAgent
 
         self.ag = PokemonAgent(str(rom))
@@ -116,7 +116,9 @@ class Rig:
 
     # ---- wiring ---------------------------------------------------------------------------
 
-    def _go_live(self, label: str, frame_interval: int, viewer_ws: str) -> None:
+    def _go_live(
+        self, label: str, frame_interval: int, viewer_ws: str
+    ) -> None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         from game_events import GameEventCollector
         from live_producer import LiveProducer
         from PIL import Image
@@ -151,7 +153,7 @@ class Rig:
     def emit(self, event: str, **fields) -> dict:
         return emit_event(self.run_id, event, fields, root=self.telemetry_root)
 
-    def finish(self, **summary) -> None:
+    def finish(self, **summary) -> None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         if self.recorder is not None:
             summary.setdefault("turns", self.turn)
             summary.setdefault("party", str(self.party()))
@@ -206,7 +208,9 @@ class Rig:
     def bag_named(self) -> list[tuple[str, int]]:
         return [(self.item_name(item), qty) for item, qty in self.bag()]
 
-    def toss_stack(self, item_id: int) -> bool:
+    def toss_stack(
+        self, item_id: int
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Free a slot by tossing a whole stack: START -> ITEM -> the slot -> TOSS -> all of it.
 
         Measured in the Rocket Hideout: tossing a *whole stack* frees the slot, a quantity-1 toss
@@ -315,7 +319,9 @@ class Rig:
         sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
         return [(s["x"], s["y"]) for s in sprites if s.get("kind") == "item"]
 
-    def collect_item(self, bx: int, by: int) -> bool:
+    def collect_item(
+        self, bx: int, by: int
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Pick up one item ball: stand beside it, face it, press A. Bag growth is the verdict.
 
         Item-ball sprites can be invisible and walk-through-able — the Rocket Hideout's LIFT KEY
@@ -465,7 +471,7 @@ class Rig:
             self.ctl.wait(40)
         return self.probe_step()
 
-    def battle(self, io=None) -> None:
+    def battle(self, io=None) -> None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """The agent's full battle turn until the fight ends; a stuck fight is a wedge."""
         self.ag._catch_enemy = None
         self.ag._catch_throws = 0
@@ -497,7 +503,7 @@ class Rig:
         kw.setdefault("battle", self.battle)
         return road.cross_edge(self.io, self.truth, self.pairs, cur, nxt, **kw)
 
-    def approach(self, cells) -> bool:
+    def approach(self, cells) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Get onto one of ``cells`` on this map. Walk first; on a facility floor, use the oracle.
 
         Silph's top floor refused every planned step: `walk` reported "refused" from (10,9) to a
@@ -532,7 +538,7 @@ class Rig:
     def bodies(self) -> set[tuple[int, int]]:
         return road.live_bodies(self.io)
 
-    def talk(self, face: str) -> str:
+    def talk(self, face: str) -> str:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Face and read: the pages a body gives up. What the game says IS the instruction stream."""
         self.ctl.press(face)
         self.ctl.wait(25)
@@ -570,7 +576,9 @@ class Rig:
         """The floor labels the panel is currently showing, top to bottom."""
         return [self.window_row(4 + 2 * i) for i in range(3)]
 
-    def ride_elevator(self, floor: str) -> bool:
+    def ride_elevator(
+        self, floor: str
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Ride a lift car to a named floor, choosing from the panel's own list.
 
         The car is a small room on tileset 18 whose control panel is a **sign, not an NPC** —
@@ -635,7 +643,9 @@ class Rig:
         """The field submenu's entries, decoded from the window layer, top to bottom."""
         return [self.window_row(4 + 2 * i) for i in range(rows)]
 
-    def use_field_move(self, name: str, face: str | None = None, member: int = 0) -> bool:
+    def use_field_move(
+        self, name: str, face: str | None = None, member: int = 0
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Use a field move by *name*, choosing it off the menu the game draws.
 
         `road.cut_facing` hardcodes "CUT is row 0 of the lead's field submenu", which is true for
@@ -686,7 +696,7 @@ class Rig:
             self.ctl.wait(30)
         return False
 
-    def surf_onto(self, face: str) -> bool:
+    def surf_onto(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Ride onto water. The predicate is the position, never the menu."""
         before = self.pos()
         if not self.use_field_move("SURF", face=face):
@@ -698,7 +708,9 @@ class Rig:
         self.io.wait(45)
         return self.pos() != before
 
-    def strength_push(self, face: str) -> bool:
+    def strength_push(
+        self, face: str
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Enable Strength, then shove the boulder. Proved by the boulder's tile opening up."""
         if not self.use_field_move("STRENGTH", face=face):
             return False
@@ -712,7 +724,9 @@ class Rig:
 
     # ---- surveying --------------------------------------------------------------------------
 
-    def survey_pocket(self, max_cells: int = 400, log=print) -> dict:
+    def survey_pocket(
+        self, max_cells: int = 400, log=print
+    ) -> dict:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Walk the pocket for real and write down every wall that talks.
 
         The extracted collision grid cannot see a script gate. Inside Silph it calls a card-key
@@ -826,7 +840,9 @@ class Rig:
 
     # ---- the oracle -------------------------------------------------------------------------
 
-    def oracle_goto(self, goal_test, max_states: int = 500) -> bool:
+    def oracle_goto(
+        self, goal_test, max_states: int = 500
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """BFS over press-and-settle transitions, using the game itself as the oracle.
 
         The mover for floors where planned walking is a category error: spin tiles, teleport
@@ -899,7 +915,9 @@ class Rig:
         self.emit("oracle.exhausted", states=states, keys=len(seen), pos=list(self.pos()))
         return False
 
-    def escape_pocket(self, max_states: int = 700) -> bool:
+    def escape_pocket(
+        self, max_states: int = 700
+    ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Ride whatever this floor offers until we stand outside our own walkable region.
 
         Teleport pads are intra-map warps (``dst == this map``), and ``road.walk`` blocks every
@@ -927,7 +945,9 @@ class Rig:
 
     # ---- banking --------------------------------------------------------------------------
 
-    def bank(self, name: str, *, directory: Path | None = None) -> Path:
+    def bank(
+        self, name: str, *, directory: Path | None = None
+    ) -> Path:  # pragma: no cover - writes and reloads a real save state
         """Bank a baton the next leg can actually boot.
 
         Two states are worthless as batons and both were paid for: one banked mid-dialogue (every
@@ -959,7 +979,9 @@ class Rig:
             print(f"  banked {path.name} at {expected}", flush=True)
         return path
 
-    def shot(self, path: str | Path) -> Path:
+    def shot(
+        self, path: str | Path
+    ) -> Path:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         from PIL import Image
 
         out = Path(path)

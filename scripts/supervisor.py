@@ -47,7 +47,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parent
-if str(SCRIPT_DIR) not in sys.path:
+if str(SCRIPT_DIR) not in sys.path:  # pragma: no cover - imported from repo root and scripts/ alike
     sys.path.insert(0, str(SCRIPT_DIR))
 
 MAP_CHANGE = re.compile(r"MAP CHANGE \| (\d+) -> (\d+)")
@@ -449,7 +449,11 @@ class LegRunner:
         bx, by = culprit
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies()) & adjacent
-        if not near:
+        if not near:  # pragma: no cover - defensive; unreachable while both reads use one body set
+            # If lifting a body reconnects the target then a neighbour of it is reachable by
+            # definition, so this cannot fire. It did once, when `blocking_body` was reading the
+            # extraction's sprites and `reachable` the live table — two different sets. Kept as a
+            # guard precisely because that divergence is easy to reintroduce.
             self.notes.append(f"the body at {culprit} severs this hop but no approach cell is reachable")
             return False
         self.log(f"  one body at {culprit} severs this hop — going to meet it")
@@ -900,7 +904,7 @@ def parse_goals(text: str) -> list[int]:
     return [int(part) for part in str(text).replace(" ", "").split(",") if part]
 
 
-def cmd_explore(args) -> int:
+def cmd_explore(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Walk the frontier: survey every pocket reachable from here, merging what each one teaches.
 
     A static pocket model is only as good as its gate coverage, and gates only exist where
@@ -982,7 +986,7 @@ def cmd_explore(args) -> int:
     return 0
 
 
-def cmd_survey(args) -> int:
+def cmd_survey(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Measure a pocket's true shape and write down every wall that talks.
 
     The output is the thing Silph has been missing all along: which steps the game refuses and
@@ -1013,7 +1017,7 @@ def cmd_survey(args) -> int:
     return 0
 
 
-def cmd_lift_tour(args) -> int:
+def cmd_lift_tour(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Ride a lift car to each named floor, clearing and looting what the lift can reach.
 
     A lift is not a hop in the connection graph, and that is exactly why it matters here: it
@@ -1076,7 +1080,7 @@ def cmd_lift_tour(args) -> int:
     return 0
 
 
-def cmd_run(args) -> int:
+def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Boot a baton and drive the supervised leg chain. This is the loop body the skill promises.
 
     One boot, N goals: the campaign shape. Each goal gets its share of the remaining budget, the
