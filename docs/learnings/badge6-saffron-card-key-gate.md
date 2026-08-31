@@ -123,11 +123,23 @@ Two things worth carrying forward:
 1. **Giovanni is `kind: "npc"` in the extraction, not `"trainer"`** — his sprite carries a
    different text flag — so `engage_trainers` walks straight past him. A floor clear that only
    fights `kind == "trainer"` will never fight a boss.
-2. **The teleport pads are the one mechanism never tried.** 2F's own trainer says it: *"Diamond
-   shaped tiles are teleport blocks!"* They are intra-map warps (`dst == this map`) on the
-   tileset-22 floors, and `road.walk(avoid_warps=True)` blocks every one of them by design. The
-   oracle can ride them — that is exactly how Rocket Hideout B4 fell — but nothing has yet
-   *aimed* it at a pad. That is the next thing to try, before assuming the key is unreachable.
+2. **The pads are floor-to-floor, not intra-map — a guess this record already had to correct.**
+   The first version of this note called the pads intra-map warps on the tileset-22 floors and
+   named riding them as the next move. Counted, that is wrong: of Silph's floors only 208 and
+   213 hold *any* intra-map warp (two each); every other floor has none. What the floors have
+   instead is dense **cross-linking to other floors** — 209 warps to 208, 210, 211, 234 and 236;
+   210 to 208, 209, 211, 212, 233, 236; and so on. Those are the teleport blocks 2F describes,
+   and `rt.route` already models them as ordinary warps.
+
+   Two consequences. The reachable set grows by riding *between* floors, since each pad lands in
+   a particular pocket of its destination — so "which pocket of floor N does floor M's pad reach"
+   is the map worth building. And `_reroute_around` bans a **map pair** on first refusal, which
+   throws away every other route to that destination; on a graph this densely cross-linked that
+   is too blunt, and banning the specific warp tile would be right.
+
+   `Rig.escape_pocket` (ride until we stand outside our own walkable region, same map) was built
+   for the wrong floor and returns False on Silph, correctly. It is the right tool for exactly
+   one place measured so far: **Sabrina's gym, map 178, which has thirty intra-map pads.**
 
 ## What the next run needs
 

@@ -636,6 +636,32 @@ class Rig:
         self.emit("oracle.exhausted", states=states, keys=len(seen), pos=list(self.pos()))
         return False
 
+    def escape_pocket(self, max_states: int = 700) -> bool:
+        """Ride whatever this floor offers until we stand outside our own walkable region.
+
+        Teleport pads are intra-map warps (``dst == this map``), and ``road.walk`` blocks every
+        warp tile by design — the standing doctrine that a door is not a floor. That is right for
+        walking and exactly wrong on a floor whose pads *are* the way across.
+
+        Where this applies is measured, not assumed, and the measurement corrected a guess:
+        Silph's floors have almost no intra-map pads (208 and 213 hold two each, the rest none) —
+        they are cross-linked to *other floors* instead — so this returns False there, correctly.
+        **Sabrina's gym, map 178, has thirty.** That is the floor this exists for.
+
+        The goal is a **region**, not a cell: anywhere our own reachable set does not contain, on
+        the same map. Aiming at a specific tile is what kept failing, because nothing knows which
+        tile is on the far side of a pad until the game puts you there. Accepting any *other map*
+        does not work either — the first run of this rode the floor's exit door out and called it
+        an escape, which was true and useless.
+        """
+        mp, x, y = self.pos()
+        region = road.reachable(self.truth, self.pairs, mp, (x, y), self.bodies())
+        print(f"  escaping a {len(region)}-cell pocket on map {mp} by riding what the floor offers", flush=True)
+        found = self.oracle_goto(lambda p: p[0] == mp and (p[1], p[2]) not in region, max_states=max_states)
+        if found:
+            self.emit("supervisor.pocket_escaped", map=mp, from_cells=len(region), to=list(self.pos()))
+        return found
+
     # ---- banking --------------------------------------------------------------------------
 
     def bank(self, name: str, *, directory: Path | None = None) -> Path:
