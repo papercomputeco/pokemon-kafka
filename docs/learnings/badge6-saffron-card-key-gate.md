@@ -59,11 +59,43 @@ and a planned walk is a category error.
 tiles wide — and `Rig.settled_pos()` exists now so that "arrived" can never again come from a
 position the world has not finished writing.
 
+## The card-key hunt, and what it ruled out
+
+Second session on this gate. The decisive measurement is a *refusal with text*: standing on
+map 234 at (10,9), every planned walk returned `refused` while raw directional presses moved
+fine, because stepping up prints
+
+> **"Darn! It needs a CARD KEY!"**
+
+The tile at (10,8) is a script gate, and the collision grid extracted from the cartridge calls
+it plain walkable floor. That one fact explains the whole hunt: `road.reachable` over-reports on
+every Silph floor, so the item sweep and the trainer approach kept choosing approach cells
+behind doors that will not open. Eleven item balls with "reachable" approach cells yielded
+exactly one pickup, and two trainers four tiles away were "unreachable".
+
+**Ruled out by measurement, not by argument:**
+
+- **The trainers on 207–212 do not carry it.** All of them were fought (14 Rockets, ~10k in
+  winnings, banked `b6rock-207` … `b6rock-212`). The bag afterwards is unchanged apart from
+  CALCIUM: DOME FOSSIL, HM01, HP UP, HYPER POTION, LIFT KEY, MOON STONE, NUGGET, POKe FLUTE,
+  RARE CANDY, S.S.TICKET, SILPH SCOPE, SUPER POTION, TM07/10/11/21/24/28/34. **No CARD KEY.**
+  So the Rocket Hideout's LIFT KEY template — beaten Rocket drops the key — does *not* apply here.
+- **The reachable item balls do not hold it.** Of the 11 on 208–212, only (1,9) on 212 opened,
+  and it was CALCIUM. The rest sit behind card-key doors.
+- **A full bag is not the cause.** `make_room` frees a slot by tossing the largest stack and was
+  verified live (20 slots -> 19). Pickups land when the tile is reachable.
+
+**Never visited:** maps **236, 213, 233, 235**. Silph 1F has three ways up — (26,0)->207,
+(16,10)->208 (dead), and **(20,0)->236** — and `rt.route` picked 207 every single time, so 236
+has never been entered. That is the open lead, and it is a lookup rather than a guess.
+
 ## What the next run needs
 
-1. **Find the CARD KEY.** It is somewhere in Silph's lower floors, which are already reachable
-   and already tileset-22 territory — so `ORACLE_SEARCH` (facing-keyed, `0xC109` in the state
-   key) is the mover, not `walk`. The supervisor offers it automatically on tileset 22.
+1. **Find the CARD KEY on a floor nobody has stood on yet** — 236 first (Silph 1F's untried
+   (20,0) door), then 213, 233, 235. The floors already cleared are exhausted as of this record.
+   Note that neither `walk` nor the oracle can open a card-key door, so a search that begins
+   inside a locked pocket stays in it: getting onto a *new floor* is the only move that changes
+   the reachable set.
 2. **Top floor → Giovanni.** Expect the gym guard at (34,4) to stand down once Silph falls; that
    is the hypothesis this leg leaves behind, not a fact — verify it by walking back to (34,3).
 3. **Then badges 7 and 8 are blocked on SURF**, which does not exist in `scripts/` in any form
