@@ -244,6 +244,34 @@ def menu_for(failure: str, *, edge_hop: bool = True) -> list[str]:
     return menu
 
 
+def hop_blocker(rig, hop: dict | None) -> tuple[int, int] | None:
+    """The single body severing this hop, if one does — see ``road.blocking_body``.
+
+    When the edge cells are unreachable even with every body lifted, the map is severed by its
+    own terrain and the way across is its gate building. The question that matters then is not
+    "which body blocks the edge" (none can) but "which body blocks the *gate door*" — measured
+    on Route 12, where the north edge is only ever reached through the gate at (10,21), and one
+    sprite at (10,62) was holding that door.
+    """
+    import road
+
+    if hop is None:
+        return None
+    mp, x, y = rig.pos()
+    try:
+        if hop["via"] == "edge":
+            targets, _direction = road.edge_cells(rig.truth, mp, hop["to"])
+        else:
+            targets = {(hop["x"], hop["y"])}
+        if not (road.reachable(rig.truth, rig.pairs, mp, (x, y)) & set(targets)):
+            doors = road.gate_doors(rig.truth, mp)
+            if doors:
+                targets = doors  # the terrain is severed: the gate door is the real objective
+        return road.blocking_body(rig.truth, rig.pairs, mp, (x, y), targets, rig.bodies())
+    except (StopIteration, KeyError):
+        return None
+
+
 def describe(rig, goal: int, hop: dict | None, failure: str, notes: list[str] | None = None) -> str:
     """The measured facts handed to a seat. Everything here was read from RAM or the cartridge."""
     import road
@@ -277,6 +305,12 @@ def describe(rig, goal: int, hop: dict | None, failure: str, notes: list[str] | 
     bodies = sorted(rig.bodies())
     lines.append(f"LIVE BODIES (sprites on screen right now): {bodies[:12]}" + (" ..." if len(bodies) > 12 else ""))
     lines.append("Bodies are not walls — wanderers move if you wait, but trainers never move.")
+    culprit = hop_blocker(rig, hop)
+    if culprit:
+        lines.append(
+            f"THE BLOCKING BODY IS {culprit}: removing that one sprite reconnects this hop, and no "
+            "other body does. Any body you are standing next to is a bystander unless it is this one."
+        )
     lines.append(f"PARTY: {rig.party()}   BADGES byte: 0b{rig.badges():08b}")
     text = rig.dialogue()
     if text:
@@ -354,6 +388,7 @@ class LegRunner:
         self.consults: list[dict] = []
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
+        self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
 
     # ---- one hop ---------------------------------------------------------------------------
 
@@ -381,6 +416,39 @@ class LegRunner:
                 return None
             return f"interior-{inner}"
         return str(result)
+
+    def _clear_blocker(self, hop: dict) -> bool:
+        """Go meet the one body that severs this hop. Deterministic: there is nothing to choose.
+
+        When exactly one sprite explains the severance, the next move is not a judgement call —
+        walk to it and engage. Route 12's was a trainer whose line of sight had never been
+        crossed; the fight started on approach and paid 700. Others will be story gates, and then
+        what they *say* is the finding. Either way it is measured, not decided.
+        """
+        import road
+
+        culprit = hop_blocker(self.rig, hop)
+        if culprit is None or culprit in self.engaged:
+            return False
+        self.engaged.add(culprit)
+        mp, x, y = self.rig.pos()
+        bx, by = culprit
+        adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
+        near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies()) & adjacent
+        if not near:
+            self.notes.append(f"the body at {culprit} severs this hop but no approach cell is reachable")
+            return False
+        self.log(f"  one body at {culprit} severs this hop — going to meet it")
+        self.rig.walk(mp, near, cap=400)
+        _, x, y = self.rig.pos()
+        if (x, y) not in adjacent:
+            return False
+        said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        self.tried.append(f"engaged the blocking body at {culprit}")
+        self.notes.append(f"the body at {culprit} (which alone severs this hop) says: {said[:300]}")
+        self.log(f"  it says: {said[:160]}")
+        self.rig.emit("supervisor.blocker_engaged", body=[bx, by], said=said[:300])
+        return True
 
     def _reroute_around(self, hop: dict) -> bool:
         """Ban a hop the world has structurally refused and ask the graph for another chain.
@@ -451,10 +519,16 @@ class LegRunner:
             if not bodies:
                 self.notes.append("no live body to talk to — the block is terrain or a script, not a sprite")
                 return
-            bx, by = min(bodies, key=lambda b: abs(b[0] - x) + abs(b[1] - y))
+            # The body that severs the hop, not the one we happen to be standing beside. On
+            # Route 12 those were fifteen tiles apart and only one of them was the wall.
+            culprit = hop_blocker(self.rig, hop)
+            bx, by = culprit or min(bodies, key=lambda b: abs(b[0] - x) + abs(b[1] - y))
             adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
             if (x, y) not in adjacent:
-                self.rig.walk(cur, adjacent, cap=120)
+                # Only aim at approach cells our side of the block can actually reach — the
+                # doctrine's body-aware region, applied to the approach as well as the crossing.
+                near = road.reachable(self.rig.truth, self.rig.pairs, cur, (x, y), bodies) & adjacent
+                self.rig.walk(cur, near or adjacent, cap=400)
                 _, x, y = self.rig.pos()
             face = "right" if bx > x else "left" if bx < x else "down" if by > y else "up"
             said = self.rig.talk(face)
@@ -555,9 +629,15 @@ class LegRunner:
             attempt = self.attempts[wall]
             self.log(f"hop failed: {failure} (attempt {attempt}/{LADDER_ATTEMPTS} on {wall})")
             self.rig.emit("supervisor.hop_failed", wall=wall, failure=failure, attempt=attempt)
-            # Determinism first. A hop whose grid is severed even after its gate building was
-            # tried is a fact about the graph, not a question — ban it and take another chain
-            # rather than spending a crew ladder on a road the world does not have.
+            # Determinism first, in the order the measurements rule things out.
+            # 1. One sprite explains the severance -> it is a gate to open, not a missing road.
+            #    This must come before any ban: Route 12's north road was banned as impassable
+            #    when the whole wall was a single unfought trainer at (10,62).
+            # 2. Otherwise, a hop still severed after its gate building was tried is a fact about
+            #    the graph — ban it and take another chain rather than spending a crew ladder on
+            #    a road the world does not have.
+            if hop is not None and failure in ("no-path", "body-blocked") and self._clear_blocker(hop):
+                continue
             if hop is not None and failure == "no-path" and (cur, hop["to"]) in self.gated:
                 if self._reroute_around(hop):
                     continue

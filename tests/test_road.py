@@ -401,3 +401,67 @@ def test_drive_to_hop_cap_runs_out():
     truth = _two_map_world()
     io = RoadIO(truth, (1, 0, 0), thresholds={(1, 2, 0, "right"): (2, 0, 0)}, arrive={(2, 2, 0): (9, 0, 0)})
     assert road.drive_to(io, truth, PAIRS, 9, max_hops=0) is False
+
+
+# ------------------------------------------------------------------ the wall vs the bump
+
+
+def _corridor_truth():
+    """A map shaped like Route 12: a wide south room, a two-column corridor north, and one
+    choke cell at the top that a single body can plug."""
+    #      x: 0123456
+    rows = [
+        "0011000",  # y=0  the goal edge
+        "0011000",  # y=1
+        "0001000",  # y=2  the choke: only x=3
+        "0011000",  # y=3
+        "1111111",  # y=4  the wide south room
+        "1111111",  # y=5
+    ]
+    return {
+        "maps": {
+            "1": {
+                "width": 7,
+                "height": 6,
+                "tileset": 0,
+                "grid": rows,
+                "warps": [],
+                "sprites": [],
+                "connections": {"north": 2},
+            },
+            "2": {
+                "width": 7,
+                "height": 6,
+                "tileset": 0,
+                "grid": rows,
+                "warps": [],
+                "sprites": [],
+                "connections": {"south": 1},
+            },
+        }
+    }
+
+
+def test_reachable_is_the_body_aware_region():
+    truth, pairs = _corridor_truth(), set()
+    assert (3, 0) in road.reachable(truth, pairs, 1, (0, 5))
+    assert (3, 0) not in road.reachable(truth, pairs, 1, (0, 5), blocked={(3, 2)})
+
+
+def test_blocking_body_names_the_choke_not_the_body_underfoot():
+    """Route 12 in miniature: the bystander at (1,4) is adjacent; the wall is the choke at (3,2)."""
+    truth, pairs = _corridor_truth(), set()
+    bodies = {(1, 4), (3, 2)}
+    assert road.blocking_body(truth, pairs, 1, (0, 5), {(2, 0), (3, 0)}, bodies) == (3, 2)
+
+
+def test_blocking_body_is_none_when_the_goal_is_already_reachable():
+    truth, pairs = _corridor_truth(), set()
+    assert road.blocking_body(truth, pairs, 1, (0, 5), {(2, 0), (3, 0)}, {(1, 4)}) is None
+
+
+def test_two_bodies_in_one_corridor_are_terrain_not_a_gate():
+    """No *single* removal reconnects it, so there is no one sprite to go argue with."""
+    truth, pairs = _corridor_truth(), set()
+    bodies = {(3, 2), (3, 3), (2, 3)}
+    assert road.blocking_body(truth, pairs, 1, (0, 5), {(2, 0), (3, 0)}, bodies) is None

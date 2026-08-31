@@ -56,6 +56,67 @@ def _step(io, direction: str) -> None:
     io.wait(30)
 
 
+def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, int]]:
+    """Every cell reachable from ``start`` on this map, treating ``blocked`` cells as solid."""
+    from collections import deque
+
+    import rom_truth as rt
+
+    m = truth["maps"][str(map_id)]
+    w, h = m["width"], m["height"]
+    blocked = set(blocked)
+    seen = {tuple(start)}
+    queue = deque([tuple(start)])
+    while queue:
+        x, y = queue.popleft()
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in seen or (nx, ny) in blocked:
+                continue
+            if m["grid"][ny][nx] != "1" or not rt.passable(m, pairs, x, y, nx, ny):
+                continue
+            seen.add((nx, ny))
+            queue.append((nx, ny))
+    return seen
+
+
+def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
+    """The doors on this map that belong to a gate building rather than a dead-end house.
+
+    Measurable signature, no recall needed: a building you can *pass through* is entered from
+    this map by two or more doors (Route 12's gate is (10,15), (11,15) and (10,21), all into map
+    87 — two doors on the north side of the severance and one on the south). A house is entered
+    by exactly one. ``pass_gate`` aims at the nearest door first and Route 11's Diglett house
+    taught what that costs; this is the same lesson as a lookup.
+    """
+    by_dest: dict[int, set[tuple[int, int]]] = {}
+    for wx, wy, dst, _wid in truth["maps"].get(str(map_id), {}).get("warps", []):
+        by_dest.setdefault(dst, set()).add((wx, wy))
+    return {door for doors in by_dest.values() if len(doors) > 1 for door in doors}
+
+
+def blocking_body(truth, pairs, map_id: int, start, targets, bodies):
+    """The one body whose removal reconnects ``targets`` — the wall, not the bump.
+
+    ``walk`` reports the body it bumped into. That is often not the body that matters. Measured
+    on Route 12: the step north was refused by a trainer at (14,76) that column 15 walks straight
+    around, while the actual severance was a single sprite at (10,62) fifteen tiles away — one
+    body holding 237 cells and the map's only gate door hostage. Naming the bystander sends a
+    crew to argue with the wrong sprite, and "body-blocked" then reads as a wall when it is a
+    story gate standing somewhere else entirely.
+
+    Returns ``None`` when the targets are already reachable, or when no *single* body explains
+    the severance (two parked trainers in one corridor are terrain, not a gate).
+    """
+    targets = set(targets)
+    bodies = set(bodies)
+    if reachable(truth, pairs, map_id, start, bodies) & targets:
+        return None
+    for body in sorted(bodies):
+        if reachable(truth, pairs, map_id, start, bodies - {body}) & targets:
+            return body
+    return None
+
+
 def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], str]:
     """The open cells on ``cur``'s edge facing ``nxt``, and the outward direction."""
     m = truth["maps"][str(cur)]

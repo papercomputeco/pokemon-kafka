@@ -77,7 +77,11 @@ class FakeRig:
         return False
 
     def walk(self, mp, targets, **kw):
+        # A walk that records but never moves would let the runner "arrive" everywhere and
+        # nowhere; the real one lands on a target cell, so this one does too.
         self.calls.append(("walk", sorted(targets)))
+        if targets:
+            self._pos = (mp, *sorted(targets)[0])
         return True
 
     def talk(self, face):
@@ -464,3 +468,92 @@ def test_route_can_ban_a_hop_the_world_refuses():
     detour = rt.route(truth, 1, 2, banned={(1, 2)})
     assert [h["to"] for h in detour] == [3, 4, 2]
     assert rt.route(truth, 1, 2, banned={(1, 2), (1, 3)}) is None
+
+
+# ------------------------------------------------------- one body is a gate, not a missing road
+
+
+class BlockedRig(SeveredRig):
+    """1->2 is severed while `blocker` stands there; engaging it opens the road."""
+
+    def __init__(self, blocker=(3, 2), **kw):
+        super().__init__(severed=(1, 2), truth=_corridor_world(), **kw)
+        self._pos = (1, 0, 5)
+        self._bodies = {blocker, (1, 4)}  # the wall, and a bystander right next to us
+        self.blocker = blocker
+
+    def cross(self, cur, nxt, **kw):
+        self.calls.append(("cross", nxt))
+        if (cur, nxt) == self.severed and self.blocker in self._bodies:
+            return "no-path"
+        self._pos = (nxt, 1, 1)
+        return True
+
+    def talk(self, face):
+        self.calls.append(("talk", face))
+        self._bodies.discard(self.blocker)  # beaten/moved: the road opens
+        return "I like shorts!"
+
+
+def _corridor_world():
+    rows = ["0011000", "0011000", "0001000", "0011000", "1111111", "1111111"]
+
+    def m(**kw):
+        return {
+            "width": 7,
+            "height": 6,
+            "tileset": 0,
+            "grid": rows,
+            "sprites": [],
+            "warps": [],
+            "connections": {},
+            **kw,
+        }
+
+    return {"maps": {"1": m(connections={"north": 2}), "2": m(connections={"south": 1})}}
+
+
+def test_one_body_severing_a_hop_is_engaged_before_anything_is_banned(tmp_path):
+    """Route 12: the north road was banned as impassable when the wall was one unfought trainer."""
+    rig = BlockedRig()
+    consult = _consult("GIVE_UP")
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert runner.banned == set()  # nothing was banned: the road was there all along
+    assert consult.seen == []  # and nothing was asked: one body is not a judgement call
+    assert any(e["event"] == "supervisor.blocker_engaged" for e in rig.events)
+
+
+def test_the_body_underfoot_is_not_mistaken_for_the_wall(tmp_path):
+    rig = BlockedRig()
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).run()
+    walks = [c[1] for c in rig.calls if c[0] == "walk"]
+    # It walked to a cell adjacent to the choke at (3,2), not to the bystander at (1,4).
+    assert walks and set(walks[0]) <= {(2, 2), (4, 2), (3, 1), (3, 3)}
+
+
+def test_the_same_blocker_is_only_engaged_once(tmp_path):
+    """A body that does not clear must not become an infinite errand."""
+    rig = BlockedRig()
+
+    def stubborn(face):  # engaging changes nothing: the body stays exactly where it was
+        rig.calls.append(("talk", face))
+        return "..."
+
+    rig.talk = stubborn
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert len(runner.engaged) == 1
+    assert len([c for c in rig.calls if c[0] == "talk"]) == 1
+
+
+def test_gate_doors_tell_a_pass_through_from_a_dead_end_house():
+    import road
+
+    truth = {
+        "maps": {
+            "23": {"warps": [[10, 15, 87, 0], [11, 15, 87, 1], [10, 21, 87, 2], [11, 77, 189, 0]]},
+        }
+    }
+    assert road.gate_doors(truth, 23) == {(10, 15), (11, 15), (10, 21)}  # map 87 is the gate
