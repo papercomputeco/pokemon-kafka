@@ -499,3 +499,30 @@ def test_wild_encounters_rejects_malformed_tables(rom):
     # A ROM shorter than its own pointer table.
     with pytest.raises(ValueError):
         rom_truth.wild_encounters(bytes(0x5000), {1})
+
+
+def test_measured_gates_close_a_step_the_grid_calls_walkable(tmp_path):
+    """The grid has no way to express a script gate, so a measured refusal has to override it —
+    otherwise every region computed inside Silph over-reports and every route plans through a
+    locked door."""
+    grid = ["1111", "1111", "1111", "1111"]
+    m = {"width": 4, "height": 4, "tileset": 0, "grid": grid, "warps": []}
+    assert rom_truth.passable(m, set(), 1, 1, 0, 1) is True
+    m["gates"] = {"1,1,left": "Darn! It needs a CARD KEY!"}
+    assert rom_truth.passable(m, set(), 1, 1, 0, 1) is False
+    assert rom_truth.passable(m, set(), 1, 1, 2, 1) is True  # only that one direction
+
+
+def test_measured_gates_merge_and_accumulate(tmp_path):
+    path = tmp_path / "measured_gates.json"
+    rom_truth.merge_measured_gates({"208": {"18,8,left": "a"}}, path)
+    rom_truth.merge_measured_gates({"208": {"18,9,left": "b"}, "209": {"5,13,up": "c"}}, path)
+    merged = rom_truth.load_measured_gates(path)
+    assert merged["208"] == {"18,8,left": "a", "18,9,left": "b"}
+    assert merged["209"] == {"5,13,up": "c"}
+
+
+def test_attaching_gates_reaches_the_map_dicts_passable_reads():
+    truth = {"maps": {"208": {"width": 1, "height": 1, "grid": ["1"], "warps": []}}}
+    rom_truth.attach_measured_gates(truth, rom_truth.MEASURED_GATES)
+    assert truth["maps"]["208"].get("gates"), "the shared gate file should carry map 208"

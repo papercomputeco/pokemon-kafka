@@ -82,6 +82,38 @@ def tile_pairs(rom: bytes) -> set[tuple[int, int, int]]:
     return pairs
 
 
+MEASURED_GATES = Path(__file__).resolve().parent.parent / "references" / "measured_gates.json"
+
+_DIR_OF = {(0, -1): "up", (0, 1): "down", (-1, 0): "left", (1, 0): "right"}
+
+
+def load_measured_gates(path: Path | None = None) -> dict:
+    """Steps the *engine* refuses that the collision grid calls walkable.
+
+    The grid has no way to express a script gate. Inside Silph it calls a card-key door plain
+    floor, and so every region computed from it over-reports — 343 cells claimed on 3F against
+    233 actually walkable. These are measured by ``Rig.survey_pocket``, which tries each step
+    and records the ones the engine refuses, and merging them here is what makes the rest of the
+    module honest: ``passable`` consults them, so ``path_on_map``, ``road.reachable``,
+    ``blocking_body`` and every route planned on top all stop planning through locked doors.
+    """
+    path = path or MEASURED_GATES
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def merge_measured_gates(gates: dict, path: Path | None = None) -> dict:
+    """Fold a survey's gates into the shared file. Knowledge accumulates or it is not knowledge."""
+    path = path or MEASURED_GATES
+    merged = load_measured_gates(path)
+    for map_id, entries in gates.items():
+        merged.setdefault(str(map_id), {}).update(entries)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+    return merged
+
+
 def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: int, y1: int) -> bool:
     """Can the player step from (x0,y0) to (x1,y1) on map ``m``? Both cells must be walkable
     AND the move must not be a tile-pair collision. Checking ``grid`` alone is not enough: on
@@ -93,6 +125,9 @@ def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: in
         return False
     if m["grid"][y0][x0] != "1" or m["grid"][y1][x1] != "1":
         return False
+    gates = m.get("gates")
+    if gates and gates.get(f"{x0},{y0},{_DIR_OF.get((x1 - x0, y1 - y0), '?')}") is not None:
+        return False  # measured: the engine refuses this step whatever the grid says
     tiles = m.get("tiles")
     if not tiles:
         return True
@@ -511,6 +546,14 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
     }
 
 
+def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
+    """Hang each map's measured gates on its own dict, where ``passable`` will find them."""
+    for map_id, entries in load_measured_gates(path).items():
+        if map_id in truth.get("maps", {}):
+            truth["maps"][map_id]["gates"] = entries
+    return truth
+
+
 def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict:
     """Load an extracted truth file; if the ROM is present, refuse a sha mismatch (a grid from a
     different image misroutes silently — the spec's number-one risk)."""
@@ -519,7 +562,7 @@ def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict
         sha = hashlib.sha256(rom_path.read_bytes()).hexdigest()
         if sha != truth.get("rom_sha256"):
             raise ValueError(f"rom_truth.json was extracted from a different ROM (sha {truth.get('rom_sha256')[:12]}…)")
-    return truth
+    return attach_measured_gates(truth)
 
 
 def route(truth: dict, src: int, dst: int, banned: set[tuple[int, int]] | None = None) -> list[dict] | None:

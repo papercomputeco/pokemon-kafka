@@ -898,6 +898,11 @@ def cmd_survey(args) -> int:
     rig = Rig(args.state, live_label=args.live_label)
     print(f"surveying from {rig.settled_pos()}", flush=True)
     survey = rig.survey_pocket(max_cells=args.max_cells)
+    if survey["doors"] and not args.no_merge:
+        import rom_truth as rt
+
+        rt.merge_measured_gates({survey["map"]: survey["doors"]})
+        print(f"merged {len(survey['doors'])} gates into {rt.MEASURED_GATES.name}", flush=True)
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -1057,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--max-cells", type=int, default=400)
     sv.add_argument("--out", default=None, help="write the survey as JSON here")
     sv.add_argument("--live-label", default=None)
+    sv.add_argument("--no-merge", action="store_true", help="do not fold the gates into references/")
     lt = sub.add_parser("lift-tour", help="ride a lift car to each floor, clearing and looting each")
     lt.add_argument("--state", required=True, help="a baton standing inside the lift car")
     lt.add_argument("--floors", required=True, help="comma-separated labels exactly as the panel prints them")
