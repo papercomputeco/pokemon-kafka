@@ -235,6 +235,39 @@ false-positive gate silently removes a real path. `survey_pocket` skips cells wi
 them, but a wanderer that moved, or a trainer freeze, would still register as a door. If the
 reachable set shrinks as coverage grows, audit the gates before believing the shrinkage.
 
+## Where it actually stands, and the one well-defined question left
+
+Every npc and trainer reachable from the six lift batons has been spoken to, and every ball
+they can reach is open. Yield: CARBOS and RARE CANDY on 10F. **No CARD KEY.**
+
+The remaining targets are all *routable on paper* and *unreachable in practice*, which is the
+open question and it is now sharp:
+
+| target | model says | live says |
+|---|---|---|
+| 212 (1,9) ball, from 7F baton | same pocket, 0 hops | could not open |
+| 208 (24,8) npc, from 3F baton | same pocket, 0 hops | could not reach |
+| 210 (21,16) ball, from 5F baton | same pocket, 0 hops | could not open |
+
+Two layers explain part of it and neither explains all of it:
+
+1. **A pocket is terrain; bodies sever it further.** `pockets()` is bodiless by construction, so
+   it is an *upper bound* on where you can stand. On 210 a single sprite at (28,4) severs the
+   ball at (21,16) — `blocking_body` names it — and that body is itself unreachable from the
+   baton, so the severance is not clearable from there.
+2. **Gate coverage is still incomplete in these pockets.** Where the body-aware region *does*
+   include an approach cell (212, 208) and the live approach still fails, the model is
+   over-reporting, which means gates nobody has walked into yet.
+
+So the question for the next session is not "where is the card key" but: **why does the pocket
+model claim reachable where the engine refuses, on 212 (21,3)->(1,9) and 208 (18,8)->(24,8)?**
+Both are one `survey_pocket` away from an answer, and the survey now re-probes rather than
+trusting the gate file it feeds, so it can correct itself.
+
+Worth noting what has *not* been tried: physically walking the pocket route from the Silph
+entrance. Every attempt so far has teleported in via the lift, and the 19-reachable figure is
+computed from the entrance — the two are not the same starting set.
+
 ## What the next run needs
 
 1. **Build the pocket-graph explorer.** Not another hand-picked door: a frontier walk over
