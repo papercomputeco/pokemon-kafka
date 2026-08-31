@@ -906,6 +906,7 @@ def cmd_explore(args) -> int:
     from expedition_rig import Rig
 
     rig = Rig(args.state, live_label=args.live_label)
+    area = {int(m) for part in (args.area or "").split(",") if part.strip() for m in [part.strip()]}
     started = time.monotonic()
     origin = _io.BytesIO()
     rig.pb.save_state(origin)
@@ -942,6 +943,9 @@ def cmd_explore(args) -> int:
         print(f"  {here['cells']} cells, {here['gates']} gates, balls={here['balls']} npcs={here['npcs']}", flush=True)
         rig.emit("supervisor.pocket_explored", **{k: v for k, v in here.items() if k != "exits"})
         for step, dest in survey["exits"].items():
+            if area and dest not in area:
+                continue  # the frontier is unbounded otherwise: it walked out of Silph into
+                # Saffron and then Route 7, which is true exploration and the wrong budget
             x, y, direction = step.split(",")
             branch = _io.BytesIO()
             snap.seek(0)
@@ -1141,6 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
     ex.add_argument("--max-pockets", type=int, default=30)
     ex.add_argument("--max-cells", type=int, default=400)
     ex.add_argument("--out", default=None)
+    ex.add_argument("--area", default=None, help="comma-separated map ids the frontier may enter")
     ex.add_argument("--live-label", default=None)
     sv = sub.add_parser("survey", help="measure a pocket by attempted steps and record every wall that talks")
     sv.add_argument("--state", required=True)
