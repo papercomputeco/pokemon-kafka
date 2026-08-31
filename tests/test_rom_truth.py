@@ -526,3 +526,23 @@ def test_attaching_gates_reaches_the_map_dicts_passable_reads():
     truth = {"maps": {"208": {"width": 1, "height": 1, "grid": ["1"], "warps": []}}}
     rom_truth.attach_measured_gates(truth, rom_truth.MEASURED_GATES)
     assert truth["maps"]["208"].get("gates"), "the shared gate file should carry map 208"
+
+
+def test_a_dead_warp_is_dropped_from_a_pocket_s_exits(tmp_path):
+    """Silph 1F's (16,10) pad was measured dead early and then routed through by every planner
+    since, because `measured_gates` records refused steps and a dead door is a refused warp."""
+    grid = ["11", "11"]
+    truth = {
+        "maps": {
+            "1": {"width": 2, "height": 2, "tileset": 0, "grid": grid, "warps": [[0, 0, 2, 0], [1, 0, 2, 0]]},
+            "2": {"width": 2, "height": 2, "tileset": 0, "grid": grid, "warps": [[0, 0, 1, 0]]},
+        }
+    }
+    assert len(rom_truth.pocket_exits(truth, 1, 0)) == 2
+    truth["maps"]["1"]["dead_warps"] = {"0,0": "refused"}
+    assert [e["from"] for e in rom_truth.pocket_exits(truth, 1, 0)] == [[1, 0]]
+
+
+def test_dead_warps_merge_and_reach_the_truth():
+    assert rom_truth.load_dead_warps()["181"]["16,10"]
+    assert "16,10" in rom_truth.load_truth()["maps"]["181"].get("dead_warps", {})

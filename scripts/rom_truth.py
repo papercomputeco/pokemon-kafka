@@ -114,6 +114,34 @@ def merge_measured_gates(gates: dict, path: Path | None = None) -> dict:
     return merged
 
 
+DEAD_WARPS = Path(__file__).resolve().parent.parent / "references" / "dead_warps.json"
+
+
+def load_dead_warps(path: Path | None = None) -> dict:
+    """Warp tiles the engine will not fire, by map — doors the extraction believes in and the
+    world does not.
+
+    ``measured_gates`` records refused *steps*; a dead door is a refused *warp*, and it had
+    nowhere to live. Silph 1F's pad at (16,10) was measured dead early on, written into a
+    learnings file, and then routed through by every planner since — including the pocket router,
+    which proposed it as the first hop of three different chains.
+    """
+    path = path or DEAD_WARPS
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def merge_dead_warps(dead: dict, path: Path | None = None) -> dict:
+    path = path or DEAD_WARPS
+    merged = load_dead_warps(path)
+    for map_id, tiles in dead.items():
+        merged.setdefault(str(map_id), {}).update(tiles)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+    return merged
+
+
 def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: int, y1: int) -> bool:
     """Can the player step from (x0,y0) to (x1,y1) on map ``m``? Both cells must be walkable
     AND the move must not be a tile-pair collision. Checking ``grid`` alone is not enough: on
@@ -561,6 +589,9 @@ def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
     for map_id, entries in load_measured_gates(path).items():
         if map_id in truth.get("maps", {}):
             truth["maps"][map_id]["gates"] = entries
+    for map_id, tiles in load_dead_warps().items():
+        if map_id in truth.get("maps", {}):
+            truth["maps"][map_id]["dead_warps"] = tiles
     return truth
 
 
@@ -625,9 +656,12 @@ def pocket_exits(truth: dict, map_id: int, index: int) -> list[dict]:
         return []
     cells = pocket[index]
     out = []
+    dead = truth["maps"][str(map_id)].get("dead_warps", {})
     for wx, wy, dst, dwarp in truth["maps"][str(map_id)]["warps"]:
         if (wx, wy) not in cells or dst == LAST_MAP or str(dst) not in truth["maps"]:
             continue
+        if f"{wx},{wy}" in dead:
+            continue  # measured: this door does not open, whatever the warp table says
         dwarps = truth["maps"][str(dst)]["warps"]
         land = (dwarps[dwarp][0], dwarps[dwarp][1]) if dwarp < len(dwarps) else None
         out.append(
