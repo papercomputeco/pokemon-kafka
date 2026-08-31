@@ -43,7 +43,10 @@ api-key-*.txt
 config.toml
 
 # Claude Code (user-specific)
-.claude/
+# Ignore .claude contents (local settings) but keep the directory traversable, so project
+# skills can be re-included: doctrine every session should load travels with the repo.
+.claude/*
+!.claude/skills/
 
 # Git worktrees
 .worktrees/
