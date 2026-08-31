@@ -240,6 +240,9 @@ TYPE_NAMES = {
 _NAME_CHARS = {0xE1: "Pk", 0xE2: "Mn", 0xEF: "M", 0xF5: "F", 0xE8: "."}
 
 
+HM_FIRST, HM_COUNT = 196, 5  # ids 196..200 render as HM01..HM05 on the game's own ITEM screen
+TM_BASE, TM_COUNT = 200, 50  # id 200+n renders as TM<n>: 207->TM07, 234->TM34, six such readings
+
 _ITEM_CHARS = {0x7F: " ", 0xBA: "e", 0xE1: "Pk", 0xE2: "Mn", 0xE3: "-", 0xE6: "?", 0xE7: "!", 0xE8: "."}
 for _i in range(10):
     _ITEM_CHARS[0xF6 + _i] = chr(ord("0") + _i)
@@ -276,6 +279,14 @@ def item_names(rom: bytes, count: int = 250) -> dict[str, str]:
         if not name.strip():
             break
         out[str(iid)] = name.strip()
+    # Past the plain-item list the ROM stores TMs and HMs as a numbered range rather than as
+    # names. The boundaries below were read off the game's own ITEM screen, one entry at a time,
+    # for a bag holding ids 196/207/210/211/221/224/228/234 — which rendered as HM01, TM07, TM10,
+    # TM11, TM21, TM24, TM28, TM34. Seven data points, so the offset is measured, not assumed.
+    for iid in range(HM_FIRST, HM_FIRST + HM_COUNT):
+        out[str(iid)] = f"HM{iid - HM_FIRST + 1:02d}"
+    for iid in range(TM_BASE + 1, TM_BASE + TM_COUNT + 1):
+        out[str(iid)] = f"TM{iid - TM_BASE:02d}"
     return out
 
 

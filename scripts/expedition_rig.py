@@ -51,6 +51,7 @@ ADDR_FACING = 0xC109  # the player's facing — part of the state key on any til
 ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
 ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E  # quartermaster's, verified live in the mart probe
 BAG_SLOTS = 20  # a full bag refuses pickups silently (measured in the Rocket Hideout)
+ADDR_LIST_SCROLL = 0xCC36  # item-list scroll offset; 0xCC26 is the cursor WITHIN the 3-row window
 BATTLE_TURN_CAP = 200  # a battle past this is wedged, not long
 
 
@@ -213,9 +214,10 @@ class Rig:
         from timing: the verdict is the bag's slot count dropping.
         """
         before = len(self.bag())
-        slot = next((i for i, (item, _q) in enumerate(self.bag()) if item == item_id), None)
-        if slot is None:
+        found = next(((i, q) for i, (item, q) in enumerate(self.bag()) if item == item_id), None)
+        if found is None:
             return False
+        slot, qty = found
         self.ctl.press("start")
         self.ctl.wait(40)
         for _ in range(8):  # ITEM sits below POKeMON in the field menu; walk the cursor onto it
@@ -225,11 +227,21 @@ class Rig:
             self.ctl.wait(15)
         self.ctl.press("a")
         self.ctl.wait(50)
-        for _ in range(slot + 24):  # scroll to the slot; the list cursor is its own register
-            if self.mem[qm.ADDR_MENU_CUR] == slot:
+        # The item list shows three rows at a time: 0xCC26 is the cursor *within that window* and
+        # caps at 2, while 0xCC36 is the scroll offset. The slot we want is their sum. Comparing
+        # the cursor alone to the slot index silently stops on slot 2 and tosses the wrong thing —
+        # or, here, nothing at all.
+        for _ in range(2 * (slot + len(self.bag()) + 4)):
+            here = self.mem[ADDR_LIST_SCROLL] + self.mem[qm.ADDR_MENU_CUR]
+            if here == slot:
                 break
-            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < slot else "up")
+            self.ctl.press("down" if here < slot else "up")
             self.ctl.wait(15)
+        if self.mem[ADDR_LIST_SCROLL] + self.mem[qm.ADDR_MENU_CUR] != slot:
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
         self.ctl.press("a")
         self.ctl.wait(50)
         for _ in range(6):  # the item submenu: USE / TOSS — TOSS is the lower row
@@ -239,10 +251,14 @@ class Rig:
             self.ctl.wait(15)
         self.ctl.press("a")
         self.ctl.wait(50)
-        for _ in range(12):  # quantity picker: up raises it; take the whole stack
+        # The quantity picker starts at 1 and WRAPS. Holding up a fixed number of times is how
+        # you ask for the whole stack and get one unit instead: twelve presses on a six-stack
+        # lands back on 1, and a quantity-1 toss frees no slot — the very thing this method
+        # exists to avoid. Press exactly what the stack holds.
+        for _ in range(max(0, qty - 1)):
             self.ctl.press("up")
             self.ctl.wait(12)
-        for _ in range(4):  # confirm, then the "threw away" box
+        for _ in range(3):  # confirm the count, answer the "Is it OK to toss?" box, dismiss it
             self.ctl.press("a")
             self.ctl.wait(45)
         for _ in range(6):
