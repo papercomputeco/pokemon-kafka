@@ -117,6 +117,10 @@ class FakeRig:
         self.calls.append(("talk", face))
         return self.said
 
+    def press(self, button, hold=8, release=8):
+        # `self.io is self`, so the refusal probe presses land here. A plain rig does not move.
+        self.calls.append(("press", button))
+
     def wait(self, frames):
         self.calls.append(("wait", frames))
 
@@ -839,3 +843,94 @@ def test_a_floor_with_no_trainers_says_so_rather_than_claiming_a_clear(tmp_path)
 def test_the_lift_tour_is_registered_with_its_own_arguments():
     with pytest.raises(SystemExit):
         supervisor.main(["lift-tour", "--help"])
+
+
+# ----------------------------------------------------- what the game says when it refuses
+
+
+class TalkingWallRig(FakeRig):
+    """A world whose refused step prints a sentence — the Silph card-key door, in miniature."""
+
+    def __init__(self, said="Darn! It needs a CARD KEY!", moves=False):
+        super().__init__(hops=[None] * 12)
+        self.wall_text = said
+        self.moves = moves
+        self.presses: list[str] = []
+
+    def press(self, button, hold=8, release=8):
+        self.presses.append(button)
+        if self.moves:
+            self._pos = (self._pos[0], self._pos[1] + 1, self._pos[2])
+
+    def wait(self, frames=30):
+        pass
+
+    def dialogue(self):
+        return self.wall_text
+
+
+def test_a_refusal_that_prints_a_sentence_records_it(tmp_path):
+    """The engine's failure code is one token; the sentence behind it is the actual finding."""
+    rig = TalkingWallRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert (1, 5, 5) in runner.gates
+    assert "CARD KEY" in runner.gates[(1, 5, 5)]
+    assert any(e["event"] == "supervisor.gate_text" for e in rig.events)
+
+
+def test_the_sentence_reaches_the_seat_and_the_written_record(tmp_path):
+    rig = TalkingWallRig()
+    consult = _consult("GIVE_UP")
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert "CARD KEY" in consult.seen[0]["facts"]  # the crew is told, not left to guess
+    assert "CARD KEY" in next(tmp_path.glob("*.md")).read_text()  # and so is the operator
+
+
+def test_a_silent_refusal_records_no_gate(tmp_path):
+    rig = TalkingWallRig(said="")
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert runner.gates == {}  # a bare refusal is a different fact, and stays one
+
+
+def test_a_step_that_was_not_actually_refused_is_undone(tmp_path):
+    """The probe must not leave the leg somewhere it did not choose to be."""
+    rig = TalkingWallRig(moves=True)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.read_refusal({"via": "edge", "to": 2})
+    assert rig.presses[-2:] == ["right", "left"]  # stepped out toward the edge, then back
+
+
+def test_the_gates_ledger_is_reported_with_the_leg(tmp_path):
+    rig = TalkingWallRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert any("CARD KEY" in said for said in result["gates"].values())
+
+
+def test_two_seats_explaining_the_same_wall_is_recorded_as_a_diagnosis(tmp_path):
+    """The Point Man named the CARD KEY twice on the first Silph leg and both were scored as
+    failed answers, because only the ACTION field was ever read."""
+    rig = FakeRig(hops=[None] * 12)
+
+    def consult(tier, facts, menu):
+        return "RETRY_SAME", "the warp is locked behind a CARD KEY requirement", "fake"
+
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("both seats explain" in n and "CARD KEY" in n for n in runner.notes)
+    assert "CARD KEY" in next(tmp_path.glob("*.md")).read_text()
+
+
+def test_seats_that_disagree_are_not_reported_as_a_diagnosis(tmp_path):
+    rig = FakeRig(hops=[None] * 12)
+    whys = iter(["a body is in the way", "the edge is offset", "try the gate", "back out"])
+
+    def consult(tier, facts, menu):
+        return "RETRY_SAME", next(whys, "something else"), "fake"
+
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert not any("both seats explain" in n for n in runner.notes)

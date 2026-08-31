@@ -401,6 +401,7 @@ class LegRunner:
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
         self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
+        self.gates: dict[tuple[int, int, int], str] = {}  # (map, x, y) -> what the game said when it refused
         self.looted: set[tuple[int, tuple[int, int]]] = set()  # (map, ball) we have already tried
 
     # ---- one hop ---------------------------------------------------------------------------
@@ -467,6 +468,51 @@ class LegRunner:
         self.log(f"  it says: {said[:160]}")
         self.rig.emit("supervisor.blocker_engaged", body=[bx, by], said=said[:300])
         return True
+
+    def read_refusal(self, hop: dict | None) -> str:
+        """Step into the refusal and read what the game says about it.
+
+        This is the cheapest measurement in the project and the one this session kept skipping.
+        A failure code is a single token — `refused`, `no-path` — and it discards the sentence
+        the game prints at that exact instant. On Silph the sentence was "Darn! It needs a CARD
+        KEY!" and it took five legs and a hand-written probe to see it, because nothing in the
+        loop ever pressed the direction and looked.
+
+        The text buffer goes stale after boxes close, so reading it without causing the refusal
+        again proves nothing. We press once toward the target: a refused step does not move us,
+        and a step that *does* move is undone.
+        """
+        import road
+
+        mp, x, y = self.rig.pos()
+        if hop is None:
+            return ""
+        try:
+            if hop["via"] == "edge":
+                _cells, direction = road.edge_cells(self.rig.truth, mp, hop["to"])
+            else:
+                dx, dy = hop.get("x", x) - x, hop.get("y", y) - y
+                if abs(dx) >= abs(dy):
+                    direction = "right" if dx > 0 else "left" if dx < 0 else "down"
+                else:
+                    direction = "down" if dy > 0 else "up"
+        except (StopIteration, KeyError):
+            return ""
+        before = self.rig.pos()
+        self.rig.io.press(direction, hold=8, release=8)
+        self.rig.io.wait(40)
+        said = self.rig.dialogue()
+        after = self.rig.pos()
+        if after != before and after[0] == before[0]:  # it was not refused after all: undo
+            opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}[direction]
+            self.rig.io.press(opposite, hold=8, release=8)
+            self.rig.io.wait(40)
+        if said:
+            self.gates[(mp, x, y)] = said
+            self.log(f'  the game says: "{said[:160]}"')
+            self.notes.append(f'stepping {direction} from ({x}, {y}) on map {mp} prints: "{said[:200]}"')
+            self.rig.emit("supervisor.gate_text", map=mp, at=[x, y], direction=direction, said=said[:300])
+        return said
 
     def _reroute_around(self, hop: dict) -> bool:
         """Ban a hop the world has structurally refused and ask the graph for another chain.
@@ -752,6 +798,9 @@ class LegRunner:
             attempt = self.attempts[wall]
             self.log(f"hop failed: {failure} (attempt {attempt}/{LADDER_ATTEMPTS} on {wall})")
             self.rig.emit("supervisor.hop_failed", wall=wall, failure=failure, attempt=attempt)
+            # Look at it before reasoning about it. A refusal that prints a sentence is a
+            # different fact from a silent one, and the sentence is free to obtain.
+            self.read_refusal(hop)
             # Determinism first, in the order the measurements rule things out.
             # 1. One sprite explains the severance -> it is a gate to open, not a missing road.
             #    This must come before any ban: Route 12's north road was banned as impassable
@@ -780,6 +829,15 @@ class LegRunner:
             action, why, model = self.consult(tier, describe(self.rig, self.goal, hop, failure, self.notes), menu)
             self.consults.append({"wall": wall, "tier": tier, "model": model, "action": action, "why": why})
             self.rig.emit("supervisor.consult", wall=wall, tier=tier, model=model, action=action or "", why=why[:300])
+            # A seat's WHY is evidence even when its ACTION does not clear the wall. Tonight the
+            # Point Man named the CARD KEY twice on the first Silph leg and the loop scored both
+            # as failed answers, because only the ACTION was ever read. When two seats keep
+            # explaining the *same* wall, the leg has a diagnosis and should hand it over rather
+            # than spend the rest of the ladder producing it again.
+            if len({c["why"].strip().lower() for c in self.consults if c["wall"] == wall and c["why"]}) == 1:
+                agreeing = [c for c in self.consults if c["wall"] == wall and c["why"]]
+                if len(agreeing) >= 2:
+                    self.notes.append(f"both seats explain {wall} the same way: {agreeing[-1]['why'][:200]}")
             if action is None:
                 self.notes.append(f"the {tier} seat returned no menu action; retrying the hop unchanged")
                 continue  # a non-answer costs the attempt it already cost, and nothing else
@@ -799,9 +857,12 @@ class LegRunner:
             "pos": [mp, x, y],
             "badges": self.rig.badges(),
             "consults": self.consults,
+            "gates": {f"{m}:{x},{y}": said for (m, x, y), said in self.gates.items()},
             "run_id": self.rig.run_id,
         }
-        self.rig.emit("supervisor.leg_end", **{k: v for k, v in result.items() if k != "consults"})
+        self.rig.emit("supervisor.leg_end", **{k: v for k, v in result.items() if k not in ("consults", "gates")})
+        for where, said in self.gates.items():
+            self.log(f'  GATE {where}: "{said[:120]}"')
         self.log(f"LEG {outcome}: {reason} — at {(mp, x, y)}, badges 0b{self.rig.badges():08b}")
         return result
 
