@@ -89,16 +89,58 @@ exactly one pickup, and two trainers four tiles away were "unreachable".
 (16,10)->208 (dead), and **(20,0)->236** — and `rt.route` picked 207 every single time, so 236
 has never been entered. That is the open lead, and it is a lookup rather than a guess.
 
+## The lift tour — every floor visited, still no key
+
+A lift car is not a hop in the connection graph (`rt.route` correctly reports no path out of
+map 236), because it is a **control panel**, and the panel is a **sign, not an NPC** — Silph's
+at (3,0), the Rocket Hideout's at (1,1). That is why talking to bodies never found it. The
+floor list scrolls like the ITEM list (`0xCC26` cursor inside a three-row window, `0xCC36`
+scroll), and menus render to the **window** tilemap, never the background.
+
+`supervisor.py lift-tour` rode all ten floors. The floor-to-map mapping, read off the panel:
+
+| 2F | 3F | 4F | 5F | 6F | 7F | 8F | 9F | 10F | 11F |
+|---|---|---|---|---|---|---|---|---|---|
+| 207 | 208 | 209 | 210 | 211 | 212 | 213 | 233 | 234 | **235** |
+
+**Map 234 is 10F, not the top floor** — an earlier note in this file assumed otherwise. 11F is
+map 235, and it is **tileset 16**, not 22.
+
+Roughly 25 Rockets fought across the tour and the walked sweep combined. Total yield: **CALCIUM**
+(7F) and **TM26** (10F). **No CARD KEY, on any floor, in any pocket the lift reaches.**
+
+The lift enters *different* pockets than walking does — riding to 5F lands on map 210 at (20,1)
+where every walked approach arrives at (8,15) — but neither region contains the item balls. Six
+balls were attempted and logged as unreachable: (3,9)/(4,7)/(5,8) on 209 and (2,13)/(4,6)/(21,16)
+on 210. They sit in a *third* region behind card-key doors.
+
+**11F is the sharpest measurement.** The lift drops us at (13,0)→(15,10) inside a pocket of
+**52 cells out of 324**. Giovanni and the Silph president are the two npcs at **(7,5)** and
+**(10,5)**, both outside it, along with two of the floor's three trainers.
+
+Two things worth carrying forward:
+
+1. **Giovanni is `kind: "npc"` in the extraction, not `"trainer"`** — his sprite carries a
+   different text flag — so `engage_trainers` walks straight past him. A floor clear that only
+   fights `kind == "trainer"` will never fight a boss.
+2. **The teleport pads are the one mechanism never tried.** 2F's own trainer says it: *"Diamond
+   shaped tiles are teleport blocks!"* They are intra-map warps (`dst == this map`) on the
+   tileset-22 floors, and `road.walk(avoid_warps=True)` blocks every one of them by design. The
+   oracle can ride them — that is exactly how Rocket Hideout B4 fell — but nothing has yet
+   *aimed* it at a pad. That is the next thing to try, before assuming the key is unreachable.
+
 ## What the next run needs
 
-1. **Find the CARD KEY on a floor nobody has stood on yet** — 236 first (Silph 1F's untried
-   (20,0) door), then 213, 233, 235. The floors already cleared are exhausted as of this record.
-   Note that neither `walk` nor the oracle can open a card-key door, so a search that begins
-   inside a locked pocket stays in it: getting onto a *new floor* is the only move that changes
-   the reachable set.
-2. **Top floor → Giovanni.** Expect the gym guard at (34,4) to stand down once Silph falls; that
+1. **Ride the teleport pads.** Every floor has been visited and every reachable trainer fought;
+   the pads are the only untried way between pockets. Aim `oracle_goto` at a pad tile (an
+   intra-map warp, `dst == this map`) rather than at a destination cell, and let the game decide
+   where it puts you. `road.walk` will never do this — `avoid_warps` exists precisely to stop it.
+2. **Fight the boss as an npc.** On 11F (map 235) the two npcs at (7,5) and (10,5) are Giovanni
+   and the president. Whatever reaches them has to engage `kind: "npc"` sprites, which the
+   current `--clear-floor` does not.
+3. **Then Giovanni → Silph falls.** Expect the gym guard at (34,4) to stand down once Silph falls; that
    is the hypothesis this leg leaves behind, not a fact — verify it by walking back to (34,3).
-3. **Then badges 7 and 8 are blocked on SURF**, which does not exist in `scripts/` in any form
+4. **Then badges 7 and 8 are blocked on SURF**, which does not exist in `scripts/` in any form
    (only field-Cut, `road.cut_facing`). Cinnabar (map 8) connects only north→32 and east→31,
    both water. Surf and Strength come from the Safari Zone in Fuchsia. Build field-HM support in
    the engine, with tests, before planning either leg.
