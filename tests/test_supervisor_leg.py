@@ -976,3 +976,9 @@ def test_a_body_that_hands_something_over_is_reported_loudly(tmp_path):
     runner.engage_bodies(("npc",))
     assert any("gave us" in n and "CARD KEY" in n for n in runner.notes)
     assert any(e["event"] == "supervisor.body_engaged" and e["gained"] for e in rig.events)
+
+
+@pytest.mark.parametrize("cmd", ["explore", "survey", "lift-tour"])
+def test_the_measurement_subcommands_are_registered(cmd):
+    with pytest.raises(SystemExit):
+        supervisor.main([cmd, "--help"])

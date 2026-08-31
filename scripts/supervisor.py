@@ -886,6 +886,84 @@ def parse_goals(text: str) -> list[int]:
     return [int(part) for part in str(text).replace(" ", "").split(",") if part]
 
 
+def cmd_explore(args) -> int:
+    """Walk the frontier: survey every pocket reachable from here, merging what each one teaches.
+
+    A static pocket model is only as good as its gate coverage, and gates only exist where
+    somebody has walked. Silph's 233 looked like one 234-cell pocket because its eight measured
+    gates all came from the one pocket the lift reaches — so a route planned through it died on
+    the first hop into ground nobody had surveyed. The fix is not a better guess, it is coverage:
+    enter a pocket, survey it, fold its gates into `references/measured_gates.json`, and push
+    every exit it actually has onto the frontier.
+
+    This is a *discovery* pass. Backtracking is done by reloading a snapshot, so items picked up
+    and fights won on an abandoned branch do not persist — the output is the map, and a normal
+    leg walks it afterwards with the corrected model.
+    """
+    import io as _io
+
+    import rom_truth as rt
+    from expedition_rig import Rig
+
+    rig = Rig(args.state, live_label=args.live_label)
+    started = time.monotonic()
+    origin = _io.BytesIO()
+    rig.pb.save_state(origin)
+    frontier = [(origin, "start")]
+    visited: set[tuple] = set()
+    found: list[dict] = []
+    while frontier and time.monotonic() - started < args.budget and len(visited) < args.max_pockets:
+        snap, label = frontier.pop()
+        snap.seek(0)
+        rig.pb.load_state(snap)
+        where = rig.settled_pos()
+        print(f"\n=== pocket via {label}: map {where[0]} at {where[1:]} ===", flush=True)
+        survey = rig.survey_pocket(max_cells=args.max_cells)
+        signature = (survey["map"], min(survey["cells"]) if survey["cells"] else where[1:])
+        if signature in visited:
+            print("  already surveyed this pocket", flush=True)
+            continue
+        visited.add(signature)
+        if survey["doors"]:
+            rt.merge_measured_gates({survey["map"]: survey["doors"]})
+        cells = {tuple(c) for c in survey["cells"]}
+        sprites = rig.truth["maps"].get(str(survey["map"]), {}).get("sprites", [])
+        here = {
+            "map": survey["map"],
+            "anchor": list(signature[1]),
+            "cells": len(cells),
+            "gates": len(survey["doors"]),
+            "balls": [[s["x"], s["y"]] for s in sprites if s["kind"] == "item" and (s["x"], s["y"]) in cells],
+            "npcs": [[s["x"], s["y"]] for s in sprites if s["kind"] == "npc" and (s["x"], s["y"]) in cells],
+            "trainers": [[s["x"], s["y"]] for s in sprites if s["kind"] == "trainer" and (s["x"], s["y"]) in cells],
+            "exits": survey["exits"],
+        }
+        found.append(here)
+        print(f"  {here['cells']} cells, {here['gates']} gates, balls={here['balls']} npcs={here['npcs']}", flush=True)
+        rig.emit("supervisor.pocket_explored", **{k: v for k, v in here.items() if k != "exits"})
+        for step, dest in survey["exits"].items():
+            x, y, direction = step.split(",")
+            branch = _io.BytesIO()
+            snap.seek(0)
+            rig.pb.load_state(snap)
+            if rig.approach({(int(x), int(y))}):
+                rig.io.press(direction, hold=8, release=8)
+                rig.io.wait(60)
+                if rig.settled_pos()[0] == dest:
+                    rig.pb.save_state(branch)
+                    frontier.append((branch, f"{survey['map']} {step} -> {dest}"))
+    origin.seek(0)
+    rig.pb.load_state(origin)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(found, indent=2) + "\n")
+        print(f"\nwrote {out}", flush=True)
+    print(json.dumps({"pockets": len(found), "frontier_left": len(frontier)}))
+    rig.finish(outcome="explore")
+    return 0
+
+
 def cmd_survey(args) -> int:
     """Measure a pocket's true shape and write down every wall that talks.
 
@@ -1057,6 +1135,13 @@ def main(argv: list[str] | None = None) -> int:
     ce.add_argument("--harness-death", type=int, default=0)
     ce.add_argument("--load-ok", type=int, default=1)
     ce.add_argument("--lane-log", type=Path, action="append", default=[])
+    ex = sub.add_parser("explore", help="survey every pocket reachable from here, merging what each teaches")
+    ex.add_argument("--state", required=True)
+    ex.add_argument("--budget", type=float, default=3600.0)
+    ex.add_argument("--max-pockets", type=int, default=30)
+    ex.add_argument("--max-cells", type=int, default=400)
+    ex.add_argument("--out", default=None)
+    ex.add_argument("--live-label", default=None)
     sv = sub.add_parser("survey", help="measure a pocket by attempted steps and record every wall that talks")
     sv.add_argument("--state", required=True)
     sv.add_argument("--max-cells", type=int, default=400)
@@ -1077,6 +1162,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lift_tour(args)
     if args.cmd == "survey":
         return cmd_survey(args)
+    if args.cmd == "explore":
+        return cmd_explore(args)
     if args.cmd == "replay":
         springs: Counter = Counter()
         for p in args.logs:

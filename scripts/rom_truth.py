@@ -565,6 +565,107 @@ def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict
     return attach_measured_gates(truth)
 
 
+def pockets(truth: dict, map_id: int) -> list[set[tuple[int, int]]]:
+    """A map's walkable regions once the measured gates are honoured.
+
+    The engine's unit of place is the map, and inside a gated building that is one level too
+    coarse: with 36 card-key doors closed, "map 209" names five disconnected places, and every
+    primitive keyed on a map id — routing, banning, batons, goals — is quietly talking about the
+    wrong thing. A pocket is the honest unit.
+    """
+    from collections import deque
+
+    m = truth["maps"].get(str(map_id))
+    if not m:
+        return []
+    pairs = loaded_pairs(truth)
+    w, h = m["width"], m["height"]
+    open_cells = {(x, y) for y in range(h) for x in range(w) if m["grid"][y][x] == "1"}
+    out: list[set[tuple[int, int]]] = []
+    while open_cells:
+        start = min(open_cells)
+        seen, queue = {start}, deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (nx, ny) in open_cells and (nx, ny) not in seen and passable(m, pairs, x, y, nx, ny):
+                    seen.add((nx, ny))
+                    queue.append((nx, ny))
+        out.append(seen)
+        open_cells -= seen
+    return out
+
+
+def pocket_of(truth: dict, map_id: int, cell) -> int | None:
+    """Which pocket index a cell belongs to — the place-id the map id was standing in for."""
+    for i, pocket in enumerate(pockets(truth, map_id)):
+        if tuple(cell) in pocket:
+            return i
+    return None
+
+
+def pocket_exits(truth: dict, map_id: int, index: int) -> list[dict]:
+    """Every warp reachable *from this pocket*, resolved to where it actually lands.
+
+    A warp's destination is a map in the extraction and a *pocket* in the world. Resolving that
+    is what turns 51 loose landings into a graph you can walk.
+    """
+    pocket = pockets(truth, map_id)
+    if index >= len(pocket):
+        return []
+    cells = pocket[index]
+    out = []
+    for wx, wy, dst, dwarp in truth["maps"][str(map_id)]["warps"]:
+        if (wx, wy) not in cells or dst == LAST_MAP or str(dst) not in truth["maps"]:
+            continue
+        dwarps = truth["maps"][str(dst)]["warps"]
+        land = (dwarps[dwarp][0], dwarps[dwarp][1]) if dwarp < len(dwarps) else None
+        out.append(
+            {
+                "from": [wx, wy],
+                "to_map": dst,
+                "land": list(land) if land else None,
+                "to_pocket": pocket_of(truth, dst, land) if land else None,
+            }
+        )
+    return out
+
+
+def route_pockets(truth: dict, src: tuple[int, int], dst: tuple[int, int]) -> list[dict] | None:
+    """A hop chain between *pockets*, which is the unit a gated building is actually made of.
+
+    ``route`` plans over map ids. Inside Silph that is the wrong granularity and it is why a
+    whole session failed to find Giovanni: with the card-key doors closed the eleven floors are
+    twenty-eight pockets, and the eleventh floor's boss sits in one that map-level routing has no
+    way to distinguish from the pocket the lift drops you in.
+    """
+    from collections import deque
+
+    if src == dst:
+        return []
+    seen, parents, queue = {src}, {}, deque([src])
+    while queue:
+        node = queue.popleft()
+        for exit_ in pocket_exits(truth, node[0], node[1]):
+            if exit_["to_pocket"] is None:
+                continue
+            nxt = (exit_["to_map"], exit_["to_pocket"])
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            parents[nxt] = (node, exit_)
+            if nxt == dst:
+                chain = []
+                cur = dst
+                while cur != src:
+                    prev, hop = parents[cur]
+                    chain.append({"from_map": prev[0], "from_pocket": prev[1], **hop})
+                    cur = prev
+                return list(reversed(chain))
+            queue.append(nxt)
+    return None
+
+
 def route(truth: dict, src: int, dst: int, banned: set[tuple[int, int]] | None = None) -> list[dict] | None:
     """BFS over the map graph: warps (LAST_MAP mats are the return leg of the warp that entered,
     so only forward, non-LAST_MAP warps make edges) plus edge connections. Returns the hop list
