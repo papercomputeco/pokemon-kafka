@@ -254,3 +254,11 @@ def test_make_room_still_refuses_a_bag_of_only_key_items(tmp_path):
     r = _bag_rig([(74, 1), (72, 1)], items={"74": "LIFT KEY", "72": "SILPH SCOPE"})
     r.telemetry_root = tmp_path
     assert r.make_room() is False
+
+
+def test_text_from_returns_only_what_the_action_produced():
+    r = rig.Rig.__new__(rig.Rig)
+    state = {"text": "AAAAAAA got 750 for winning!"}
+    r.dialogue = lambda: state["text"]
+    assert r.text_from(lambda: None) == ""  # a sticky buffer is not this action's message
+    assert r.text_from(lambda: state.update(text="Darn! It needs a CARD KEY!")) == "Darn! It needs a CARD KEY!"

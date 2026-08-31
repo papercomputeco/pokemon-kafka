@@ -499,12 +499,12 @@ class LegRunner:
         except (StopIteration, KeyError):
             return ""
         before = self.rig.pos()
-        baseline = self.rig.dialogue()  # the buffer is stale after a box closes; only a CHANGE is ours
-        self.rig.io.press(direction, hold=8, release=8)
-        self.rig.io.wait(40)
-        said = self.rig.dialogue()
-        if said == baseline:
-            said = ""
+
+        def step():
+            self.rig.io.press(direction, hold=8, release=8)
+            self.rig.io.wait(40)
+
+        said = self.rig.text_from(step)  # only text this step produced; the buffer is sticky
         after = self.rig.pos()
         if after != before and after[0] == before[0]:  # it was not refused after all: undo
             opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}[direction]

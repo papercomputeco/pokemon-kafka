@@ -120,6 +120,12 @@ class FakeRig:
         self.calls.append(("talk", face))
         return self.said
 
+    def text_from(self, action):
+        baseline = self.dialogue()
+        action()
+        said = self.dialogue()
+        return "" if said == baseline else said
+
     def press(self, button, hold=8, release=8):
         # `self.io is self`, so the refusal probe presses land here. A plain rig does not move.
         self.calls.append(("press", button))

@@ -399,6 +399,20 @@ class Rig:
                 return True
         return False
 
+    def text_from(self, action) -> str:
+        """Run ``action`` and return only text that appeared *because of it*.
+
+        Every screen-derived signal here is sticky — the dialogue buffer, the window tilemap and
+        the text-id register all keep their last contents until something overwrites them, and
+        none is cleared when a box closes. Reading one raw is how 54 ordinary walls came to be
+        labelled doors, all quoting a battle three minutes old. Routing every read through this
+        makes "what did that do?" the only question anyone can ask of the screen.
+        """
+        baseline = self.dialogue()
+        action()
+        said = self.dialogue()
+        return "" if said == baseline else said
+
     def flush_text(self, tries: int = 6) -> bool:
         """Close whatever box is on screen, so the next message is unambiguously the next message.
 
@@ -838,9 +852,21 @@ class Rig:
                 print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
         path = (directory or BATON_DIR) / f"{name}.state"
         path.parent.mkdir(parents=True, exist_ok=True)
+        expected = self.settled_pos()
         with path.open("wb") as fh:
             self.pb.save_state(fh)
-        print(f"  banked {path.name} at {self.pos()}", flush=True)
+        # Read it back. Three batons this session were unusable — one banked mid-dialogue, one
+        # standing on a warp mat, one mid-transition reporting a tile its map does not have — and
+        # each was discovered a leg later by a run that had already spent its budget booting it.
+        # A baton nobody can boot is not a baton, and the check costs one load.
+        with path.open("rb") as fh:
+            self.pb.load_state(fh)
+        got = self.settled_pos()
+        if got != expected:
+            print(f"  WARNING: {path.name} reloads as {got}, not {expected} — do not trust it", flush=True)
+            self.emit("baton.unstable", name=name, expected=list(expected), got=list(got))
+        else:
+            print(f"  banked {path.name} at {expected}", flush=True)
         return path
 
     def shot(self, path: str | Path) -> Path:
