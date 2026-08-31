@@ -337,8 +337,8 @@ class TapesConsult:
     parameter a caller can casually redirect, it is the crew module's constant.
     """
 
-    def __init__(self, *, timeout: float = 120.0, log=print) -> None:
-        self.timeout = timeout
+    def __init__(self, *, timeout: float | None = None, log=print) -> None:
+        self.timeout = timeout  # None = each seat is waited for as long as its budget needs
         self.log = log
 
     def __call__(self, tier: str, facts: str, menu: list[str]) -> tuple[str | None, str, str]:
@@ -354,7 +354,8 @@ class TapesConsult:
             crew.TAPES_CHAT_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            wait = self.timeout if self.timeout is not None else crew.answer_timeout(tier)
+            with urllib.request.urlopen(req, timeout=wait) as resp:
                 payload = json.loads(resp.read())
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             self.log(f"  consult FAILED ({seat['title']}, {seat['model']}): {exc}")
@@ -667,7 +668,11 @@ class LegRunner:
             #    a road the world does not have.
             if hop is not None and failure in ("no-path", "body-blocked") and self._clear_blocker(hop):
                 continue
-            if hop is not None and failure == "no-path" and (cur, hop["to"]) in self.gated:
+            # 3. A door that will not open is as structural as a severed grid. Silph 1F's
+            #    (16,10) pad is dead, and the floor has two other ways up — (26,0) and (20,0).
+            #    Routing around it is a lookup; the crew spent a whole ladder on it instead.
+            structural = failure == "warp-dead" or (failure == "no-path" and (cur, hop["to"]) in self.gated)
+            if hop is not None and structural:
                 if self._reroute_around(hop):
                     continue
             if attempt > LADDER_ATTEMPTS:

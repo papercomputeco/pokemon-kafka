@@ -167,3 +167,9 @@ def test_the_puzzle_seat_gets_the_budget_its_thinking_actually_costs():
 
 def test_an_unknown_tier_still_gets_a_usable_budget():
     assert crew.answer_tokens("interpretive-dance") == crew.answer_tokens("navigation")
+
+
+def test_the_wait_scales_with_the_seats_budget():
+    """Raising the Extractor's tokens without its timeout only changed how it failed."""
+    assert crew.answer_timeout("puzzle") > crew.answer_timeout("navigation")
+    assert crew.answer_timeout("interpretive-dance") == crew.answer_timeout("navigation")

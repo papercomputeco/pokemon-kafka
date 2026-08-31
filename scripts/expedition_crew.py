@@ -23,14 +23,16 @@ from typing import Any
 
 # Seats, and the measured evidence behind each (README "The model crew").
 CREW: dict[str, dict] = {
-    "battle": {"title": "The Wheelman", "model": "laguna-xs-128k", "tokens": 1600},
-    "navigation": {"title": "The Point Man", "model": "qwen38-27b-128k", "tokens": 1600},
-    # The Extractor thinks in a different weight class, and its budget is measured, not guessed:
-    # on one bounded-choice prompt it spent 6,286 reasoning tokens and truncated with no answer
-    # at a 1,600 cap, then spent 11,635 and returned a correct ACTION line at 6,000. Seven
-    # NO-ANSWERs across two legs were this and nothing else. Puzzle is the tier we escalate TO;
-    # starving it is how a ladder ends in silence.
-    "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud", "tokens": 8000},
+    "battle": {"title": "The Wheelman", "model": "laguna-xs-128k", "tokens": 1600, "timeout": 180},
+    "navigation": {"title": "The Point Man", "model": "qwen38-27b-128k", "tokens": 1600, "timeout": 180},
+    # The Extractor thinks in a different weight class, and both of its numbers are measured
+    # rather than guessed. On one bounded-choice prompt it spent 6,286 reasoning tokens and
+    # truncated with no answer at a 1,600 cap, then spent 11,635 and returned a correct ACTION
+    # line at 6,000; seven NO-ANSWERs across two legs were that and nothing else. The wall clock
+    # has to move with the budget: raising it to 8,000 tokens while leaving a 120s timeout only
+    # changed how the seat failed, from "truncated" to "timed out", twice, on the very next leg.
+    # Puzzle is the tier we escalate TO — starving it either way is how a ladder ends in silence.
+    "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud", "tokens": 8000, "timeout": 420},
 }
 
 # The tapes capture proxy (~/.tapes/config.toml: provider openai, upstream 11434, listen 42345).
@@ -45,6 +47,7 @@ NAV_ATTEMPTS = 2
 # consultations that were pure truncated chain-of-thought and not one ACTION line — the seats
 # looked exhausted when they had simply never been given room to answer.
 ANSWER_TOKENS = 1600
+ANSWER_TIMEOUT = 180.0  # seconds; the per-seat value in CREW overrides this
 
 # A bare menu word is only trusted this near the end of a reply. Mid-thought a model names every
 # option it is weighing ("RETRY_SAME ... doesn't make sense"), so scraping the whole text hands
@@ -67,6 +70,11 @@ def seat_for(tier: str) -> dict:
 def answer_tokens(tier: str) -> int:
     """The seat's token budget — thinking models need room for the answer *after* the thinking."""
     return int(seat_for(tier).get("tokens", ANSWER_TOKENS))
+
+
+def answer_timeout(tier: str) -> float:
+    """How long to wait for that seat. Must scale with its budget, or the budget buys nothing."""
+    return float(seat_for(tier).get("timeout", ANSWER_TIMEOUT))
 
 
 def tier_for_attempt(attempt: int, nav_attempts: int = NAV_ATTEMPTS) -> str:

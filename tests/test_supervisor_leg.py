@@ -629,3 +629,52 @@ def test_the_facility_menu_reaches_the_seat(tmp_path):
     consult = _consult("GIVE_UP")
     LegRunner(rig, goal=208, consult=consult, log=lambda *_: None, learnings_dir=tmp_path).run()
     assert "ORACLE_SEARCH" in consult.seen[0]["menu"]
+
+
+def test_a_dead_door_is_routed_around_rather_than_asked_about(tmp_path):
+    """Silph 1F's (16,10) pad is dead and the floor has two other ways up. A door that will not
+    open is as structural as a severed grid — a lookup, not a question."""
+
+    class DeadDoorRig(FakeRig):
+        def __init__(self):
+            super().__init__(truth=_fork_truth(), start=(1, 5, 5))
+
+        def cross(self, cur, nxt, **kw):
+            self.calls.append(("cross", nxt))
+            if (cur, nxt) == (1, 2):
+                return "warp-dead"
+            self._pos = (nxt, 1, 1)
+            return True
+
+    rig = DeadDoorRig()
+    consult = _consult("GIVE_UP")
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"] and (1, 2) in runner.banned
+    assert consult.seen == []
+
+
+def test_the_consult_waits_as_long_as_the_seat_needs(monkeypatch):
+    import expedition_crew as crew
+
+    waits = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "ACTION: GIVE_UP\nWHY: x"}}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        waits[json.loads(req.data)["model"]] = timeout
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    consult = supervisor.TapesConsult(log=lambda *_: None)
+    consult("navigation", "facts", ["GIVE_UP"])
+    consult("puzzle", "facts", ["GIVE_UP"])
+    assert waits[crew.CREW["puzzle"]["model"]] > waits[crew.CREW["navigation"]["model"]]
