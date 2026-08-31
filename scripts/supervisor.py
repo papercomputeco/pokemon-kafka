@@ -655,22 +655,27 @@ class LegRunner:
         return gained
 
     def engage_trainers(self) -> bool:
-        """Fight every trainer the cartridge lists for this map. The story floors need this.
+        """Fight every trainer the cartridge lists for this map."""
+        return self.engage_bodies(("trainer",))
 
-        ``_engage_until_badge`` watches the BADGES byte, which is right for a gym and useless
-        for a floor like Silph's top, where the fight that matters changes no badge at all. Here
-        the objective is the roster: the extraction names every trainer sprite on the map, so
-        "cleared" means each of them has been walked up to and engaged.
+    def engage_bodies(self, kinds: tuple[str, ...] = ("trainer", "npc")) -> bool:
+        """Go and meet every sprite of these kinds that the cartridge lists for this map.
+
+        Talking is not a lesser version of fighting. Three ways of acquiring a story item are
+        *observed* in this ROM: an item ball, a beaten trainer dropping one (the Rocket Hideout's
+        LIFT KEY), and **an npc simply handing it over** — which is how the POKe FLUTE arrived
+        from Mr Fuji. Only the first two were ever automated, and `kind == "trainer"` is a filter
+        that excludes both Giovanni, whose sprite is an npc, and every npc who might be holding
+        the thing a run is looking for. Silph and Saffron between them hold ~41 never spoken to.
         """
         mp = self.rig.pos()[0]
-        trainers = [
-            (s["x"], s["y"])
-            for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", [])
-            if s["kind"] == "trainer"
+        spots = [
+            (s["x"], s["y"]) for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", []) if s["kind"] in kinds
         ]
-        if not trainers:
-            self.notes.append(f"map {mp} lists no trainers to clear")
+        if not spots:
+            self.notes.append(f"map {mp} lists no {'/'.join(kinds)} to engage")
             return False
+        trainers = spots
         badges_before = self.rig.badges()
         for spot in trainers:
             if spot in self.engaged:
@@ -702,9 +707,15 @@ class LegRunner:
             mp, x, y = self.rig.pos()
             if (x, y) not in adjacent:
                 return False
+        before = self.rig.bag()
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
-        self.log(f"  engaged the trainer at {spot}: {said[:140]}")
-        self.rig.emit("supervisor.trainer_engaged", map=mp, at=list(spot), said=said[:300])
+        gained = [item for item in self.rig.bag() if item not in before]
+        self.log(f"  engaged {spot}: {said[:140]}")
+        if gained:
+            named = [(self.rig.item_name(i), q) for i, q in gained]
+            self.log(f"  *** {spot} HANDED OVER {named} ***")
+            self.notes.append(f"the body at {spot} gave us {named}")
+        self.rig.emit("supervisor.body_engaged", map=mp, at=list(spot), said=said[:300], gained=gained)
         return True
 
     def _engage_until_badge(self) -> bool:

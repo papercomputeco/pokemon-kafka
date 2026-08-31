@@ -62,6 +62,9 @@ class FakeRig:
     def bag(self):
         return list(self._bag)
 
+    def item_name(self, item_id):
+        return {60: "FRESH WATER", 48: "CARD KEY"}.get(item_id, f"#{item_id}")
+
     def collect_item(self, bx, by):
         self.calls.append(("collect", (bx, by)))
         if (bx, by) in self._pickups:
@@ -812,7 +815,7 @@ def test_clearing_a_floor_fights_every_trainer_the_cartridge_lists(tmp_path):
     )
     assert runner.run()["ok"]
     assert runner.engaged == {(1, 9), (10, 2)}  # both trainers, and neither the npc nor the ball
-    assert len([e for e in rig.events if e["event"] == "supervisor.trainer_engaged"]) == 2
+    assert len([e for e in rig.events if e["event"] == "supervisor.body_engaged"]) == 2
 
 
 def test_clearing_a_floor_stops_early_when_a_badge_actually_lands():
@@ -837,7 +840,7 @@ def test_a_floor_with_no_trainers_says_so_rather_than_claiming_a_clear(tmp_path)
         rig, goal=234, clear_floor=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
     )
     runner.run()
-    assert any("lists no trainers" in n for n in runner.notes)
+    assert any("lists no trainer" in n for n in runner.notes)
 
 
 def test_the_lift_tour_is_registered_with_its_own_arguments():
@@ -949,3 +952,27 @@ def test_a_stale_buffer_is_not_mistaken_for_a_door(tmp_path):
     runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
     runner.run()
     assert runner.gates == {}
+
+
+def test_npcs_are_engaged_too_because_that_is_how_story_items_arrive(tmp_path):
+    """Item ball, beaten trainer, and *an npc handing it over* are all observed in this ROM —
+    the POKe FLUTE came from Mr Fuji. Only the first two were ever automated."""
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.engage_bodies(("trainer", "npc")) is True
+    assert runner.engaged == {(1, 9), (10, 2), (9, 15)}  # both trainers AND the npc
+
+
+def test_a_body_that_hands_something_over_is_reported_loudly(tmp_path):
+    rig = FakeRig(start=(234, 8, 8), truth=_top_floor())
+    original = rig.talk
+
+    def talk(face):
+        rig._bag.append((48, 1))  # it gives us something
+        return original(face)
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.engage_bodies(("npc",))
+    assert any("gave us" in n and "CARD KEY" in n for n in runner.notes)
+    assert any(e["event"] == "supervisor.body_engaged" and e["gained"] for e in rig.events)
