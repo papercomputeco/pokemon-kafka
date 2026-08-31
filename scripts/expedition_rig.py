@@ -655,8 +655,8 @@ class Rig:
                     # cannot see. Any text present is recorded as evidence, never as the test.
                     if rt.passable(m, self.pairs, cell[0], cell[1], target[0], target[1]) and target not in bodies:
                         said = self.dialogue()
-                        doors[f"{cell[0]},{cell[1]},{direction}"] = said or "(refused silently)"
-                        log(f'  GATE at {cell} {direction} -> {target}: "{(said or "no message")[:90]}"')
+                        doors[f"{cell[0]},{cell[1]},{direction}"] = said or ""
+                        log(f'  GATE at {cell} {direction} -> {target}   [buffer: "{(said or "")[:70]}"]')
                     continue
                 landed = (now[1], now[2])
                 if landed not in cells:
@@ -667,6 +667,10 @@ class Rig:
             "map": mp,
             "start": [sx, sy],
             "cells": sorted(cells),
+            # ``doors`` maps a refused step to whatever was in the text buffer at the time. The
+            # gate itself is the *key*, established structurally; the value is a hint and is
+            # frequently stale — 207's four gates all "said" a trainer's line from minutes
+            # earlier. Never read a value here as the door's own message.
             "doors": doors,
             "exits": exits,
             "battles": battles,
