@@ -196,6 +196,45 @@ surveyed and swept before the frontier advances. Every piece of that exists — 
 measures a pocket, `sweep_items` empties it, the exits are already in the survey JSON — but
 nothing walks the frontier, so exploration has been me picking doors by hand.
 
+## The pocket model, and the two bugs it took to get right
+
+The engine's unit of place was the **map**. Inside a gated building that is one level too
+coarse: with the doors shut, "map 235" names two disconnected places — the 52-cell pocket the
+lift reaches and the 128-cell one holding Giovanni — and map-level routing cannot tell them
+apart. That, not the card key, is what defeated a whole session. `rom_truth.pockets()`,
+`pocket_of()`, `pocket_exits()` and `route_pockets()` make the pocket first class.
+
+Getting it right took two corrections, both worth keeping:
+
+1. **A static pocket model is only as good as its gate coverage.** The first pocket graph was
+   built from gates measured in one pocket per floor, and the six-hop chain it produced to
+   Giovanni died on its fourth hop, in ground nobody had surveyed. `supervisor.py explore`
+   answers this with coverage rather than a better guess: walk the frontier, survey each pocket
+   entered, merge its gates, push its real exits. It needs `--area` — unbounded, it followed
+   Silph's exits out into Saffron and then Route 7.
+2. **A shut door is shut from both sides.** Gates are recorded from whichever side somebody
+   stood on, and honouring only that direction makes connectivity *asymmetric* — 234 cells
+   reachable from one side of a 233 door, 109 from the other, with `pocket_of` reporting both
+   cells as the same pocket. That is impossible for a flood fill, and it is exactly why the
+   chain broke. `passable` blocks both ends now, which matches the one door measured from both
+   sides (234's (10,8), refused up from (10,9) and down from (10,7)) and errs the safe way:
+   over-blocking costs a route we might have had, under-blocking costs a run.
+
+With 117 measured gates and the symmetric rule, **19 of 43 pockets are reachable** and the model
+*declines* to route to Giovanni rather than proposing a chain that breaks halfway. That is the
+improvement; the earlier route was an artifact.
+
+**The remaining search space, and it is small.** The card key must be in the reachable component,
+because the game is completable without it. What is in there and untried:
+
+- unopened item balls: map **210 p1** (2,13), **210 p2** (21,16), **212 p1** (1,9)
+- npcs never spoken to: map **207 p0** (10,1), **208 p0** (24,8), **213 p0** (4,2), **234 p2** (9,15)
+
+Standing caution: under the conservative rule more coverage means *fewer* provable routes, so a
+false-positive gate silently removes a real path. `survey_pocket` skips cells with a body on
+them, but a wanderer that moved, or a trainer freeze, would still register as a door. If the
+reachable set shrinks as coverage grows, audit the gates before believing the shrinkage.
+
 ## What the next run needs
 
 1. **Build the pocket-graph explorer.** Not another hand-picked door: a frontier walk over
