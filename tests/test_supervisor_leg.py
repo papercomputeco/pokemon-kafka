@@ -557,3 +557,15 @@ def test_gate_doors_tell_a_pass_through_from_a_dead_end_house():
         }
     }
     assert road.gate_doors(truth, 23) == {(10, 15), (11, 15), (10, 21)}  # map 87 is the gate
+
+
+def test_clearing_a_blocker_retires_the_verdicts_reached_while_it_stood(tmp_path):
+    """Route 12 was banned as impassable, and its gate marked tried, on evidence gathered while
+    the blocker still stood there. Clearing it makes both verdicts stale."""
+    rig = BlockedRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.banned.add((1, 2))
+    runner.gated.add((1, 2))
+    runner._clear_blocker({"via": "edge", "to": 2})
+    assert (1, 2) not in runner.banned
+    assert (1, 2) not in runner.gated

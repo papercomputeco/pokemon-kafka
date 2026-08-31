@@ -444,6 +444,11 @@ class LegRunner:
         if (x, y) not in adjacent:
             return False
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        # The world just changed, so every verdict reached about this hop is stale. Route 12 was
+        # banned as impassable on evidence gathered while the blocker still stood, and its gate
+        # was marked "already tried" from an attempt made when the gate door was unreachable.
+        self.gated.discard((mp, hop["to"]))
+        self.banned.discard((mp, hop["to"]))
         self.tried.append(f"engaged the blocking body at {culprit}")
         self.notes.append(f"the body at {culprit} (which alone severs this hop) says: {said[:300]}")
         self.log(f"  it says: {said[:160]}")
