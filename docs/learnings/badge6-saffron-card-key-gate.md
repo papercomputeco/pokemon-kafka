@@ -141,6 +141,28 @@ Two things worth carrying forward:
    for the wrong floor and returns False on Silph, correctly. It is the right tool for exactly
    one place measured so far: **Sabrina's gym, map 178, which has thirty intra-map pads.**
 
+## Why static reachability cannot answer anything inside Silph
+
+The last and most expensive correction of the session. Having found that 11F is reachable from
+three doors and that only map 212's at (5,7) lands in Giovanni's 128-cell region, the whole chain
+was verified with `road.reachable` — **208 → 212 (landing (5,3)) → (5,7) → 235 (3,2) → Giovanni**
+— and every hop checked out. It was then run, and the *first westward step on 208* printed:
+
+> **"Darn! It needs a CARD KEY!"**
+
+`road.reachable` walks the extracted collision grid, and the grid calls a card-key door plain
+walkable floor. So **every static reachability claim made anywhere inside Silph over-reports**,
+including the 343-cell region on 208, the 128-cell region on 235, and the six item balls listed
+earlier as "approach cells reachable". None of those numbers mean what they appear to mean. The
+only trustworthy statement about a Silph pocket is one obtained by stepping into its boundary and
+reading what the game prints.
+
+The tractable next piece of work follows directly: **build the door map by measurement.** For
+each pocket, walk its boundary, attempt each outward step, and record which ones print the CARD
+KEY line. `LegRunner.read_refusal` already captures exactly that sentence and keys it by (map,
+x, y), so a boundary sweep would turn the invisible locks into data the graph can carry. Until
+that exists, no route inside Silph can be planned — only tried.
+
 ## What the next run needs
 
 1. **Ride the teleport pads.** Every floor has been visited and every reachable trainer fought;
