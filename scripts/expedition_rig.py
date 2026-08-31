@@ -160,6 +160,25 @@ class Rig:
     def pos(self) -> tuple[int, int, int]:
         return self.mem[0xD35E], self.mem[0xD362], self.mem[0xD361]
 
+    def settled_pos(self, tries: int = 8) -> tuple[int, int, int]:
+        """A position the world agrees with: stable across ticks, and inside the map's own bounds.
+
+        A map transition writes the new map id before the coordinates catch up, so a raw read
+        taken inside that window names a tile that cannot exist. Measured twice: a leg announced
+        arrival at (234, 17, 11) on a map 16 tiles wide and then banked back on the floor below,
+        and a baton banked at (7, 5, 28) booted as (157, 5, 27).
+        """
+        last = self.pos()
+        for _ in range(tries):
+            m = self.truth["maps"].get(str(last[0]))
+            inside = m is None or (last[1] < m["width"] and last[2] < m["height"])
+            self.io.wait(20)
+            now = self.pos()
+            if now == last and inside:
+                return now
+            last = now
+        return last
+
     def badges(self) -> int:
         return self.mem[ADDR_BADGES]
 
@@ -368,6 +387,11 @@ class Rig:
                     self.battle()
                     landed = self.pos()
                 if goal_test(landed):
+                    # Let the world finish. A warp fired by the settling step changes the map id
+                    # before the coordinates catch up, and returning inside that window reports a
+                    # position that cannot exist — the badge-6 leg announced arrival at
+                    # (234, 17, 11) on a map only 16 tiles wide, then banked back on 209.
+                    self.io.wait(90)
                     return True
                 states += 1
                 if key() not in seen:

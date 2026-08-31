@@ -642,6 +642,10 @@ class LegRunner:
                 return self._finish("budget", f"budget of {self.budget_s:.0f}s spent")
             cur = self.rig.pos()[0]
             if cur == self.goal:
+                # Confirm on a settled read: a torn one across a warp names a tile that cannot
+                # exist, and "arrived" is the one verdict that must never be reported from it.
+                cur = self.rig.settled_pos()[0]
+            if cur == self.goal:
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
@@ -694,7 +698,7 @@ class LegRunner:
         return self._finish("max-hops", f"{self.max_hops} hops without arriving")
 
     def _finish(self, outcome: str, reason: str) -> dict:
-        mp, x, y = self.rig.pos()
+        mp, x, y = self.rig.settled_pos()
         result = {
             "ok": outcome == "arrived",
             "outcome": outcome,

@@ -47,6 +47,9 @@ class FakeRig:
     def bodies(self):
         return set(self._bodies)
 
+    def settled_pos(self):
+        return self._pos
+
     def emit(self, event, **fields):
         self.events.append({"event": event, **fields})
         return {}

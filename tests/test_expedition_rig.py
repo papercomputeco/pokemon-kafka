@@ -117,3 +117,29 @@ def test_the_rig_points_at_this_repos_rom_and_baton_shelf():
     assert rig.ROM_DEFAULT.name == "pokemon_red.gb"
     assert rig.BATON_DIR.parts[-2:] == ("local_runs", "roster-bench")
     assert rig.TELEMETRY_DIR.parts[-2:] == ("telemetry", "game")
+
+
+def test_settled_pos_rejects_a_torn_read_across_a_warp():
+    """(234, 17, 11) on a map 16 tiles wide is the transition window, not a place."""
+    r = _stub_rig(at=(17, 11))
+    r.mem[0xD35E] = 234
+    r.truth = {"maps": {"234": {"width": 16, "height": 18, "warps": []}}}
+    calls = {"n": 0}
+
+    def press(button, hold=8, release=8):  # the transition completes as the world ticks on
+        calls["n"] += 1
+
+    def wait(frames=30):
+        r.mem[0xD362], r.mem[0xD361] = 13, 7
+        r.mem[0xD35E] = 209
+
+    r.io.press, r.io.wait = press, wait
+    r.truth["maps"]["209"] = {"width": 26, "height": 18, "warps": []}
+    assert r.settled_pos() == (209, 13, 7)
+
+
+def test_settled_pos_returns_a_stable_in_bounds_read_unchanged():
+    r = _stub_rig(at=(4, 11))
+    r.truth = {"maps": {"157": {"width": 10, "height": 18, "warps": []}}}
+    r.io.wait = lambda frames=30: None
+    assert r.settled_pos() == (157, 4, 11)
