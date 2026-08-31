@@ -143,3 +143,47 @@ def test_settled_pos_returns_a_stable_in_bounds_read_unchanged():
     r.truth = {"maps": {"157": {"width": 10, "height": 18, "warps": []}}}
     r.io.wait = lambda frames=30: None
     assert r.settled_pos() == (157, 4, 11)
+
+
+def _bag_rig(bag, items=None):
+    r = rig.Rig.__new__(rig.Rig)
+    r.mem = {rig.ADDR_BAG_COUNT: len(bag)}
+    for i, (item, qty) in enumerate(bag):
+        r.mem[rig.ADDR_BAG_ITEMS + 2 * i] = item
+        r.mem[rig.ADDR_BAG_ITEMS + 2 * i + 1] = qty
+    r.truth = {"items": items or {"60": "FRESH WATER", "74": "LIFT KEY", "40": "RARE CANDY"}}
+    r.run_id = "t"
+    r.telemetry_root = None
+    return r
+
+
+def test_the_bag_is_read_as_named_items_not_raw_ids():
+    r = _bag_rig([(74, 1), (60, 6)])
+    assert r.bag_named() == [("LIFT KEY", 1), ("FRESH WATER", 6)]
+    assert r.item_name(999) == "#999"  # TMs live past the name list and keep their id
+
+
+def test_the_bag_is_full_only_at_the_measured_slot_cap():
+    assert _bag_rig([(4, 1)] * (rig.BAG_SLOTS - 1)).bag_full() is False
+    assert _bag_rig([(4, 1)] * rig.BAG_SLOTS).bag_full() is True
+
+
+def test_make_room_tosses_the_largest_stack(monkeypatch, tmp_path):
+    """Quantity is the measured signal: key items are single copies, consumables come in stacks."""
+    r = _bag_rig([(74, 1), (60, 6), (40, 2)])
+    r.telemetry_root = tmp_path
+    tossed = {}
+
+    def toss(item):
+        tossed["item"] = item
+        return True
+
+    r.toss_stack = toss
+    assert r.make_room() is True
+    assert tossed["item"] == 60  # FRESH WATER x6, not the LIFT KEY and not RARE CANDY x2
+
+
+def test_make_room_refuses_when_every_slot_is_a_single_item(tmp_path):
+    r = _bag_rig([(74, 1), (72, 1), (73, 1)])
+    r.telemetry_root = tmp_path
+    assert r.make_room() is False  # nothing here is expendable; say so rather than tossing a key

@@ -198,6 +198,75 @@ class Rig:
         """
         return self.mem[ADDR_BAG_COUNT] >= BAG_SLOTS
 
+    def item_name(self, item_id: int) -> str:
+        """What the cartridge calls this id. TMs/HMs live past the name list and keep their id."""
+        return self.truth.get("items", {}).get(str(item_id), f"#{item_id}")
+
+    def bag_named(self) -> list[tuple[str, int]]:
+        return [(self.item_name(item), qty) for item, qty in self.bag()]
+
+    def toss_stack(self, item_id: int) -> bool:
+        """Free a slot by tossing a whole stack: START -> ITEM -> the slot -> TOSS -> all of it.
+
+        Measured in the Rocket Hideout: tossing a *whole stack* frees the slot, a quantity-1 toss
+        does not — so callers pick a stack, not an item. Every phase is confirmed from RAM, never
+        from timing: the verdict is the bag's slot count dropping.
+        """
+        before = len(self.bag())
+        slot = next((i for i, (item, _q) in enumerate(self.bag()) if item == item_id), None)
+        if slot is None:
+            return False
+        self.ctl.press("start")
+        self.ctl.wait(40)
+        for _ in range(8):  # ITEM sits below POKeMON in the field menu; walk the cursor onto it
+            if self.mem[qm.ADDR_MENU_CUR] == 2:
+                break
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < 2 else "up")
+            self.ctl.wait(15)
+        self.ctl.press("a")
+        self.ctl.wait(50)
+        for _ in range(slot + 24):  # scroll to the slot; the list cursor is its own register
+            if self.mem[qm.ADDR_MENU_CUR] == slot:
+                break
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < slot else "up")
+            self.ctl.wait(15)
+        self.ctl.press("a")
+        self.ctl.wait(50)
+        for _ in range(6):  # the item submenu: USE / TOSS — TOSS is the lower row
+            if self.mem[qm.ADDR_MENU_CUR] == 1:
+                break
+            self.ctl.press("down")
+            self.ctl.wait(15)
+        self.ctl.press("a")
+        self.ctl.wait(50)
+        for _ in range(12):  # quantity picker: up raises it; take the whole stack
+            self.ctl.press("up")
+            self.ctl.wait(12)
+        for _ in range(4):  # confirm, then the "threw away" box
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return len(self.bag()) < before
+
+    def make_room(self) -> bool:
+        """Toss the largest stack so a pickup can land. Returns True if a slot came free.
+
+        Which items are safe to lose is not a judgement this makes from lore: quantity is the
+        measured signal. Key items are single-copy, consumables come in stacks, so the biggest
+        stack is both the most expendable and the one whose loss costs the least.
+        """
+        stacks = [(qty, item) for item, qty in self.bag() if qty > 1]
+        if not stacks:
+            print("  bag is full and holds no stack to toss — every slot is a single item", flush=True)
+            return False
+        qty, item = max(stacks)
+        print(f"  bag full: tossing {qty}x {self.item_name(item)} to free a slot", flush=True)
+        freed = self.toss_stack(item)
+        self.emit("supervisor.tossed", item=self.item_name(item), qty=qty, freed=freed)
+        return freed
+
     def item_balls(self, map_id: int) -> list[tuple[int, int]]:
         """Where this cartridge says the item balls are on a map — extracted, never recalled."""
         sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
@@ -212,8 +281,8 @@ class Rig:
         is confirmed from the bag rather than from anything on screen.
         """
         mp, x, y = self.pos()
-        if self.bag_full():
-            print(f"  bag is full ({BAG_SLOTS} slots) — pickups will be refused", flush=True)
+        if self.bag_full() and not self.make_room():
+            print(f"  bag is full ({BAG_SLOTS} slots) and no slot could be freed", flush=True)
             return False
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:

@@ -240,6 +240,45 @@ TYPE_NAMES = {
 _NAME_CHARS = {0xE1: "Pk", 0xE2: "Mn", 0xEF: "M", 0xF5: "F", 0xE8: "."}
 
 
+_ITEM_CHARS = {0x7F: " ", 0xBA: "e", 0xE1: "Pk", 0xE2: "Mn", 0xE3: "-", 0xE6: "?", 0xE7: "!", 0xE8: "."}
+for _i in range(10):
+    _ITEM_CHARS[0xF6 + _i] = chr(ord("0") + _i)
+
+
+def item_names(rom: bytes, count: int = 250) -> dict[str, str]:
+    """Item id -> name, from the ROM's own 0x50-terminated name list.
+
+    Located by content signature (the list opens with MASTER BALL), never by address — the same
+    rule the species and type tables follow. This is what lets a run say what it is *holding*:
+    the bag is a list of numeric ids, and every previous session that reasoned about those ids
+    did it from recall. The extraction independently reproduces the three that were measured
+    live in the Rocket Hideout — 72 SILPH SCOPE, 73 POKE FLUTE, 74 LIFT KEY — which is the
+    cross-check that says the decode is right.
+
+    Ids past the plain-item list are TMs and HMs, which the ROM stores as a numbered range
+    rather than as names; those come back as ``TM<n>``/``HM<n>``.
+    """
+    base = rom.find(bytes(0x80 + ord(c) - ord("A") if c != " " else 0x7F for c in "MASTER BALL"))
+    if base < 0:
+        return {}  # a synthetic/partial image has no item table; the real-ROM smoke test asserts ours does
+    out: dict[str, str] = {}
+    off = base
+    for iid in range(1, count + 1):
+        name = ""
+        while off < len(rom) and rom[off] != 0x50:
+            byte = rom[off]
+            if 0x80 <= byte <= 0x99:
+                name += chr(ord("A") + byte - 0x80)
+            else:
+                name += _ITEM_CHARS.get(byte, "")
+            off += 1
+        off += 1
+        if not name.strip():
+            break
+        out[str(iid)] = name.strip()
+    return out
+
+
 def species_table(rom: bytes) -> dict[str, dict]:
     """Internal species id -> {name, dex, types, catch_rate}, from the ROM's own three tables:
     the name table (10 bytes/entry, internal order — found by RHYDON at id 1), the internal->dex
@@ -456,6 +495,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "wilds": wild_encounters(rom, {int(k) for k in species}),
         "evolutions": evolutions_table(rom),
         "type_chart": type_chart(rom),
+        "items": item_names(rom),
         "maps": maps,
     }
 

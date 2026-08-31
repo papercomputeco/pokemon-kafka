@@ -66,3 +66,26 @@ def test_intro_reaches_bedroom(rom):
         assert state.money == 3000, f"{rom.name}: money should read 3000, got {state.money}"
     finally:
         pyboy.stop()
+
+
+def test_item_names_come_from_this_cartridge_and_match_what_was_measured_live():
+    """The bag is a list of numeric ids, and every prior session reasoned about them from recall.
+
+    The cross-checks are items whose identity was established *live* in the Rocket Hideout —
+    if the decode were wrong, these would not line up.
+    """
+    import rom_truth as rt
+
+    items = rt.item_names(rt.ROM_DEFAULT.read_bytes())
+    assert items["1"] == "MASTER BALL"
+    assert items["72"] == "SILPH SCOPE"
+    assert items["73"] == "POKe FLUTE"
+    assert items["74"] == "LIFT KEY"
+    assert items["60"] == "FRESH WATER"
+    assert all(name.strip() for name in items.values())
+
+
+def test_the_extracted_truth_carries_the_item_table():
+    import rom_truth as rt
+
+    assert rt.load_truth()["items"]["74"] == "LIFT KEY"
