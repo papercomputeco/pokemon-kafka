@@ -47,6 +47,7 @@ RUNS_DIR = WORKSPACE / "runs"
 VIEWER_WS = "ws://127.0.0.1:8201"
 
 ADDR_BADGES = 0xD356  # game_profile.RED_BLUE.addr_badges
+ADDR_FACING = 0xC109  # the player's facing — part of the state key on any tile-driven floor
 ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
 BATTLE_TURN_CAP = 200  # a battle past this is wedged, not long
 
@@ -305,6 +306,76 @@ class Rig:
             self.ctl.press("b")
             self.ctl.wait(25)
         return " | ".join(pages[-4:])
+
+    # ---- the oracle -------------------------------------------------------------------------
+
+    def oracle_goto(self, goal_test, max_states: int = 500) -> bool:
+        """BFS over press-and-settle transitions, using the game itself as the oracle.
+
+        The mover for floors where planned walking is a category error: spin tiles, teleport
+        pads, ice — anywhere the tile decides where you end up. Rocket Hideout B4 stood against
+        an 880-state position-keyed oracle for weeks and fell in 721 states once **facing**
+        entered the state key, because spin-tile movement reads 0xC109 and a position-only key
+        prunes exactly the hold-arrivals the maze is made of.
+
+        ``goal_test(pos) -> bool`` decides arrival. A failed search never strands the run at a
+        random explored state — the origin is restored.
+        """
+        import io as _io
+        from collections import deque
+
+        def snap():
+            buf = _io.BytesIO()
+            self.pb.save_state(buf)
+            return buf
+
+        def load(buf):
+            buf.seek(0)
+            self.pb.load_state(buf)
+
+        def key():
+            return (*self.pos(), self.mem[ADDR_FACING])
+
+        def press_settle(direction):
+            self.pb.button(direction, delay=8)
+            for _ in range(8):
+                self.pb.tick()
+            last, stable = self.pos(), 0
+            for _ in range(40):
+                for _ in range(10):
+                    self.pb.tick()
+                now = self.pos()
+                if now == last:
+                    stable += 1
+                    if stable >= 3:
+                        break
+                else:
+                    stable, last = 0, now
+            return self.pos()
+
+        if goal_test(self.pos()):
+            return True
+        origin = snap()
+        seen = {key()}
+        queue = deque([(key(), origin)])
+        states = 0
+        while queue and states < max_states:
+            _state, snapshot = queue.popleft()
+            for direction in ("down", "left", "right", "up"):
+                load(snapshot)
+                landed = press_settle(direction)
+                if self.mem[qm.ADDR_IN_BATTLE]:
+                    self.battle()
+                    landed = self.pos()
+                if goal_test(landed):
+                    return True
+                states += 1
+                if key() not in seen:
+                    seen.add(key())
+                    queue.append((key(), snap()))
+        load(origin)
+        self.emit("oracle.exhausted", states=states, keys=len(seen), pos=list(self.pos()))
+        return False
 
     # ---- banking --------------------------------------------------------------------------
 

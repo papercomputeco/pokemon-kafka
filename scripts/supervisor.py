@@ -223,8 +223,15 @@ ACTIONS = (
     "BACK_OUT_AND_REENTER",  # leave by the nearest warp and come back; reloads bodies/scripts
     "WAIT_FOR_BODIES",  # bodies are not walls: wanderers move if you wait
     "TALK_TO_BLOCKER",  # what the blocker SAYS is the finding (guards, story gates)
+    "ORACLE_SEARCH",  # let the game itself be the oracle: facing-keyed press-and-settle BFS
     "GIVE_UP",  # end the leg now; the operator gets the written record
 )
+
+# Tileset 22 is the facility floor set — Rocket Hideout and Silph Co. Its tiles decide where you
+# end up (spin arrows, teleport pads), so a planned walk is a category error there and the oracle
+# is the mover. The tileset is read from the map, never assumed: tile-id meanings measured in one
+# tileset have already been shown not to carry into another.
+FACILITY_TILESET = 22
 
 MENUS: dict[str, tuple[str, ...]] = {
     "no-route": ("BACK_OUT_AND_REENTER", "TALK_TO_BLOCKER", "USE_GATE_WARP", "GIVE_UP"),
@@ -236,11 +243,13 @@ MENUS: dict[str, tuple[str, ...]] = {
 DEFAULT_MENU = ("RETRY_SAME", "TRY_FAR_EDGE_CELL", "USE_GATE_WARP", "BACK_OUT_AND_REENTER", "GIVE_UP")
 
 
-def menu_for(failure: str, *, edge_hop: bool = True) -> list[str]:
+def menu_for(failure: str, *, edge_hop: bool = True, facility: bool = False) -> list[str]:
     """The bounded menu for a measured failure, minus what this hop cannot do."""
     menu = list(MENUS.get(failure, DEFAULT_MENU))
     if not edge_hop:  # a warp hop has no edge cells to aim at
         menu = [m for m in menu if m != "TRY_FAR_EDGE_CELL"]
+    if facility:  # on a tile-driven floor the oracle is a real option, and often the only one
+        menu.insert(0, "ORACLE_SEARCH")
     return menu
 
 
@@ -340,7 +349,7 @@ class TapesConsult:
 
         seat = crew.seat_for(tier)
         prompt = crew.build_prompt(facts, menu)
-        body = json.dumps(crew.chat_body(seat["model"], prompt)).encode()
+        body = json.dumps(crew.chat_body(seat["model"], prompt, crew.answer_tokens(tier))).encode()
         req = urllib.request.Request(
             crew.TAPES_CHAT_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
@@ -540,6 +549,21 @@ class LegRunner:
             self.log(f"  blocker at ({bx}, {by}) says: {said[:160]}")
             self.notes.append(f"the body at ({bx}, {by}) says: {said[:300]}")
             return
+        if action == "ORACLE_SEARCH":
+            if hop is None:
+                self.notes.append("nothing to search toward: there is no routed hop")
+                return
+            target = (
+                {(hop["x"], hop["y"])}
+                if hop["via"] != "edge"
+                else set(road.edge_cells(self.rig.truth, cur, hop["to"])[0])
+            )
+            self.log(f"  oracle search on map {cur} toward {sorted(target)[:6]}")
+            found = self.rig.oracle_goto(lambda p: p[0] != cur or (p[1], p[2]) in target)
+            self.notes.append(
+                f"the facing-keyed oracle {'reached' if found else 'could not reach'} the hop target on map {cur}"
+            )
+            return
         if action == "TRY_FAR_EDGE_CELL":  # warp hop: the menu should not have offered it
             self.notes.append("TRY_FAR_EDGE_CELL is meaningless on a warp hop")
             return
@@ -650,7 +674,8 @@ class LegRunner:
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"
-            menu = menu_for(failure, edge_hop=bool(hop and hop["via"] == "edge"))
+            facility = self.rig.truth["maps"].get(str(cur), {}).get("tileset") == FACILITY_TILESET
+            menu = menu_for(failure, edge_hop=bool(hop and hop["via"] == "edge"), facility=facility)
             action, why, model = self.consult(tier, describe(self.rig, self.goal, hop, failure, self.notes), menu)
             self.consults.append({"wall": wall, "tier": tier, "model": model, "action": action, "why": why})
             self.rig.emit("supervisor.consult", wall=wall, tier=tier, model=model, action=action or "", why=why[:300])

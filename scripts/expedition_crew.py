@@ -22,10 +22,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 # Seats, and the measured evidence behind each (README "The model crew").
-CREW: dict[str, dict[str, str]] = {
-    "battle": {"title": "The Wheelman", "model": "laguna-xs-128k"},
-    "navigation": {"title": "The Point Man", "model": "qwen38-27b-128k"},
-    "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud"},
+CREW: dict[str, dict] = {
+    "battle": {"title": "The Wheelman", "model": "laguna-xs-128k", "tokens": 1600},
+    "navigation": {"title": "The Point Man", "model": "qwen38-27b-128k", "tokens": 1600},
+    # The Extractor thinks in a different weight class, and its budget is measured, not guessed:
+    # on one bounded-choice prompt it spent 6,286 reasoning tokens and truncated with no answer
+    # at a 1,600 cap, then spent 11,635 and returned a correct ACTION line at 6,000. Seven
+    # NO-ANSWERs across two legs were this and nothing else. Puzzle is the tier we escalate TO;
+    # starving it is how a ladder ends in silence.
+    "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud", "tokens": 8000},
 }
 
 # The tapes capture proxy (~/.tapes/config.toml: provider openai, upstream 11434, listen 42345).
@@ -54,9 +59,14 @@ GROUND_TRUTH_PREAMBLE = (
 )
 
 
-def seat_for(tier: str) -> dict[str, str]:
+def seat_for(tier: str) -> dict:
     """The crew seat for a skill tier. Unknown tiers fall back to navigation."""
     return CREW.get(tier, CREW["navigation"])
+
+
+def answer_tokens(tier: str) -> int:
+    """The seat's token budget — thinking models need room for the answer *after* the thinking."""
+    return int(seat_for(tier).get("tokens", ANSWER_TOKENS))
 
 
 def tier_for_attempt(attempt: int, nav_attempts: int = NAV_ATTEMPTS) -> str:

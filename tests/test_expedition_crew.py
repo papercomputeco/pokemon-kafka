@@ -155,3 +155,15 @@ def test_deliberation_that_names_two_options_is_not_a_choice():
 def test_an_explicit_action_line_still_wins_over_the_tail():
     reply = "ACTION: USE_GATE_WARP\nWHY: the gate severs the route\nRETRY_SAME was the alternative"
     assert crew.parse_decision(reply, MENU) == ("USE_GATE_WARP", "the gate severs the route")
+
+
+def test_the_puzzle_seat_gets_the_budget_its_thinking_actually_costs():
+    """Measured on one bounded-choice prompt: 6,286 reasoning tokens and NO answer at a 1,600
+    cap; 11,635 and a correct ACTION line at 6,000. Puzzle is the tier we escalate TO."""
+    assert crew.answer_tokens("puzzle") >= 6000
+    assert crew.answer_tokens("puzzle") > crew.answer_tokens("navigation")
+    assert crew.chat_body("m", "p", crew.answer_tokens("puzzle"))["max_tokens"] == crew.answer_tokens("puzzle")
+
+
+def test_an_unknown_tier_still_gets_a_usable_budget():
+    assert crew.answer_tokens("interpretive-dance") == crew.answer_tokens("navigation")

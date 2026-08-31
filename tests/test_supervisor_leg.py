@@ -569,3 +569,63 @@ def test_clearing_a_blocker_retires_the_verdicts_reached_while_it_stood(tmp_path
     runner._clear_blocker({"via": "edge", "to": 2})
     assert (1, 2) not in runner.banned
     assert (1, 2) not in runner.gated
+
+
+# ------------------------------------------------------------- the facility floors (tileset 22)
+
+
+def test_the_oracle_is_offered_only_on_tile_driven_floors():
+    """Spin arrows and teleport pads live in tileset 22; a route map has nothing to search."""
+    assert "ORACLE_SEARCH" not in menu_for("warp-dead", facility=False)
+    assert menu_for("warp-dead", facility=True)[0] == "ORACLE_SEARCH"
+
+
+class FacilityRig(FakeRig):
+    """A tileset-22 floor whose warp will not fire until the oracle finds the way onto it."""
+
+    def __init__(self):
+        grid = ["1" * 8 for _ in range(8)]
+        truth = {
+            "maps": {
+                "181": {
+                    "width": 8,
+                    "height": 8,
+                    "tileset": 22,
+                    "grid": grid,
+                    "sprites": [],
+                    "warps": [[6, 4, 208, 0]],
+                    "connections": {},
+                },
+                "208": {
+                    "width": 8,
+                    "height": 8,
+                    "tileset": 22,
+                    "grid": grid,
+                    "sprites": [],
+                    "warps": [[0, 0, 181, 0]],
+                    "connections": {},
+                },
+            }
+        }
+        super().__init__(start=(181, 1, 1), truth=truth, hops=[None] * 12)
+        self.oracle_calls = []
+
+    def oracle_goto(self, goal_test, max_states=500):
+        self.oracle_calls.append(max_states)
+        self._pos = (208, 1, 1)  # the oracle found the pad and it fired
+        return True
+
+
+def test_the_oracle_action_runs_the_facing_keyed_search_toward_the_hop_target(tmp_path):
+    rig = FacilityRig()
+    runner = LegRunner(rig, goal=208, consult=_consult("ORACLE_SEARCH"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert rig.oracle_calls, "the oracle was never run on a tileset-22 floor"
+    assert result["ok"] and result["outcome"] == "arrived"
+
+
+def test_the_facility_menu_reaches_the_seat(tmp_path):
+    rig = FacilityRig()
+    consult = _consult("GIVE_UP")
+    LegRunner(rig, goal=208, consult=consult, log=lambda *_: None, learnings_dir=tmp_path).run()
+    assert "ORACLE_SEARCH" in consult.seen[0]["menu"]
