@@ -224,6 +224,7 @@ ACTIONS = (
     "WAIT_FOR_BODIES",  # bodies are not walls: wanderers move if you wait
     "TALK_TO_BLOCKER",  # what the blocker SAYS is the finding (guards, story gates)
     "ORACLE_SEARCH",  # let the game itself be the oracle: facing-keyed press-and-settle BFS
+    "SWEEP_ITEMS",  # a locked door that names its key: the floor's item balls are extracted
     "GIVE_UP",  # end the leg now; the operator gets the written record
 )
 
@@ -243,13 +244,15 @@ MENUS: dict[str, tuple[str, ...]] = {
 DEFAULT_MENU = ("RETRY_SAME", "TRY_FAR_EDGE_CELL", "USE_GATE_WARP", "BACK_OUT_AND_REENTER", "GIVE_UP")
 
 
-def menu_for(failure: str, *, edge_hop: bool = True, facility: bool = False) -> list[str]:
+def menu_for(failure: str, *, edge_hop: bool = True, facility: bool = False, items: bool = False) -> list[str]:
     """The bounded menu for a measured failure, minus what this hop cannot do."""
     menu = list(MENUS.get(failure, DEFAULT_MENU))
     if not edge_hop:  # a warp hop has no edge cells to aim at
         menu = [m for m in menu if m != "TRY_FAR_EDGE_CELL"]
     if facility:  # on a tile-driven floor the oracle is a real option, and often the only one
         menu.insert(0, "ORACLE_SEARCH")
+    if items:  # this floor still has item balls the cartridge listed and we have not opened
+        menu.insert(0, "SWEEP_ITEMS")
     return menu
 
 
@@ -379,6 +382,7 @@ class LegRunner:
         log=print,
         max_hops: int = DEFAULT_MAX_HOPS,
         engage: bool = False,
+        sweep: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
     ) -> None:
@@ -390,6 +394,7 @@ class LegRunner:
         self.log = log
         self.max_hops = max_hops
         self.engage = engage
+        self.sweep = sweep
         self.engage_rounds = engage_rounds
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
@@ -399,6 +404,7 @@ class LegRunner:
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
         self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
+        self.looted: set[tuple[int, tuple[int, int]]] = set()  # (map, ball) we have already tried
 
     # ---- one hop ---------------------------------------------------------------------------
 
@@ -550,6 +556,9 @@ class LegRunner:
             self.log(f"  blocker at ({bx}, {by}) says: {said[:160]}")
             self.notes.append(f"the body at ({bx}, {by}) says: {said[:300]}")
             return
+        if action == "SWEEP_ITEMS":
+            self.sweep_items()
+            return
         if action == "ORACLE_SEARCH":
             if hop is None:
                 self.notes.append("nothing to search toward: there is no routed hop")
@@ -573,6 +582,30 @@ class LegRunner:
         _ = rt  # imported for symmetry with describe(); the actions above use `road`
 
     # ---- the gym engage ---------------------------------------------------------------------
+
+    def sweep_items(self) -> list[tuple[int, int]]:
+        """Collect every item ball the cartridge lists for this map. Returns what the bag gained.
+
+        A locked door whose own NPC names the key it wants (Silph 209's (11,7): "requires a CARD
+        KEY") is not a navigation problem — the key is an object somewhere, and this floor's item
+        balls are extracted, not guessed. Bag growth is the only proof a pickup happened.
+        """
+        mp = self.rig.pos()[0]
+        gained: list[tuple[int, int]] = []
+        for ball in self.rig.item_balls(mp):
+            if (mp, ball) in self.looted:
+                continue
+            self.looted.add((mp, ball))
+            before = self.rig.bag()
+            if not self.rig.collect_item(*ball):
+                continue
+            new = [item for item in self.rig.bag() if item not in before]
+            gained.extend(new)
+            self.log(f"  picked up {new} at {ball} on map {mp}")
+            self.rig.emit("supervisor.item_collected", map=mp, at=list(ball), items=new)
+        if gained:
+            self.notes.append(f"collected {gained} from map {mp}'s item balls")
+        return gained
 
     def _engage_until_badge(self) -> bool:
         """On the goal map, talk bodies down until the BADGES byte changes.
@@ -646,6 +679,8 @@ class LegRunner:
                 # exist, and "arrived" is the one verdict that must never be reported from it.
                 cur = self.rig.settled_pos()[0]
             if cur == self.goal:
+                if self.sweep:
+                    self.sweep_items()
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
@@ -684,7 +719,10 @@ class LegRunner:
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"
             facility = self.rig.truth["maps"].get(str(cur), {}).get("tileset") == FACILITY_TILESET
-            menu = menu_for(failure, edge_hop=bool(hop and hop["via"] == "edge"), facility=facility)
+            unlooted = [b for b in self.rig.item_balls(cur) if (cur, b) not in self.looted]
+            menu = menu_for(
+                failure, edge_hop=bool(hop and hop["via"] == "edge"), facility=facility, items=bool(unlooted)
+            )
             action, why, model = self.consult(tier, describe(self.rig, self.goal, hop, failure, self.notes), menu)
             self.consults.append({"wall": wall, "tier": tier, "model": model, "action": action, "why": why})
             self.rig.emit("supervisor.consult", wall=wall, tier=tier, model=model, action=action or "", why=why[:300])
@@ -748,6 +786,7 @@ def cmd_run(args) -> int:
             # Engaging is what turns arrival into a badge, so it belongs to the last goal only:
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
             engage=args.engage and index == len(goals),
+            sweep=args.sweep_items,
             consult=consult,
         )
         try:
@@ -776,6 +815,9 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--bank", default=None, help="bank the end state under this name")
     rn.add_argument("--live-label", default=None, help="stream to the viewer under this label")
     rn.add_argument("--engage", action="store_true", help="on arrival, engage bodies until the BADGES byte changes")
+    rn.add_argument(
+        "--sweep-items", action="store_true", help="on arrival, open every item ball the cartridge lists for the map"
+    )
     rn.add_argument("--no-consult", action="store_true", help="deterministic only — never call a model")
     ce = sub.add_parser("classify-exit", help="decide resume/continue/next/retry/escalate after an operator exit")
     ce.add_argument("--state", type=Path, required=True)

@@ -30,6 +30,8 @@ class FakeRig:
         self.events: list[dict] = []
         self.io = self
         self.said = "MOVE ASIDE!"
+        self._bag: list = []
+        self._pickups: dict = {}
 
     # reads
     def pos(self):
@@ -49,6 +51,23 @@ class FakeRig:
 
     def settled_pos(self):
         return self._pos
+
+    def item_balls(self, map_id):
+        return [
+            (s["x"], s["y"])
+            for s in self.truth["maps"].get(str(map_id), {}).get("sprites", [])
+            if s.get("kind") == "item"
+        ]
+
+    def bag(self):
+        return list(self._bag)
+
+    def collect_item(self, bx, by):
+        self.calls.append(("collect", (bx, by)))
+        if (bx, by) in self._pickups:
+            self._bag.append(self._pickups[(bx, by)])
+            return True
+        return False
 
     def emit(self, event, **fields):
         self.events.append({"event": event, **fields})
@@ -681,3 +700,69 @@ def test_the_consult_waits_as_long_as_the_seat_needs(monkeypatch):
     consult("navigation", "facts", ["GIVE_UP"])
     consult("puzzle", "facts", ["GIVE_UP"])
     assert waits[crew.CREW["puzzle"]["model"]] > waits[crew.CREW["navigation"]["model"]]
+
+
+# ------------------------------------------------------------------- the floor's own item balls
+
+
+def _floor_with_balls():
+    grid = ["1" * 8 for _ in range(8)]
+    return {
+        "maps": {
+            "209": {
+                "width": 8,
+                "height": 8,
+                "tileset": 22,
+                "grid": grid,
+                "warps": [[6, 6, 234, 0]],
+                "connections": {},
+                "sprites": [
+                    {"kind": "item", "x": 3, "y": 4},
+                    {"kind": "item", "x": 5, "y": 2},
+                    {"kind": "trainer", "x": 1, "y": 1},
+                ],
+            },
+            "234": {
+                "width": 8,
+                "height": 8,
+                "tileset": 22,
+                "grid": grid,
+                "warps": [],
+                "connections": {},
+                "sprites": [],
+            },
+        }
+    }
+
+
+def test_the_sweep_opens_every_ball_the_cartridge_lists_and_reports_the_bag(tmp_path):
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())
+    rig._pickups = {(3, 4): (48, 1), (5, 2): (20, 3)}
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    gained = runner.sweep_items()
+    assert sorted(gained) == [(20, 3), (48, 1)]
+    assert sorted(c[1] for c in rig.calls if c[0] == "collect") == [(3, 4), (5, 2)]
+    assert any(e["event"] == "supervisor.item_collected" for e in rig.events)
+
+
+def test_a_ball_is_only_tried_once_per_leg(tmp_path):
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.sweep_items()
+    runner.sweep_items()
+    assert len([c for c in rig.calls if c[0] == "collect"]) == 2  # two balls, not four
+
+
+def test_the_sweep_is_offered_only_where_unopened_balls_remain():
+    assert "SWEEP_ITEMS" not in menu_for("warp-dead", items=False)
+    assert menu_for("warp-dead", items=True)[0] == "SWEEP_ITEMS"
+
+
+def test_arriving_with_sweep_on_opens_the_floor(tmp_path):
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())
+    rig._pickups = {(3, 4): (48, 1)}
+    runner = LegRunner(
+        rig, goal=209, sweep=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    assert runner.run()["ok"]
+    assert rig.bag() == [(48, 1)]

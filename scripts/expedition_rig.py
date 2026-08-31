@@ -49,6 +49,8 @@ VIEWER_WS = "ws://127.0.0.1:8201"
 ADDR_BADGES = 0xD356  # game_profile.RED_BLUE.addr_badges
 ADDR_FACING = 0xC109  # the player's facing — part of the state key on any tile-driven floor
 ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
+ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E  # quartermaster's, verified live in the mart probe
+BAG_SLOTS = 20  # a full bag refuses pickups silently (measured in the Rocket Hideout)
 BATTLE_TURN_CAP = 200  # a battle past this is wedged, not long
 
 
@@ -181,6 +183,57 @@ class Rig:
 
     def badges(self) -> int:
         return self.mem[ADDR_BADGES]
+
+    def bag(self) -> list[tuple[int, int]]:
+        """The bag as (item id, quantity) pairs — the only honest proof a pickup happened."""
+        count = self.mem[ADDR_BAG_COUNT]
+        return [(self.mem[ADDR_BAG_ITEMS + 2 * i], self.mem[ADDR_BAG_ITEMS + 2 * i + 1]) for i in range(count)]
+
+    def bag_full(self) -> bool:
+        """The bag caps at 20 slots, and a full bag silently refuses pickups.
+
+        Measured in the Rocket Hideout: tossing a whole stack frees a slot, a quantity-1 toss
+        does not. A sweep that does not check this reports "collected nothing" and looks like a
+        map problem.
+        """
+        return self.mem[ADDR_BAG_COUNT] >= BAG_SLOTS
+
+    def item_balls(self, map_id: int) -> list[tuple[int, int]]:
+        """Where this cartridge says the item balls are on a map — extracted, never recalled."""
+        sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
+        return [(s["x"], s["y"]) for s in sprites if s.get("kind") == "item"]
+
+    def collect_item(self, bx: int, by: int) -> bool:
+        """Pick up one item ball: stand beside it, face it, press A. Bag growth is the verdict.
+
+        Item-ball sprites can be invisible and walk-through-able — the Rocket Hideout's LIFT KEY
+        was listed in the live sprite table the whole time while the engine let us walk over its
+        tile. So the approach is a cell *beside* the ball, never the ball itself, and the pickup
+        is confirmed from the bag rather than from anything on screen.
+        """
+        mp, x, y = self.pos()
+        if self.bag_full():
+            print(f"  bag is full ({BAG_SLOTS} slots) — pickups will be refused", flush=True)
+            return False
+        adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
+        if (x, y) not in adjacent:
+            near = road.reachable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
+            if not near:
+                return False
+            self.walk(mp, near, cap=400)
+            mp, x, y = self.pos()
+            if (x, y) not in adjacent:
+                return False
+        before = self.bag()
+        self.ctl.press("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        self.ctl.wait(25)
+        for _ in range(4):
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        for _ in range(3):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        return self.bag() != before
 
     def party(self) -> list[tuple[str, int, int]]:
         from memory_reader import SPECIES_ID_MAP
