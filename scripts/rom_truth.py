@@ -471,11 +471,20 @@ def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict
     return truth
 
 
-def route(truth: dict, src: int, dst: int) -> list[dict] | None:
+def route(truth: dict, src: int, dst: int, banned: set[tuple[int, int]] | None = None) -> list[dict] | None:
     """BFS over the map graph: warps (LAST_MAP mats are the return leg of the warp that entered,
     so only forward, non-LAST_MAP warps make edges) plus edge connections. Returns the hop list
-    — each hop names the mechanism and the tile to use — or ``None`` if unreachable."""
+    — each hop names the mechanism and the tile to use — or ``None`` if unreachable.
+
+    ``banned`` drops ``(from, to)`` hops from the graph. The connection table is undirected but
+    the world is not: Cycling Road (map 28, 20x144) carries only *down* ledges — the extracted
+    ledge set has no upward hop anywhere in the cartridge — so the chain
+    ``7 -> 29 -> 28 -> 27 -> 6`` is a perfectly good graph path that a player cannot walk north.
+    A caller that measures a hop as structurally impossible bans it and asks again, rather than
+    re-attempting a chain the world has already refused.
+    """
     maps = truth["maps"]
+    banned = banned or set()
     if str(src) not in maps or str(dst) not in maps:
         return None
     frontier, seen, parents = [src], {src}, {}
@@ -484,17 +493,17 @@ def route(truth: dict, src: int, dst: int) -> list[dict] | None:
         for m in frontier:
             hops = []
             for x, y, dmap, dwarp in maps[str(m)]["warps"]:
-                if dmap != LAST_MAP and str(dmap) in maps:
+                if dmap != LAST_MAP and str(dmap) in maps and (m, dmap) not in banned:
                     hops.append((dmap, {"from": m, "to": dmap, "via": "warp", "x": x, "y": y, "dest_warp": dwarp}))
             for edge, dmap in maps[str(m)]["connections"].items():
-                if str(dmap) in maps:
+                if str(dmap) in maps and (m, dmap) not in banned:
                     hops.append((dmap, {"from": m, "to": dmap, "via": "edge", "edge": edge}))
             # A LAST_MAP mat is usable as "back out the way in": link to every map holding a warp
             # into this one (single-door interiors: the Center, the gym, gate rooms).
             if any(w[2] == LAST_MAP for w in maps[str(m)]["warps"]):
                 for other, om in maps.items():
                     for x, y, dmap, dwarp in om["warps"]:
-                        if dmap == m:
+                        if dmap == m and (m, int(other)) not in banned:
                             mat = maps[str(m)]["warps"][0]
                             hops.append(
                                 (int(other), {"from": m, "to": int(other), "via": "mat", "x": mat[0], "y": mat[1]})

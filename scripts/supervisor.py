@@ -352,13 +352,25 @@ class LegRunner:
         self.tried: list[str] = []  # every action executed, for the exhaustion record
         self.notes: list[str] = []  # measured observations that feed the next consult
         self.consults: list[dict] = []
+        self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
+        self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
 
     # ---- one hop ---------------------------------------------------------------------------
 
     def _hop(self, hop: dict) -> str | None:
         """Attempt one routed hop. Returns None on progress, else the measured failure code."""
+        import road
+
         cur = self.rig.pos()[0]
         result = self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
+        if result == "no-path" and hop["via"] == "edge" and (cur, hop["to"]) not in self.gated:
+            # A severed route is usually its own gate building (Route 11's Diglett house taught
+            # that the nearest door is not the gate). Determinism gets this before the crew does.
+            self.gated.add((cur, hop["to"]))
+            self.log(f"  no-path: trying {cur}'s gate building")
+            cells, _direction = road.edge_cells(self.rig.truth, cur, hop["to"])
+            if self.rig.gate(cur, cells):
+                result = self.rig.cross(cur, hop["to"])
         now = self.rig.pos()[0]
         if now == hop["to"]:
             return None
@@ -369,6 +381,27 @@ class LegRunner:
                 return None
             return f"interior-{inner}"
         return str(result)
+
+    def _reroute_around(self, hop: dict) -> bool:
+        """Ban a hop the world has structurally refused and ask the graph for another chain.
+
+        The connection table is undirected; the world is not. Cycling Road (map 28) carries only
+        down-ledges, so ``7 -> 29 -> 28 -> 27 -> 6`` is a valid graph path no player can walk
+        north — and the badge-6 leg spent its whole crew ladder on it before the record was
+        written. A structural refusal is a fact about the graph, not a question for a model.
+        """
+        import rom_truth as rt
+
+        cur = self.rig.pos()[0]
+        self.banned.add((cur, hop["to"]))
+        alt = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
+        if not alt:
+            self.notes.append(f"banning {cur}->{hop['to']} leaves no chain to {self.goal} at all")
+            return False
+        self.log(f"  banned {cur}->{hop['to']}; rerouted: {rt.describe_route(alt)}")
+        self.notes.append(f"the hop {cur}->{hop['to']} is structurally refused; rerouted around it")
+        self.rig.emit("supervisor.rerouted", banned=[cur, hop["to"]], chain=rt.describe_route(alt))
+        return True
 
     # ---- the bounded actions ----------------------------------------------------------------
 
@@ -508,7 +541,7 @@ class LegRunner:
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
-            chain = rt.route(self.rig.truth, cur, self.goal)
+            chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
             hop = chain[0] if chain else None
             if hop is None:
                 failure = "no-route"
@@ -522,6 +555,12 @@ class LegRunner:
             attempt = self.attempts[wall]
             self.log(f"hop failed: {failure} (attempt {attempt}/{LADDER_ATTEMPTS} on {wall})")
             self.rig.emit("supervisor.hop_failed", wall=wall, failure=failure, attempt=attempt)
+            # Determinism first. A hop whose grid is severed even after its gate building was
+            # tried is a fact about the graph, not a question — ban it and take another chain
+            # rather than spending a crew ladder on a road the world does not have.
+            if hop is not None and failure == "no-path" and (cur, hop["to"]) in self.gated:
+                if self._reroute_around(hop):
+                    continue
             if attempt > LADDER_ATTEMPTS:
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")

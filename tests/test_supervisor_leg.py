@@ -51,14 +51,17 @@ class FakeRig:
         self.events.append({"event": event, **fields})
         return {}
 
-    # moves — each consumes one scripted outcome
+    # moves — each consumes one scripted outcome.
+    # "refused" is the generic failure here on purpose: it is the code with no deterministic
+    # recovery, so these fixtures exercise the crew ladder. "no-path" is structural and the
+    # runner answers it itself (see the reroute tests below).
     def _advance(self, label, arg):
         self.calls.append((label, arg))
         if self._hops:
             landed = self._hops.pop(0)
             if landed is not None:
                 self._pos = (landed, 1, 1)
-        return "no-path"
+        return "refused"
 
     def cross(self, cur, nxt, **kw):
         return self._advance("cross", nxt)
@@ -379,3 +382,85 @@ def test_route_lookup_is_the_hop_source_not_a_search():
     """The runner asks rom_truth for the chain; the smallest world answers with one edge hop."""
     chain = rt.route(_truth(), 1, 2)
     assert chain and chain[0]["via"] == "edge" and chain[0]["to"] == 2
+
+
+# --------------------------------------------------------------- determinism before consultation
+
+
+def _fork_truth():
+    """Map 1 reaches map 2 two ways: a direct edge, and a detour through map 3. The direct edge
+    is Cycling Road — a graph path the world refuses."""
+    grid = ["1" * 8 for _ in range(8)]
+
+    def m(**kw):
+        return {
+            "width": 8,
+            "height": 8,
+            "tileset": 0,
+            "grid": grid,
+            "sprites": [],
+            "warps": [],
+            "connections": {},
+            **kw,
+        }
+
+    return {
+        "maps": {
+            "1": m(connections={"east": 2, "south": 3}),
+            "2": m(connections={"west": 1, "south": 4}),
+            "3": m(connections={"north": 1, "east": 4}),
+            "4": m(connections={"west": 3, "north": 2}),
+        }
+    }
+
+
+class SeveredRig(FakeRig):
+    """One named hop reports no-path forever; every other hop lands."""
+
+    def __init__(self, severed=(1, 2), **kw):
+        kw.setdefault("truth", _fork_truth())
+        super().__init__(**kw)
+        self.severed = severed
+
+    def cross(self, cur, nxt, **kw):
+        self.calls.append(("cross", nxt))
+        if (cur, nxt) == self.severed:
+            return "no-path"
+        self._pos = (nxt, 1, 1)
+        return True
+
+
+def test_a_structurally_refused_hop_is_banned_and_routed_around_without_a_consult(tmp_path):
+    """Cycling Road, in miniature: 1->2 is a graph edge no player can walk, so take 1->3->4->2."""
+    rig = SeveredRig()
+    consult = _consult("GIVE_UP")
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert (1, 2) in runner.banned
+    assert consult.seen == []  # a fact about the graph is not a question for a model
+    assert any(e["event"] == "supervisor.rerouted" for e in rig.events)
+
+
+def test_the_gate_building_is_tried_before_the_hop_is_banned(tmp_path):
+    rig = SeveredRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert ("gate", 1) in rig.calls  # a severed route is usually its own gate building
+    assert (1, 2) in runner.gated
+
+
+def test_banning_the_only_chain_falls_back_to_the_crew_rather_than_looping(tmp_path):
+    rig = SeveredRig(truth=_truth())  # the two-map world: nothing to reroute through
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["outcome"] == "gave-up"
+    assert any("leaves no chain" in n for n in runner.notes)
+
+
+def test_route_can_ban_a_hop_the_world_refuses():
+    truth = _fork_truth()
+    assert rt.route(truth, 1, 2)[0]["to"] == 2  # the direct edge, unbanned
+    detour = rt.route(truth, 1, 2, banned={(1, 2)})
+    assert [h["to"] for h in detour] == [3, 4, 2]
+    assert rt.route(truth, 1, 2, banned={(1, 2), (1, 3)}) is None
