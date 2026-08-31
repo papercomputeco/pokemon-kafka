@@ -457,7 +457,21 @@ class LegRunner:
         _, x, y = self.rig.pos()
         if (x, y) not in adjacent:
             return False
+        import road as _road
+
+        mp_now, hx, hy = self.rig.pos()
+        before_region = len(_road.reachable(self.rig.truth, self.rig.pairs, mp_now, (hx, hy), self.rig.bodies()))
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        mp_now, hx, hy = self.rig.pos()
+        after_region = len(_road.reachable(self.rig.truth, self.rig.pairs, mp_now, (hx, hy), self.rig.bodies()))
+        if after_region <= before_region:
+            # Engaging is not clearing. A beaten Gen 1 trainer still stands on its tile, so a
+            # blocker that is a trainer stays a wall however the fight goes — measured on Silph
+            # 3F, where (20,7) was correctly named as the single body severing the npc at (24,8),
+            # was fought, and left the reachable region at 98 cells exactly as before. Saying so
+            # stops the next attempt spending its ladder on a body that has already been met.
+            self.log(f"  {culprit} was engaged and still blocks ({after_region} cells) — it is a wall")
+            self.notes.append(f"the body at {culprit} was engaged and did not clear; it is terrain")
         # The world just changed, so every verdict reached about this hop is stale. Route 12 was
         # banned as impassable on evidence gathered while the blocker still stood, and its gate
         # was marked "already tried" from an attempt made when the gate door was unreachable.
