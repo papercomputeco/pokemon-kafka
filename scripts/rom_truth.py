@@ -403,6 +403,43 @@ def evolutions_table(rom: bytes, species_count: int = 190) -> dict[str, dict]:
     raise ValueError("evolutions table not found in ROM")
 
 
+def type_chart(rom: bytes) -> dict[str, dict[str, float]]:
+    """The game's own TypeEffects table, located by content signature.
+
+    Triples (attacker, defender, multiplier*10) terminated by 0xFF; multipliers are only
+    0x00/0x05/0x14/0x20 and type ids stay small. The hand-typed chart this replaces had
+    grass<->electric and psychic<->ice swapped for months — extraction, never recall.
+    Pairs absent from the table are neutral (1.0)."""
+    best = None
+    off = 0
+    while off < len(rom) - 4:
+        n = 0
+        j = off
+        zeros = 0
+        while j + 3 < len(rom) and n < 200:
+            a, d, e = rom[j], rom[j + 1], rom[j + 2]
+            if a > 0x1A or d > 0x1A or e not in (0x00, 0x05, 0x0A, 0x14):
+                break
+            if a == 0 and d == 0 and e == 0:
+                zeros += 1
+                if zeros > 3:
+                    break
+            n += 1
+            j += 3
+        if 30 <= n < 200 and zeros <= 3 and j < len(rom) and rom[j] == 0xFF:
+            if best is None or n > best[1]:
+                best = (off, n)
+        off = max(off + 1, j - 2) if n > 20 else off + 1
+    if best is None:
+        raise ValueError("type-effectiveness table not found in ROM")
+    off, n = best
+    chart: dict[str, dict[str, float]] = {}
+    for i in range(n):
+        a, d, e = rom[off + 3 * i], rom[off + 3 * i + 1], rom[off + 3 * i + 2]
+        chart.setdefault(TYPE_NAMES.get(a, f"#{a:02X}"), {})[TYPE_NAMES.get(d, f"#{d:02X}")] = e / 10
+    return chart
+
+
 def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dict:
     rom = path.read_bytes()
     maps = {}
@@ -418,6 +455,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "species": species,
         "wilds": wild_encounters(rom, {int(k) for k in species}),
         "evolutions": evolutions_table(rom),
+        "type_chart": type_chart(rom),
         "maps": maps,
     }
 
@@ -641,6 +679,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "extract":
         truth = parse_rom(args.rom)
+        # The battle strategy reads references/type_chart.json — keep it in lockstep with
+        # the extraction so no hand-typed chart can drift back in.
+        (args.out.parent / "type_chart.json").write_text(json.dumps(truth["type_chart"], indent=2))
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(truth))
         print(f"{len(truth['maps'])} maps -> {args.out} (rom sha {truth['rom_sha256'][:12]}…)")
