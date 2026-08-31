@@ -222,14 +222,14 @@ class Rig:
             self.ctl.press("b")
             self.ctl.wait(25)
         self.ctl.press("start")
-        self.ctl.wait(40)
+        self.ctl.wait(50)
         for _ in range(8):  # ITEM sits below POKeMON in the field menu; walk the cursor onto it
             if self.mem[qm.ADDR_MENU_CUR] == 2:
                 break
             self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < 2 else "up")
-            self.ctl.wait(15)
+            self.ctl.wait(20)
         self.ctl.press("a")
-        self.ctl.wait(50)
+        self.ctl.wait(60)
         # The item list shows three rows at a time: 0xCC26 is the cursor *within that window* and
         # caps at 2, while 0xCC36 is the scroll offset. The slot we want is their sum. Comparing
         # the cursor alone to the slot index silently stops on slot 2 and tosses the wrong thing —
@@ -239,31 +239,39 @@ class Rig:
             if here == slot:
                 break
             self.ctl.press("down" if here < slot else "up")
-            self.ctl.wait(15)
+            self.ctl.wait(20)
         if self.mem[ADDR_LIST_SCROLL] + self.mem[qm.ADDR_MENU_CUR] != slot:
             for _ in range(6):
                 self.ctl.press("b")
                 self.ctl.wait(25)
             return False
         self.ctl.press("a")
-        self.ctl.wait(50)
+        self.ctl.wait(60)
         for _ in range(6):  # the item submenu: USE / TOSS — TOSS is the lower row
             if self.mem[qm.ADDR_MENU_CUR] == 1:
                 break
             self.ctl.press("down")
-            self.ctl.wait(15)
+            self.ctl.wait(20)
         self.ctl.press("a")
-        self.ctl.wait(50)
+        self.ctl.wait(60)
         # The quantity picker starts at 1 and WRAPS. Holding up a fixed number of times is how
         # you ask for the whole stack and get one unit instead: twelve presses on a six-stack
         # lands back on 1, and a quantity-1 toss frees no slot — the very thing this method
         # exists to avoid. Press exactly what the stack holds.
         for _ in range(max(0, qty - 1)):
             self.ctl.press("up")
-            self.ctl.wait(12)
-        for _ in range(3):  # confirm the count, answer the "Is it OK to toss?" box, dismiss it
+            self.ctl.wait(20)
+        # The confirm phase is predicate-driven, not timed. `quartermaster` learned this on the
+        # mart counter — "the shop dialog cadence swallowing fixed-timing scripts", a purchase
+        # that looked confirmed two A-presses before the money moved — and this method ignored
+        # it. The identical sequence tossed a stack at 60-frame waits and silently did nothing at
+        # 45, which reads as "the game would not part with it" and is really "we stopped asking".
+        # The bag is the predicate: press A until a slot frees or the strikes run out.
+        for _ in range(8):
+            if len(self.bag()) < before:
+                break
             self.ctl.press("a")
-            self.ctl.wait(45)
+            self.ctl.wait(60)
         for _ in range(6):
             self.ctl.press("b")
             self.ctl.wait(30)
