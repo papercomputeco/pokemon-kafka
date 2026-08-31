@@ -127,3 +127,49 @@ def test_failure_doc_records_the_ladder_and_refuses_anthropic():
     assert "Anthropic was NOT called" in doc
     assert "- puzzle/GIVE_UP: stuck" in doc
     assert "region: 4 cells" in doc
+
+
+# --------------------------------------------------------------------- thinking-model replies
+
+
+def test_the_token_budget_leaves_room_for_an_answer_after_the_thinking():
+    """Measured on the badge-6 leg: a 240-token cap bought four truncated chains of thought and
+    not one ACTION line — the seats looked exhausted when they were never given room to answer."""
+    assert crew.chat_body("qwen38-27b-128k", "prompt")["max_tokens"] >= 1000
+
+
+def test_a_bare_word_is_trusted_only_in_the_conclusion():
+    reply = "ACTION lines aside, let me think.\nRETRY_SAME is what I would normally do.\n" + (
+        "\n".join(["filler"] * 10) + "\nGIVE_UP"
+    )
+    action, _ = crew.parse_decision(reply, MENU)
+    assert action == "GIVE_UP"  # the tail decides, not the first option named mid-thought
+
+
+def test_deliberation_that_names_two_options_is_not_a_choice():
+    """The exact shape a thinking model truncates into: both options weighed, neither chosen."""
+    reply = "The hop returned no-path.\nRETRY_SAME doesn't make sense here.\nGIVE_UP seems better, but"
+    assert crew.parse_decision(reply, MENU)[0] is None
+
+
+def test_an_explicit_action_line_still_wins_over_the_tail():
+    reply = "ACTION: USE_GATE_WARP\nWHY: the gate severs the route\nRETRY_SAME was the alternative"
+    assert crew.parse_decision(reply, MENU) == ("USE_GATE_WARP", "the gate severs the route")
+
+
+def test_the_puzzle_seat_gets_the_budget_its_thinking_actually_costs():
+    """Measured on one bounded-choice prompt: 6,286 reasoning tokens and NO answer at a 1,600
+    cap; 11,635 and a correct ACTION line at 6,000. Puzzle is the tier we escalate TO."""
+    assert crew.answer_tokens("puzzle") >= 6000
+    assert crew.answer_tokens("puzzle") > crew.answer_tokens("navigation")
+    assert crew.chat_body("m", "p", crew.answer_tokens("puzzle"))["max_tokens"] == crew.answer_tokens("puzzle")
+
+
+def test_an_unknown_tier_still_gets_a_usable_budget():
+    assert crew.answer_tokens("interpretive-dance") == crew.answer_tokens("navigation")
+
+
+def test_the_wait_scales_with_the_seats_budget():
+    """Raising the Extractor's tokens without its timeout only changed how it failed."""
+    assert crew.answer_timeout("puzzle") > crew.answer_timeout("navigation")
+    assert crew.answer_timeout("interpretive-dance") == crew.answer_timeout("navigation")

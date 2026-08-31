@@ -82,6 +82,66 @@ def tile_pairs(rom: bytes) -> set[tuple[int, int, int]]:
     return pairs
 
 
+MEASURED_GATES = Path(__file__).resolve().parent.parent / "references" / "measured_gates.json"
+
+_DIR_OF = {(0, -1): "up", (0, 1): "down", (-1, 0): "left", (1, 0): "right"}
+
+
+def load_measured_gates(path: Path | None = None) -> dict:
+    """Steps the *engine* refuses that the collision grid calls walkable.
+
+    The grid has no way to express a script gate. Inside Silph it calls a card-key door plain
+    floor, and so every region computed from it over-reports — 343 cells claimed on 3F against
+    233 actually walkable. These are measured by ``Rig.survey_pocket``, which tries each step
+    and records the ones the engine refuses, and merging them here is what makes the rest of the
+    module honest: ``passable`` consults them, so ``path_on_map``, ``road.reachable``,
+    ``blocking_body`` and every route planned on top all stop planning through locked doors.
+    """
+    path = path or MEASURED_GATES
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def merge_measured_gates(gates: dict, path: Path | None = None) -> dict:
+    """Fold a survey's gates into the shared file. Knowledge accumulates or it is not knowledge."""
+    path = path or MEASURED_GATES
+    merged = load_measured_gates(path)
+    for map_id, entries in gates.items():
+        merged.setdefault(str(map_id), {}).update(entries)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+    return merged
+
+
+DEAD_WARPS = Path(__file__).resolve().parent.parent / "references" / "dead_warps.json"
+
+
+def load_dead_warps(path: Path | None = None) -> dict:
+    """Warp tiles the engine will not fire, by map — doors the extraction believes in and the
+    world does not.
+
+    ``measured_gates`` records refused *steps*; a dead door is a refused *warp*, and it had
+    nowhere to live. Silph 1F's pad at (16,10) was measured dead early on, written into a
+    learnings file, and then routed through by every planner since — including the pocket router,
+    which proposed it as the first hop of three different chains.
+    """
+    path = path or DEAD_WARPS
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def merge_dead_warps(dead: dict, path: Path | None = None) -> dict:
+    path = path or DEAD_WARPS
+    merged = load_dead_warps(path)
+    for map_id, tiles in dead.items():
+        merged.setdefault(str(map_id), {}).update(tiles)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+    return merged
+
+
 def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: int, y1: int) -> bool:
     """Can the player step from (x0,y0) to (x1,y1) on map ``m``? Both cells must be walkable
     AND the move must not be a tile-pair collision. Checking ``grid`` alone is not enough: on
@@ -93,6 +153,19 @@ def passable(m: dict, pairs: set[tuple[int, int, int]], x0: int, y0: int, x1: in
         return False
     if m["grid"][y0][x0] != "1" or m["grid"][y1][x1] != "1":
         return False
+    gates = m.get("gates")
+    if gates:
+        forward = _DIR_OF.get((x1 - x0, y1 - y0), "?")
+        back = _DIR_OF.get((x0 - x1, y0 - y1), "?")
+        # Both ends. A gate is recorded from whichever side somebody stood on, but a shut door is
+        # shut from both — measured on 234's (10,8), refused from (10,9) going up and from (10,7)
+        # going down. Honouring only the recorded direction makes connectivity *asymmetric*,
+        # which is impossible for a flood fill and produced exactly that: 234 cells reachable
+        # from one side of a 233 gate and 109 from the other, so `pockets` merged two places the
+        # world keeps apart and `route_pockets` planned straight through the join. Over-blocking
+        # costs a route we might have had; under-blocking costs a run, and has, repeatedly.
+        if gates.get(f"{x0},{y0},{forward}") is not None or gates.get(f"{x1},{y1},{back}") is not None:
+            return False
     tiles = m.get("tiles")
     if not tiles:
         return True
@@ -238,6 +311,56 @@ TYPE_NAMES = {
     0x1A: "dragon",
 }
 _NAME_CHARS = {0xE1: "Pk", 0xE2: "Mn", 0xEF: "M", 0xF5: "F", 0xE8: "."}
+
+
+HM_FIRST, HM_COUNT = 196, 5  # ids 196..200 render as HM01..HM05 on the game's own ITEM screen
+TM_BASE, TM_COUNT = 200, 50  # id 200+n renders as TM<n>: 207->TM07, 234->TM34, six such readings
+
+_ITEM_CHARS = {0x7F: " ", 0xBA: "e", 0xE1: "Pk", 0xE2: "Mn", 0xE3: "-", 0xE6: "?", 0xE7: "!", 0xE8: "."}
+for _i in range(10):
+    _ITEM_CHARS[0xF6 + _i] = chr(ord("0") + _i)
+
+
+def item_names(rom: bytes, count: int = 250) -> dict[str, str]:
+    """Item id -> name, from the ROM's own 0x50-terminated name list.
+
+    Located by content signature (the list opens with MASTER BALL), never by address — the same
+    rule the species and type tables follow. This is what lets a run say what it is *holding*:
+    the bag is a list of numeric ids, and every previous session that reasoned about those ids
+    did it from recall. The extraction independently reproduces the three that were measured
+    live in the Rocket Hideout — 72 SILPH SCOPE, 73 POKE FLUTE, 74 LIFT KEY — which is the
+    cross-check that says the decode is right.
+
+    Ids past the plain-item list are TMs and HMs, which the ROM stores as a numbered range
+    rather than as names; those come back as ``TM<n>``/``HM<n>``.
+    """
+    base = rom.find(bytes(0x80 + ord(c) - ord("A") if c != " " else 0x7F for c in "MASTER BALL"))
+    if base < 0:
+        return {}  # a synthetic/partial image has no item table; the real-ROM smoke test asserts ours does
+    out: dict[str, str] = {}
+    off = base
+    for iid in range(1, count + 1):
+        name = ""
+        while off < len(rom) and rom[off] != 0x50:
+            byte = rom[off]
+            if 0x80 <= byte <= 0x99:
+                name += chr(ord("A") + byte - 0x80)
+            else:
+                name += _ITEM_CHARS.get(byte, "")
+            off += 1
+        off += 1
+        if not name.strip():
+            break
+        out[str(iid)] = name.strip()
+    # Past the plain-item list the ROM stores TMs and HMs as a numbered range rather than as
+    # names. The boundaries below were read off the game's own ITEM screen, one entry at a time,
+    # for a bag holding ids 196/207/210/211/221/224/228/234 — which rendered as HM01, TM07, TM10,
+    # TM11, TM21, TM24, TM28, TM34. Seven data points, so the offset is measured, not assumed.
+    for iid in range(HM_FIRST, HM_FIRST + HM_COUNT):
+        out[str(iid)] = f"HM{iid - HM_FIRST + 1:02d}"
+    for iid in range(TM_BASE + 1, TM_BASE + TM_COUNT + 1):
+        out[str(iid)] = f"TM{iid - TM_BASE:02d}"
+    return out
 
 
 def species_table(rom: bytes) -> dict[str, dict]:
@@ -456,8 +579,20 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "wilds": wild_encounters(rom, {int(k) for k in species}),
         "evolutions": evolutions_table(rom),
         "type_chart": type_chart(rom),
+        "items": item_names(rom),
         "maps": maps,
     }
+
+
+def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
+    """Hang each map's measured gates on its own dict, where ``passable`` will find them."""
+    for map_id, entries in load_measured_gates(path).items():
+        if map_id in truth.get("maps", {}):
+            truth["maps"][map_id]["gates"] = entries
+    for map_id, tiles in load_dead_warps().items():
+        if map_id in truth.get("maps", {}):
+            truth["maps"][map_id]["dead_warps"] = tiles
+    return truth
 
 
 def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict:
@@ -468,14 +603,127 @@ def load_truth(path: Path = TRUTH_DEFAULT, rom_path: Path | None = None) -> dict
         sha = hashlib.sha256(rom_path.read_bytes()).hexdigest()
         if sha != truth.get("rom_sha256"):
             raise ValueError(f"rom_truth.json was extracted from a different ROM (sha {truth.get('rom_sha256')[:12]}…)")
-    return truth
+    return attach_measured_gates(truth)
 
 
-def route(truth: dict, src: int, dst: int) -> list[dict] | None:
+def pockets(truth: dict, map_id: int) -> list[set[tuple[int, int]]]:
+    """A map's walkable regions once the measured gates are honoured.
+
+    The engine's unit of place is the map, and inside a gated building that is one level too
+    coarse: with 36 card-key doors closed, "map 209" names five disconnected places, and every
+    primitive keyed on a map id — routing, banning, batons, goals — is quietly talking about the
+    wrong thing. A pocket is the honest unit.
+    """
+    from collections import deque
+
+    m = truth["maps"].get(str(map_id))
+    if not m:
+        return []
+    pairs = loaded_pairs(truth)
+    w, h = m["width"], m["height"]
+    open_cells = {(x, y) for y in range(h) for x in range(w) if m["grid"][y][x] == "1"}
+    out: list[set[tuple[int, int]]] = []
+    while open_cells:
+        start = min(open_cells)
+        seen, queue = {start}, deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (nx, ny) in open_cells and (nx, ny) not in seen and passable(m, pairs, x, y, nx, ny):
+                    seen.add((nx, ny))
+                    queue.append((nx, ny))
+        out.append(seen)
+        open_cells -= seen
+    return out
+
+
+def pocket_of(truth: dict, map_id: int, cell) -> int | None:
+    """Which pocket index a cell belongs to — the place-id the map id was standing in for."""
+    for i, pocket in enumerate(pockets(truth, map_id)):
+        if tuple(cell) in pocket:
+            return i
+    return None
+
+
+def pocket_exits(truth: dict, map_id: int, index: int) -> list[dict]:
+    """Every warp reachable *from this pocket*, resolved to where it actually lands.
+
+    A warp's destination is a map in the extraction and a *pocket* in the world. Resolving that
+    is what turns 51 loose landings into a graph you can walk.
+    """
+    pocket = pockets(truth, map_id)
+    if index >= len(pocket):
+        return []
+    cells = pocket[index]
+    out = []
+    dead = truth["maps"][str(map_id)].get("dead_warps", {})
+    for wx, wy, dst, dwarp in truth["maps"][str(map_id)]["warps"]:
+        if (wx, wy) not in cells or dst == LAST_MAP or str(dst) not in truth["maps"]:
+            continue
+        if f"{wx},{wy}" in dead:
+            continue  # measured: this door does not open, whatever the warp table says
+        dwarps = truth["maps"][str(dst)]["warps"]
+        land = (dwarps[dwarp][0], dwarps[dwarp][1]) if dwarp < len(dwarps) else None
+        out.append(
+            {
+                "from": [wx, wy],
+                "to_map": dst,
+                "land": list(land) if land else None,
+                "to_pocket": pocket_of(truth, dst, land) if land else None,
+            }
+        )
+    return out
+
+
+def route_pockets(truth: dict, src: tuple[int, int], dst: tuple[int, int]) -> list[dict] | None:
+    """A hop chain between *pockets*, which is the unit a gated building is actually made of.
+
+    ``route`` plans over map ids. Inside Silph that is the wrong granularity and it is why a
+    whole session failed to find Giovanni: with the card-key doors closed the eleven floors are
+    twenty-eight pockets, and the eleventh floor's boss sits in one that map-level routing has no
+    way to distinguish from the pocket the lift drops you in.
+    """
+    from collections import deque
+
+    if src == dst:
+        return []
+    seen, parents, queue = {src}, {}, deque([src])
+    while queue:
+        node = queue.popleft()
+        for exit_ in pocket_exits(truth, node[0], node[1]):
+            if exit_["to_pocket"] is None:
+                continue
+            nxt = (exit_["to_map"], exit_["to_pocket"])
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            parents[nxt] = (node, exit_)
+            if nxt == dst:
+                chain = []
+                cur = dst
+                while cur != src:
+                    prev, hop = parents[cur]
+                    chain.append({"from_map": prev[0], "from_pocket": prev[1], **hop})
+                    cur = prev
+                return list(reversed(chain))
+            queue.append(nxt)
+    return None
+
+
+def route(truth: dict, src: int, dst: int, banned: set[tuple[int, int]] | None = None) -> list[dict] | None:
     """BFS over the map graph: warps (LAST_MAP mats are the return leg of the warp that entered,
     so only forward, non-LAST_MAP warps make edges) plus edge connections. Returns the hop list
-    — each hop names the mechanism and the tile to use — or ``None`` if unreachable."""
+    — each hop names the mechanism and the tile to use — or ``None`` if unreachable.
+
+    ``banned`` drops ``(from, to)`` hops from the graph. The connection table is undirected but
+    the world is not: Cycling Road (map 28, 20x144) carries only *down* ledges — the extracted
+    ledge set has no upward hop anywhere in the cartridge — so the chain
+    ``7 -> 29 -> 28 -> 27 -> 6`` is a perfectly good graph path that a player cannot walk north.
+    A caller that measures a hop as structurally impossible bans it and asks again, rather than
+    re-attempting a chain the world has already refused.
+    """
     maps = truth["maps"]
+    banned = banned or set()
     if str(src) not in maps or str(dst) not in maps:
         return None
     frontier, seen, parents = [src], {src}, {}
@@ -484,17 +732,17 @@ def route(truth: dict, src: int, dst: int) -> list[dict] | None:
         for m in frontier:
             hops = []
             for x, y, dmap, dwarp in maps[str(m)]["warps"]:
-                if dmap != LAST_MAP and str(dmap) in maps:
+                if dmap != LAST_MAP and str(dmap) in maps and (m, dmap) not in banned:
                     hops.append((dmap, {"from": m, "to": dmap, "via": "warp", "x": x, "y": y, "dest_warp": dwarp}))
             for edge, dmap in maps[str(m)]["connections"].items():
-                if str(dmap) in maps:
+                if str(dmap) in maps and (m, dmap) not in banned:
                     hops.append((dmap, {"from": m, "to": dmap, "via": "edge", "edge": edge}))
             # A LAST_MAP mat is usable as "back out the way in": link to every map holding a warp
             # into this one (single-door interiors: the Center, the gym, gate rooms).
             if any(w[2] == LAST_MAP for w in maps[str(m)]["warps"]):
                 for other, om in maps.items():
                     for x, y, dmap, dwarp in om["warps"]:
-                        if dmap == m:
+                        if dmap == m and (m, int(other)) not in banned:
                             mat = maps[str(m)]["warps"][0]
                             hops.append(
                                 (int(other), {"from": m, "to": int(other), "via": "mat", "x": mat[0], "y": mat[1]})

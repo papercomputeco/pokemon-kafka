@@ -499,3 +499,145 @@ def test_wild_encounters_rejects_malformed_tables(rom):
     # A ROM shorter than its own pointer table.
     with pytest.raises(ValueError):
         rom_truth.wild_encounters(bytes(0x5000), {1})
+
+
+def test_measured_gates_close_a_step_the_grid_calls_walkable(tmp_path):
+    """The grid has no way to express a script gate, so a measured refusal has to override it —
+    otherwise every region computed inside Silph over-reports and every route plans through a
+    locked door."""
+    grid = ["1111", "1111", "1111", "1111"]
+    m = {"width": 4, "height": 4, "tileset": 0, "grid": grid, "warps": []}
+    assert rom_truth.passable(m, set(), 1, 1, 0, 1) is True
+    m["gates"] = {"1,1,left": "Darn! It needs a CARD KEY!"}
+    assert rom_truth.passable(m, set(), 1, 1, 0, 1) is False
+    assert rom_truth.passable(m, set(), 1, 1, 2, 1) is True  # only that one direction
+
+
+def test_measured_gates_merge_and_accumulate(tmp_path):
+    path = tmp_path / "measured_gates.json"
+    rom_truth.merge_measured_gates({"208": {"18,8,left": "a"}}, path)
+    rom_truth.merge_measured_gates({"208": {"18,9,left": "b"}, "209": {"5,13,up": "c"}}, path)
+    merged = rom_truth.load_measured_gates(path)
+    assert merged["208"] == {"18,8,left": "a", "18,9,left": "b"}
+    assert merged["209"] == {"5,13,up": "c"}
+
+
+def test_attaching_gates_reaches_the_map_dicts_passable_reads():
+    truth = {"maps": {"208": {"width": 1, "height": 1, "grid": ["1"], "warps": []}}}
+    rom_truth.attach_measured_gates(truth, rom_truth.MEASURED_GATES)
+    assert truth["maps"]["208"].get("gates"), "the shared gate file should carry map 208"
+
+
+def test_a_dead_warp_is_dropped_from_a_pocket_s_exits(tmp_path):
+    """Silph 1F's (16,10) pad was measured dead early and then routed through by every planner
+    since, because `measured_gates` records refused steps and a dead door is a refused warp."""
+    grid = ["11", "11"]
+    truth = {
+        "maps": {
+            "1": {"width": 2, "height": 2, "tileset": 0, "grid": grid, "warps": [[0, 0, 2, 0], [1, 0, 2, 0]]},
+            "2": {"width": 2, "height": 2, "tileset": 0, "grid": grid, "warps": [[0, 0, 1, 0]]},
+        }
+    }
+    assert len(rom_truth.pocket_exits(truth, 1, 0)) == 2
+    truth["maps"]["1"]["dead_warps"] = {"0,0": "refused"}
+    assert [e["from"] for e in rom_truth.pocket_exits(truth, 1, 0)] == [[1, 0]]
+
+
+def test_dead_warps_merge_and_reach_the_truth():
+    assert rom_truth.load_dead_warps()["181"]["16,10"]
+    assert "16,10" in rom_truth.load_truth()["maps"]["181"].get("dead_warps", {})
+
+
+def test_dead_warps_are_empty_when_nothing_has_been_measured(tmp_path):
+    assert rom_truth.load_dead_warps(tmp_path / "absent.json") == {}
+
+
+def test_dead_warps_merge_and_accumulate(tmp_path):
+    path = tmp_path / "dead.json"
+    rom_truth.merge_dead_warps({"181": {"16,10": "refused"}}, path)
+    rom_truth.merge_dead_warps({"181": {"9,9": "also refused"}, "207": {"1,1": "x"}}, path)
+    merged = rom_truth.load_dead_warps(path)
+    assert merged["181"] == {"16,10": "refused", "9,9": "also refused"}
+    assert merged["207"] == {"1,1": "x"}
+
+
+def _two_room_truth(gates=None, dead=None):
+    grid = ["1111", "1111", "1111", "1111"]
+
+    def m(**kw):
+        return {"width": 4, "height": 4, "tileset": 0, "grid": grid, "warps": [], "connections": {}, **kw}
+
+    truth = {"maps": {"1": m(warps=[[0, 0, 2, 0], [3, 3, 2, 0]]), "2": m(warps=[[0, 0, 1, 0]])}}
+    if gates:
+        truth["maps"]["1"]["gates"] = gates
+    if dead:
+        truth["maps"]["1"]["dead_warps"] = dead
+    return truth
+
+
+def test_pockets_of_an_unknown_map_is_empty_not_an_error():
+    assert rom_truth.pockets({"maps": {}}, 999) == []
+    assert rom_truth.pocket_of({"maps": {}}, 999, (0, 0)) is None
+    assert rom_truth.pocket_exits({"maps": {}}, 999, 0) == []
+
+
+def test_pocket_exits_of_an_index_that_does_not_exist_is_empty():
+    assert rom_truth.pocket_exits(_two_room_truth(), 1, 7) == []
+
+
+def test_pocket_exits_resolve_the_landing_pocket():
+    exits = rom_truth.pocket_exits(_two_room_truth(), 1, 0)
+    assert {tuple(e["from"]) for e in exits} == {(0, 0), (3, 3)}
+    assert all(e["to_map"] == 2 and e["to_pocket"] == 0 for e in exits)
+
+
+def test_route_pockets_finds_a_chain_and_reports_none_when_there_is_not_one():
+    truth = _two_room_truth()
+    assert rom_truth.route_pockets(truth, (1, 0), (1, 0)) == []
+    chain = rom_truth.route_pockets(truth, (1, 0), (2, 0))
+    assert len(chain) == 1 and chain[0]["to_map"] == 2
+    truth["maps"]["1"]["dead_warps"] = {"0,0": "x", "3,3": "x"}
+    assert rom_truth.route_pockets(truth, (1, 0), (2, 0)) is None
+
+
+def test_a_gate_splits_a_room_into_two_pockets():
+    truth = _two_room_truth(gates={f"{x},1,down": "shut" for x in range(4)})
+    sizes = sorted(len(p) for p in rom_truth.pockets(truth, 1))
+    assert sizes == [8, 8]
+
+
+def test_route_pockets_skips_an_exit_whose_landing_pocket_is_unknown():
+    truth = _two_room_truth()
+    truth["maps"]["1"]["warps"] = [[0, 0, 2, 9]]  # dest warp index past the end of map 2's table
+    assert rom_truth.pocket_exits(truth, 1, 0)[0]["to_pocket"] is None
+    assert rom_truth.route_pockets(truth, (1, 0), (2, 0)) is None
+
+
+def test_route_pockets_returns_a_multi_hop_chain():
+    grid = ["11", "11"]
+
+    def m(**kw):
+        return {"width": 2, "height": 2, "tileset": 0, "grid": grid, "warps": [], "connections": {}, **kw}
+
+    truth = {
+        "maps": {
+            "1": m(warps=[[0, 0, 2, 0]]),
+            "2": m(warps=[[0, 0, 1, 0], [1, 1, 3, 0]]),
+            "3": m(warps=[[0, 0, 2, 1]]),
+        }
+    }
+    chain = rom_truth.route_pockets(truth, (1, 0), (3, 0))
+    assert [h["to_map"] for h in chain] == [2, 3]
+
+
+def test_a_dead_warp_is_skipped_while_its_neighbours_are_kept():
+    truth = _two_room_truth(dead={"0,0": "measured refused"})
+    assert [tuple(e["from"]) for e in rom_truth.pocket_exits(truth, 1, 0)] == [(3, 3)]
+
+
+def test_pocket_exits_skip_a_door_mat_and_a_warp_outside_the_pocket():
+    """LAST_MAP mats are the return leg of the warp that entered, not a forward edge."""
+    truth = _two_room_truth()
+    truth["maps"]["1"]["warps"] = [[0, 0, rom_truth.LAST_MAP, 0], [1, 1, 999, 0], [3, 3, 2, 0]]
+    exits = rom_truth.pocket_exits(truth, 1, 0)
+    assert [tuple(e["from"]) for e in exits] == [(3, 3)]  # the mat and the unknown map both drop

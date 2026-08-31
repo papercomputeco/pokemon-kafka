@@ -34,6 +34,11 @@ from quartermaster import ADDR_IN_BATTLE, ADDR_MENU_CUR, QuartermasterError, rea
 SPRITE_STATE_BASE = 0xC100
 SPRITE_DATA_BASE = 0xC200
 
+# Tileset 22 is the facility floor set (Rocket Hideout, Silph Co). Its tiles decide where you end
+# up — spin arrows, teleport pads — so a planned path is a category error there and the engine's
+# own answer is the facing-keyed oracle. Read from the map, never assumed.
+FACILITY_TILESET = 22
+
 _OPPOSITE = {"down": "up", "up": "down", "right": "left", "left": "right"}
 _OUTWARD = {"west": "left", "east": "right", "north": "up", "south": "down"}
 
@@ -54,6 +59,67 @@ def live_bodies(io) -> set[tuple[int, int]]:
 def _step(io, direction: str) -> None:
     io.press(direction, hold=8, release=8)
     io.wait(30)
+
+
+def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, int]]:
+    """Every cell reachable from ``start`` on this map, treating ``blocked`` cells as solid."""
+    from collections import deque
+
+    import rom_truth as rt
+
+    m = truth["maps"][str(map_id)]
+    w, h = m["width"], m["height"]
+    blocked = set(blocked)
+    seen = {tuple(start)}
+    queue = deque([tuple(start)])
+    while queue:
+        x, y = queue.popleft()
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in seen or (nx, ny) in blocked:
+                continue
+            if m["grid"][ny][nx] != "1" or not rt.passable(m, pairs, x, y, nx, ny):
+                continue
+            seen.add((nx, ny))
+            queue.append((nx, ny))
+    return seen
+
+
+def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
+    """The doors on this map that belong to a gate building rather than a dead-end house.
+
+    Measurable signature, no recall needed: a building you can *pass through* is entered from
+    this map by two or more doors (Route 12's gate is (10,15), (11,15) and (10,21), all into map
+    87 — two doors on the north side of the severance and one on the south). A house is entered
+    by exactly one. ``pass_gate`` aims at the nearest door first and Route 11's Diglett house
+    taught what that costs; this is the same lesson as a lookup.
+    """
+    by_dest: dict[int, set[tuple[int, int]]] = {}
+    for wx, wy, dst, _wid in truth["maps"].get(str(map_id), {}).get("warps", []):
+        by_dest.setdefault(dst, set()).add((wx, wy))
+    return {door for doors in by_dest.values() if len(doors) > 1 for door in doors}
+
+
+def blocking_body(truth, pairs, map_id: int, start, targets, bodies):
+    """The one body whose removal reconnects ``targets`` — the wall, not the bump.
+
+    ``walk`` reports the body it bumped into. That is often not the body that matters. Measured
+    on Route 12: the step north was refused by a trainer at (14,76) that column 15 walks straight
+    around, while the actual severance was a single sprite at (10,62) fifteen tiles away — one
+    body holding 237 cells and the map's only gate door hostage. Naming the bystander sends a
+    crew to argue with the wrong sprite, and "body-blocked" then reads as a wall when it is a
+    story gate standing somewhere else entirely.
+
+    Returns ``None`` when the targets are already reachable, or when no *single* body explains
+    the severance (two parked trainers in one corridor are terrain, not a gate).
+    """
+    targets = set(targets)
+    bodies = set(bodies)
+    if reachable(truth, pairs, map_id, start, bodies) & targets:
+        return None
+    for body in sorted(bodies):
+        if reachable(truth, pairs, map_id, start, bodies - {body}) & targets:
+            return body
+    return None
 
 
 def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], str]:
@@ -253,22 +319,52 @@ def cut_facing(io, face: str) -> None:
 
     The lead must know Cut — its field submenu then opens with CUT on row 0 (measured on
     Charmeleon and Charizard alike). Opens both cuttable tile classes: 0x3D bushes and
-    0x50 trees."""
+    0x50 trees.
+
+    Cadence note: the menu phases here run at 60/25 frames, not the 15/45 that reads as "fast
+    enough". `quartermaster` measured the shop dialog swallowing fixed-timing scripts, and
+    `Rig.toss_stack` lost an evening to exactly that — the same presses freed a bag slot at 60
+    and silently did nothing at 45, which the caller reported as the game refusing. Where a
+    phase has a predicate, wait on the predicate; where it does not, be generous.
+    """
     io.press(face)
     io.wait(25)
     io.press("start")
-    io.wait(40)
+    io.wait(50)
     for _ in range(6):
         if io.read(ADDR_MENU_CUR) == 1:
             break
         io.press("down" if io.read(ADDR_MENU_CUR) < 1 else "up")
-        io.wait(15)
+        io.wait(20)
     for _ in range(3):
         io.press("a")
         io.wait(60)
     for _ in range(5):
         io.press("b")
         io.wait(30)
+
+
+def cut_until_open(io, truth, pairs, face: str, tries: int = 3) -> bool:
+    """Cut, then *prove it* by stepping — the predicate the bare flow never had.
+
+    ``cut_facing`` fires the menu and returns whether or not anything was cut. Callers then
+    stepped hopefully and read a refusal as terrain. The step is the predicate: if we moved, the
+    growth is gone; if not, cut again. The Vermilion yard bush regrows on map reload, so one
+    attempt was never a safe assumption anyway.
+    """
+    delta = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[face]
+    for _ in range(tries):
+        before = read_pos(io)
+        _step(io, face)
+        if read_pos(io) != before:
+            return True
+        cut_facing(io, face)
+        before = read_pos(io)
+        _step(io, face)
+        if read_pos(io) != before:
+            return True
+    _ = delta
+    return False
 
 
 def drive_to(io, truth, pairs, dst: int, *, battle=_default_battle, max_hops: int = 25, log=None) -> bool:

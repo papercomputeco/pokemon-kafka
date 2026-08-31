@@ -69,15 +69,27 @@ decision a human makes holding a failure record, not a rung the loop climbs.
 
 ```bash
 uv run python scripts/semantic_router.py route "reach saffron and beat sabrina"   # cast the seat
-uv run python scripts/supervisor.py <goal_map> [budget_seconds]                   # run it
+uv run python scripts/supervisor.py run \
+    --state data/local_runs/roster-bench/<baton>.state \
+    --goal 10,181,178 \            # one boot, a chain of legs; banked between each
+    --budget 7200 --engage \       # --engage: on the LAST goal, engage bodies until BADGES changes
+    --bank badge6 --live-label "badge 6 — sabrina"
 ```
 
-The supervisor is the loop body: deterministic Python measures and moves; on a failed hop it
-hands **measured facts** plus a bounded action menu to the seated model and executes the choice.
-Models pick actions; they never drive the emulator directly. A wrong answer costs one attempt.
+The supervisor is the loop body: deterministic Python measures and moves. It boots the baton
+(`scripts/expedition_rig.py`), **settles** it — a state banked mid-dialogue swallows every step,
+which is how `BADGE5.state` once fingerprinted a wall that was not in the world — looks the
+topology up in the extracted truth, and walks it hop by hop. On a failed hop it hands **measured
+facts** plus a bounded menu of actions the road engine can actually execute to the seated model
+and executes the choice. Models pick actions; they never drive the emulator directly. A wrong
+answer costs one attempt; an *unparsed* answer is a non-answer and moves nothing.
+
+`--no-consult` runs the same loop deterministically, never calling a model — the right first
+pass on a leg you expect to be pure topology, and the way to tell an engine bug from a real wall.
 
 If the supervisor lacks a capability the leg needs, add it there (with a test) rather than
-writing a parallel script.
+writing a parallel script. `tests/test_supervisor_leg.py` drives the whole loop against a fake
+rig, so a new action or menu costs one test, not a cartridge.
 
 ## When a search says "impossible"
 
