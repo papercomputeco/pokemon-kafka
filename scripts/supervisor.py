@@ -595,6 +595,7 @@ class LegRunner:
             self.looted.add((mp, ball))
             before = self.rig.bag()
             if not self.rig.collect_item(*ball):
+                self.log(f"  could not open the ball at {ball} on map {mp}")
                 continue
             new = [item for item in self.rig.bag() if item not in before]
             gained.extend(new)
@@ -627,6 +628,11 @@ class LegRunner:
                 continue
             self.engaged.add(spot)
             if not self._go_and_talk(spot):
+                # Logged, not just noted: this line silently swallowed a whole debugging cycle
+                # on Silph's top floor, where "could not reach" was really "a card-key door the
+                # collision grid calls floor". A refusal the operator cannot see is a refusal
+                # that gets re-diagnosed from scratch.
+                self.log(f"  could not reach the trainer at {spot} on map {mp}")
                 self.notes.append(f"could not reach the trainer at {spot} on map {mp}")
                 continue
             if self.rig.badges() != badges_before:
