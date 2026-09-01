@@ -696,3 +696,20 @@ def test_a_failed_lead_swap_closes_the_menus_it_opened():
     assert r.lead_swap(1) is False
     opened = r.ctl.presses.index("start")
     assert r.ctl.presses[opened + 1 :].count("b") >= 8  # what it opened, it closed
+
+
+def test_say_puts_what_the_game_said_into_the_sink(tmp_path):
+    """The Rig read a guru naming his rod, a boss conceding Silph and every card-key door, and
+    only ever printed them — a search across every captured event for SURF, HM or SOULBADGE
+    returned nothing while all of it had been on screen."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.mem = {0xD35E: 163, 0xD362: 2, 0xD361: 5}
+    r.run_id = "t"
+    r.telemetry_root = tmp_path
+    r.say("I'm the FISHING GURU! I simply love fishing!")
+    r.say("   ")  # nothing said is nothing to record
+    lines = [json.loads(x) for x in rig.telemetry_path(root=tmp_path).read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["event"] == "discovery"
+    assert lines[0]["map"] == 163 and (lines[0]["x"], lines[0]["y"]) == (2, 5)
+    assert "FISHING GURU" in lines[0]["text"] and lines[0]["kind"] == "dialogue"

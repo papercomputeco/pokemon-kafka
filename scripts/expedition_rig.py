@@ -577,6 +577,19 @@ class Rig:
         m = self.truth["maps"].get(str(self.pos()[0]))
         return road.live_bodies(self.io, (m["width"], m["height"]) if m else None)
 
+    def say(self, text: str, kind: str = "dialogue") -> None:
+        """Record something the game said, where it said it, into the run's event stream.
+
+        The Rig reads dialogue constantly — a guru naming his rod, a boss conceding Silph, a door
+        asking for a CARD KEY — and until now it only *printed* it. So the sink could not answer
+        "when did the game tell us about X": a search across every captured event for SURF, HM or
+        SOULBADGE returned nothing, while all of it had been on screen and in a log file.
+        """
+        if not (text or "").strip():
+            return
+        mp, x, y = self.pos()
+        self.emit("discovery", map=mp, x=x, y=y, kind=kind, text=text[:300])
+
     def talk(self, face: str) -> str:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Face and read: the pages a body gives up. What the game says IS the instruction stream."""
         self.ctl.press(face)
