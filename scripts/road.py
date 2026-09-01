@@ -445,9 +445,14 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
             return "map-change"
         if (x, y) in targets:
             return True
-        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=live_bodies(io) | warp_block)
+        # Never block the tile we are standing on. Arriving through a door leaves us ON it, and
+        # a warp block that includes our own cell makes every plan from there impossible — which
+        # is why "could not step off the warp mat" fired on Silph 3F, the Center's exit and the
+        # Safari Zone's arrival pad, and why a leg that had just walked in could not walk on.
+        here_block = warp_block - {(x, y)}
+        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=live_bodies(io) | here_block)
         if not path or len(path) < 2:
-            path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=warp_block)
+            path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=here_block)
             if not path or len(path) < 2:
                 return "no-path"
             if tuple(path[1]) in live_bodies(io):

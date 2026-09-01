@@ -756,3 +756,13 @@ def test_pad_route_can_target_a_warp_tile_itself():
     assert road.pad_route(truth, set(), 1, (0, 0), {(6, 0)}) == [(2, 0)]  # ride, then step to it
     assert road.pad_route(truth, set(), 1, (5, 0), {(6, 0)}) == []  # already beside the door
     assert road.pad_route(truth, set(), 1, (0, 0), {(1, 0)}) == []  # a plain walk reaches it
+
+
+def test_a_walk_that_starts_on_a_door_can_still_plan():
+    """Arriving through a door leaves us standing ON it. Blocking every warp tile then makes the
+    start cell a wall and no plan exists — the bug behind 'could not step off the warp mat' on
+    Silph 3F, the Center exit, and the Safari Zone's arrival pad."""
+    truth = {"maps": {"1": _map(["1111"], warps=[[0, 0, 9, 0]])}}
+    io = RoadIO(truth, (1, 0, 0))  # standing on the door at (0,0)
+    assert road.walk(io, truth, set(), 1, {(3, 0)}) is True
+    assert (io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y]) == (3, 0)
