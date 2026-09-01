@@ -119,6 +119,19 @@ def door_gates(entries: dict) -> dict:
     return {step: said for step, said in entries.items() if is_door_text(said) or not (said or "").strip()}
 
 
+def gates_the_bag_opens(entries: dict, held: set[str]) -> dict:
+    """One map's door gates minus the ones naming an item we are carrying.
+
+    A locked door is only a wall while the key is missing. The door says what it wants — "Darn!
+    It needs a CARD KEY!" — so the bag answers it directly, and the moment CARD KEY is picked up
+    every door that names it stops being terrain. Without this the engine plans as if the key had
+    never been found: the leg that took the key from 5F then reported `no-path` on 3F -> 7F, a
+    refusal from our own model rather than from the world.
+    """
+    upper = {name.upper() for name in held}
+    return {step: said for step, said in entries.items() if not any(name in (said or "").upper() for name in upper)}
+
+
 def load_measured_gates(path: Path | None = None) -> dict:
     """Steps the *engine* refuses that the collision grid calls walkable.
 

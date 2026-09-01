@@ -109,6 +109,7 @@ class Rig:
         self.recorder = None
         self.telemetry_root = telemetry_root
         self.run_id = run_id or uuid.uuid4().hex[:12]
+        self.unlock_gates()
         if live_label:
             self._go_live(live_label, frame_interval, viewer_ws)
         if settle_on_boot and not self.settle():
@@ -368,7 +369,10 @@ class Rig:
         for _ in range(3):
             self.ctl.press("b")
             self.ctl.wait(25)
-        return self.bag() != before
+        if self.bag() == before:
+            return False
+        self.unlock_gates()  # a key just picked up unlocks its doors for the rest of this leg
+        return True
 
     def party(self) -> list[tuple[str, int, int]]:
         from memory_reader import SPECIES_ID_MAP
@@ -976,6 +980,28 @@ class Rig:
         return found
 
     # ---- banking --------------------------------------------------------------------------
+
+    def unlock_gates(self) -> int:
+        """Drop every measured door gate that names an item now in the bag. Returns how many.
+
+        Called on boot and after each pickup, because the bag is what turns a locked door into a
+        door. The CARD KEY was taken on 5F and the very next leg planned as though it had not
+        been: `no-path` on 3F -> 7F, our own model refusing a route the world would have allowed.
+        """
+        held = {name for name, _qty in self.bag_named()}
+        if not held:
+            return 0
+        opened = 0
+        for m in self.truth.get("maps", {}).values():
+            gates = m.get("gates")
+            if not gates:
+                continue
+            kept = rt.gates_the_bag_opens(gates, held)
+            opened += len(gates) - len(kept)
+            m["gates"] = kept
+        if opened:
+            print(f"  the bag opens {opened} measured door gate(s)", flush=True)
+        return opened
 
     def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
         """Where to stand and which way to face to be healed, if this map is a Pokemon Center.

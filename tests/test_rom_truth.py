@@ -680,3 +680,16 @@ def test_attach_measured_gates_hangs_only_the_doors(tmp_path):
     truth = {"maps": {"1": {"width": 4, "height": 4, "grid": ["1111"] * 4}}}
     rom_truth.attach_measured_gates(truth, path)
     assert truth["maps"]["1"]["gates"] == {"1,1,up": "Darn! It needs a CARD KEY!"}
+
+
+def test_a_door_stops_being_a_wall_once_its_key_is_in_the_bag():
+    """The door says what it wants, so the bag answers it. Without this the leg that took the
+    CARD KEY on 5F planned its next hop as though it had not: `no-path` on 3F -> 7F, our own
+    model refusing a route the world would have allowed."""
+    entries = {
+        "11,11,left": "Darn! It needs a CARD KEY!",
+        "3,3,up": "The door is locked...",
+    }
+    assert rom_truth.gates_the_bag_opens(entries, set()) == entries
+    assert rom_truth.gates_the_bag_opens(entries, {"CARD KEY"}) == {"3,3,up": "The door is locked..."}
+    assert rom_truth.gates_the_bag_opens(entries, {"card key", "LIFT KEY"}) == {"3,3,up": "The door is locked..."}
