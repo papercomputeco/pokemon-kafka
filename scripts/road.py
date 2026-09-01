@@ -172,8 +172,72 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
     return [r for r in found if r["door"] not in direct or r["from_map"] != map_id]
 
 
+def pad_land(truth, map_id: int, warp) -> tuple[int, int] | None:
+    """The cell a same-map warp lands on — its destination index reads the same map's own list.
+
+    ``255`` (0xFF) is the ROM's "same map" destination and resolves here too: Sabrina's gym's two
+    arrival mats (8,17)/(9,17) carry it. A door to another map is ``None`` — the pad graph is the
+    within-floor structure, and cross-floor round trips are ``_return_through``'s job.
+    """
+    m = truth["maps"].get(str(map_id))
+    if m is None:
+        return None
+    _wx, _wy, dst, idx = warp
+    if dst not in (0xFF, map_id):
+        return None
+    if not isinstance(idx, int) or not (0 <= idx < len(m["warps"])):
+        return None
+    return (m["warps"][idx][0], m["warps"][idx][1])
+
+
+def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tuple[int, int]] | None:
+    """The shortest ride SEQUENCE that brings ``targets`` into walkable reach, or None.
+
+    BFS over the pad graph, which the cartridge already gave us complete: every warp's landing is
+    an index into its own warp list, and every pad's pocket is a ``walkable`` region. Riding
+    pads in table order *explores* that graph; riding a route through it is a measurement plus a
+    walk, and exploration is what a leg's budget is not for. Sabrina's gym is thirty pads in
+    2-cycles (every landing is another pad tile), one pocket has exactly one exit (its own pad,
+    re-fired by stepping off it and back on), and the leader's pocket sits two rides from the
+    door while the table-order hunt burns its budget standing elsewhere.
+
+    ``[]`` means the walk already covers ``targets`` and ``ride_pad``'s own walk collects it.
+    Entries are the warp tiles to ride, in order. Landings are re-measured live by the caller,
+    and the next hop re-plans from wherever the cartridge actually left us, so table and live may
+    disagree in either direction and the loop still converges.
+    """
+    from collections import deque
+
+    targets = set(targets)
+    if not targets:
+        return None
+    bodies = set(bodies)
+    if walkable(truth, pairs, map_id, start, bodies) & targets:
+        return []
+    m = truth["maps"].get(str(map_id))
+    if m is None:
+        return None
+    pads = [w for w in m.get("warps", []) if pad_land(truth, map_id, w) is not None]
+    routes = {tuple(start): []}
+    queue = deque([tuple(start)])
+    while queue:
+        anchor = queue.popleft()
+        for warp in pads:
+            pad = (warp[0], warp[1])
+            if not (walkable(truth, pairs, map_id, anchor, bodies, keep={pad}) & {pad}):
+                continue  # this pad does not stand in the pocket we are standing in
+            land = pad_land(truth, map_id, warp)
+            if land in routes:
+                continue
+            routes[land] = routes[anchor] + [pad]
+            queue.append(land)
+            if walkable(truth, pairs, map_id, land, bodies) & targets:
+                return routes[land]
+    return None
+
+
 def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, rides: int = 6):
-    """Reach ``targets`` by riding a pad, when no walk can get there.
+    """Reach ``targets`` by riding pads, when no walk can get there.
 
     The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
     stepping on one fires it — so a region whose only entrance *is* a pad is unreachable to it, and
@@ -186,63 +250,95 @@ def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, 
     re-entered. A pad that points at **its own map** simply moves us: Sabrina's gym is thirty of
     those (30 of its 32 warps), and there is no far side to come back from.
 
-    Pads are tried nearest-use first — the ones standing in the target's own region, then any
-    other pad we can actually walk onto, since in a maze the useful pad is the one we can reach
-    rather than the one beside the goal. And rides *chain*: one hop is enough for Silph's floors,
-    but Sabrina's gym is a maze of thirty pads where a trainer's pocket sits several rides from
-    the door, so ``rides`` bounds how many hops one call will take.
+    The order of the rides comes from ``pad_route`` — a BFS over the pad graph — because
+    table-order hunting is how a leg rides one wrong pocket per hop and spends its budget.
+    Each hop still tries a sequence of pads (routed first, the old nearest-use hunt behind),
+    and after every ride the landing is re-measured and the next hop re-plans from wherever the
+    cartridge actually left us, so table and live may disagree in either direction and the call
+    still converges.
     """
     targets = set(targets)
     tried: set[tuple[int, int]] = set()  # pads already ridden this call, so a maze cannot cycle
+    rides = max(int(rides), 1)
     for _ in range(rides):
-        if _ride_once(io, truth, pairs, map_id, targets, battle=battle, tried=tried):
+        if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
             return True
-        if read_pos(io)[0] != map_id:
+        pos = read_pos(io)
+        if pos[0] != map_id:
             return False  # a ride took us off this floor and could not come back
+        if _ride_hop(io, truth, pairs, map_id, targets, tried, battle=battle):
+            if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+                return True  # the landing put the targets within feet
+            continue  # we moved; the next hop re-plans from where the cartridge left us
+        return False  # no pad here took us anywhere; more hops would ride the same dead ends
     return False
 
 
-def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, tried=None):
-    """One hop: onto a reachable pad, then try to walk to the targets from wherever it landed us.
+def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]], *, battle=_default_battle) -> bool:
+    """One hop: ride the routed sequence first, the old nearest-use hunt behind — walk after each.
 
-    ``tried`` carries the pads already ridden, because a maze of pads is a graph with cycles and
-    riding the same one each hop is how a leg spends its budget standing in two rooms.
+    True if any pad actually moved us, False if none did. Pads that never took us stay untried
+    (a walk not reaching a tile is not a ride); ones that did are consumed, because a maze of
+    pads is a graph with cycles and riding the same one each hop is how a leg spends its budget
+    standing in two rooms.
     """
-    tried = tried if tried is not None else set()
     bodies = live_bodies(io)
     here = read_pos(io)[1:]
-    if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
-        return True
-    best = [pad for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)]
+    routed = [p for p in (pad_route(truth, pairs, map_id, here, targets, bodies) or []) if p not in tried]
+    best = [
+        pad
+        for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)
+        if pad not in tried and pad not in routed
+    ]
     others = [
         (w[0], w[1])
         for w in truth["maps"][str(map_id)]["warps"]
         if (w[0], w[1]) not in best
+        and (w[0], w[1]) not in routed
+        and (w[0], w[1]) not in tried
         and walkable(truth, pairs, map_id, here, bodies, keep={(w[0], w[1])}) & {(w[0], w[1])}
     ]
-    for pad in [p for p in best + others if p not in tried]:
-        was = read_pos(io)
-        walk(io, truth, pairs, map_id, {pad}, battle=battle)
-        # The walk's own verdict is not the signal: a pad that fires mid-walk leaves `walk` still
-        # trying to reach a tile we have already been teleported off, and it reports "no-path".
-        # Position is the measurement.
-        mp, x, y = read_pos(io)
-        if (mp, x, y) == was:
+    moved = False
+    for pad in routed + best + others:
+        before = read_pos(io)
+        now = _ride_live(io, truth, pairs, map_id, pad, battle=battle)
+        if now == before:
             continue  # never got moving toward this pad — not a ride, so it stays untried
         tried.add(pad)  # only pads that actually moved us count as spent
-        if mp == map_id and (x, y) != pad:
-            # An intra-map pad: we are already in the new pocket, with no far side to return from.
-            if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
-                return True
-            continue
-        if mp == map_id:  # the pad did not fire on arrival — a threshold, so step onto it again
-            _step(io, "right")
-            mp, x, y = read_pos(io)
-        if mp == map_id:
-            continue  # not a pad we can ride; try the next one
-        if _return_through(io, truth, pairs, map_id, mp, x, y):
-            return walk(io, truth, pairs, map_id, targets, battle=battle) is True
-    return False
+        moved = True
+        if now[0] != map_id and not _return_through(io, truth, pairs, map_id, now[0], now[1], now[2]):
+            return True  # we moved and are off the floor; `ride_pad` re-maps from here
+        if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+            return True
+    return moved
+
+
+def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) -> tuple[int, int, int]:
+    """End up where ``pad`` lands — by walking onto it, or re-firing it from our own feet.
+
+    A pad does not fire the moment we are standing on it; it fires on (re)entry. A dead-end
+    pocket's only exit IS its own pad — Sabrina's gym parks the gym-side trainer in one — and
+    the step-off-and-back is the whole ride. Each side is tried once; a blocked side costs
+    nothing but the step, and a side that takes us anywhere counts as the measurement.
+    """
+    was = read_pos(io)
+    if was[0] == map_id and was[1:] == pad:
+        for direction, back in (("right", "left"), ("left", "right"), ("down", "up"), ("up", "down")):
+            _step(io, direction)
+            io.wait(60)
+            if read_pos(io) == was:
+                continue  # that side is closed or held; we are still on the pad
+            _step(io, back)
+            io.wait(60)
+            now = read_pos(io)
+            if now != was:
+                return now  # the pad re-fired (or something else moved us — position is the fact)
+        return was  # it would not fire from any side
+    walk(io, truth, pairs, map_id, {pad}, battle=battle)
+    # The walk's own verdict is not the signal: a pad that fires mid-walk leaves it still trying
+    # to reach a tile we have already been teleported off, and it reports "no-path". Position is
+    # the measurement.
+    return read_pos(io)
 
 
 def _return_through(io, truth, pairs, map_id: int, mp: int, x: int, y: int) -> bool:

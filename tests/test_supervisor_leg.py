@@ -142,6 +142,11 @@ class FakeRig:
         self._pos = (self._pos[0], *sorted(cells)[0])
         return True
 
+    def settle(self, *a, **kw):
+        """The real Rig closes a win/award box by pressing and probe-moving; here it's a close."""
+        self.calls.append(("settle",))
+        return True
+
     def talk(self, face):
         self.calls.append(("talk", face))
         if self._heals_on_talk:  # the Center nurse's line is the game's heal verb
@@ -1325,11 +1330,37 @@ def test_max_hops_ends_the_leg_rather_than_looping(tmp_path):
     assert runner.run()["outcome"] == "max-hops"
 
 
-def test_engage_until_badge_skips_a_body_the_walk_could_not_reach():
+def test_engage_until_badge_skips_a_body_it_cannot_reach_even_riding(tmp_path):
     rig = FakeRig(start=(2, 1, 1), badges=0, bodies={(9, 9)})
-    rig.walk = lambda mp, targets, **kw: rig.calls.append(("walk", sorted(targets)))  # never arrives
-    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    rig.approach = lambda cells: (rig.calls.append(("approach", sorted(cells))), False)[1]  # ride refused too
+    lines = []
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lines.append, learnings_dir=tmp_path)
     assert runner.run()["outcome"] == "engaged-no-badge"
+    assert any("could not reach" in s for s in lines)
+
+
+def test_engage_until_badge_rides_the_pad_the_walk_cannot_cross():
+    """Sabrina's gym shape: the body sits in a pocket the walk cannot cross, and approach is the
+    ride. The badge byte is the verdict, not the roster: the loop talks the body down and stops
+    the moment the byte changes, whether or not it ever met the others."""
+    rig = FakeRig(start=(2, 17, 14), badges=0b11111, bodies={(3, 13)})
+
+    def approach(cells):
+        rig.calls.append(("approach", sorted(cells)))
+        rig._pos = (2, 3, 12)  # arrived on a facing cell because the pads were ridden, not planned
+        return True
+
+    rig.approach = approach
+    original = rig.talk
+
+    def talk(face):
+        rig._badges |= 0b10000000  # the badge bit is the game's own, set on its own schedule
+        return original(face)
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["ok"]
+    assert any(c[0] == "approach" for c in rig.calls)  # the walk never reached it; the ride did
 
 
 def test_clear_blocker_stops_when_the_walk_lands_somewhere_else(tmp_path):
@@ -1361,14 +1392,15 @@ def test_go_and_talk_gives_up_when_the_approach_is_refused(tmp_path):
     assert runner._go_and_talk((1, 9)) is False
 
 
-def test_engage_until_badge_re_reads_after_a_walk_changes_map():
+def test_engage_until_badge_re_reads_after_approach_changes_map():
     rig = FakeRig(start=(2, 1, 1), badges=0, bodies={(6, 6)})
 
-    def walk(mp, targets, **kw):
-        rig.calls.append(("walk", sorted(targets)))
-        rig._pos = (99, 1, 1)  # a fight or a warp carried us off the map
+    def approach(cells):
+        rig.calls.append(("approach", sorted(cells)))
+        rig._pos = (99, 1, 1)  # a ride carried us to another floor
+        return False
 
-    rig.walk = walk
+    rig.approach = approach
     runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
     assert runner.run()["outcome"] == "engaged-no-badge"
 
@@ -1415,6 +1447,55 @@ def test_engage_until_badge_reports_the_byte_after_its_rounds_run_out():
     runner = LegRunner(rig, goal=2, engage=True, engage_rounds=1, consult=_consult("GIVE_UP"), log=lambda *_: None)
     assert runner.run()["outcome"] == "engaged-no-badge"
     assert len([c for c in rig.calls if c[0] == "talk"]) == 1  # one round, one conversation
+
+
+def test_engage_until_badge_revisits_a_gated_leader_after_the_member_falls():
+    """Map 178's actual shape: the leader reads a coach line until the gym's member falls, then —
+    and only then — battles and hands over the badge. Nearest-first reaches the leader first
+    (still locked) and the member second. Retiring every body after one line is exactly how the
+    gym reported "engaged every body, badge byte unchanged": the leader was met once, locked;
+    no one ever met her again after the member came down. The loop must keep her turn, so her
+    second meeting — the one the member's defeat opened — is the one that drops the badge."""
+    member, leader = (0, 0), (7, 7)
+    rig = FakeRig(start=(2, 7, 6), badges=0b11111, bodies={member, leader})
+    state = {"member_down": False}
+
+    def talk(face):
+        rig.calls.append(("talk", face))  # the base FakeRig.talk does this; the override must too
+        # whichever body the player is standing beside is the one being faced
+        _mp, x, y = rig.pos()
+        faced = min(rig.bodies(), key=lambda b: abs(b[0] - x) + abs(b[1] - y))
+        if faced == member:
+            state["member_down"] = True  # the member's fight ends; its defeat unlocks the leader
+            return "got 1140 for winning!"
+        if not state["member_down"]:
+            return "In a battle of equals, the one with the stronger will wins!"  # the coach line
+        rig._badges |= 0b00100000  # the badge commits on the leader's second meeting
+        return "I dislike fighting, but if you wish, I will show you my powers!"
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    report = runner.run()
+    assert report["ok"]  # badge byte gained — only reachable if the leader is met twice
+    # the leader's locked line came first, the badge line after the member fell: two meetings
+    assert state["member_down"]
+    assert len([c for c in rig.calls if c[0] == "talk"]) >= 3  # leader-locked, member, leader-badge
+
+
+def test_engage_until_badge_settles_the_win_box_after_each_battle():
+    """A battle leaves the win/award box open; settle() is the closer that commits the result.
+    Without it the "got a prize" box stays pinned and the next body never unlocks. _go_and_talk
+    must settle after every talk so a fallen member actually registers as defeated."""
+    rig = FakeRig(start=(2, 7, 6), badges=0b11111, bodies={(7, 7)})
+
+    def talk(face):
+        rig._badges |= 0b00100000
+        return rig.said
+
+    rig.talk = talk
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    runner.run()
+    assert ("settle",) in rig.calls  # the win box was closed by settle, not left pinned
 
 
 def test_a_hop_the_ladder_cannot_open_is_banned_and_another_chain_tried(tmp_path):

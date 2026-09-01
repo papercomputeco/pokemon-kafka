@@ -662,3 +662,85 @@ def test_ride_pad_stops_after_its_hop_budget():
     truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 0]])}}
     io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 0, 0)})  # a pad that loops us home
     assert road.ride_pad(io, truth, set(), 1, {(8, 0)}, rides=2) is False
+
+
+def test_pad_land_resolves_the_same_map_destination_not_the_others():
+    # 255 (0xFF) is the ROM's "this map" destination and its index reads the map's own warp list.
+    m = _map(["1" * 7], warps=[[2, 0, 255, 1], [3, 0, 1, 0], [5, 0, 2, 0]])
+    road.truth = {"maps": {"1": m, "2": m}}
+    assert road.pad_land(road.truth, 1, [2, 0, 255, 1]) == (3, 0)
+    assert road.pad_land(road.truth, 1, [3, 0, 1, 0]) == (2, 0)
+    assert road.pad_land(road.truth, 1, [5, 0, 2, 0]) is None  # a door to another map is not the graph
+    assert road.pad_land(road.truth, 1, [2, 0, 255, 9]) is None  # an index past the list is a decode lie
+
+
+def test_pad_route_orders_the_rides_the_table_order_hunt_gives_up_on():
+    # (2,0) and (5,0) ride at each other; (7,0) rides home and opens the last pocket. The table
+    # lists (7,0) LAST, so the nearest-use hunt stands on (5,0)'s pocket and never rides it — the
+    # BFS says ride (2,0), then (7,0), and the walk takes the last two steps.
+    road.truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [7, 0, 1, 2]])}}
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}) == [(2, 0), (7, 0)]
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(1, 0)}) == []  # a plain walk covers it
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {}) is None
+
+
+def test_pad_route_says_ride_your_own_pad_when_it_is_the_only_exit():
+    # Standing ON a pad does not fire it. When that pad's landing pocket holds the target, the
+    # route is the pad itself — the caller re-fires it by stepping off and back on.
+    road.truth = {"maps": {"1": _map(["1" * 7], warps=[[1, 0, 1, 1], [4, 0, 1, 0]])}}
+    assert road.pad_route(road.truth, set(), 1, (1, 0), {(5, 0)}) == [(1, 0)]
+
+
+def test_pad_route_sees_the_bodies_severing_the_pocket():
+    road.truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0]])}}
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}) == [(2, 0)]
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}, bodies={(6, 0), (7, 0)}) is None
+
+
+def test_ride_pad_rides_the_routed_sequence_and_walks_the_rest():
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [7, 0, 1, 2]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 5, 0), (1, 7, 0): (1, 7, 0)})
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}, rides=3) is True
+    assert qm.read_pos(io) == (1, 8, 0)
+    assert io.pressed.count("right") == 5  # the route: (1,0), (2,0), (6,0), (7,0), (8,0)
+
+
+def test_ride_pad_refires_the_pad_its_feet_are_on():
+    # The (9,8) pocket's only exit is its own pad, and we arrive standing on such a pad: the ride
+    # is stepping off it and back on, which is what re-fires it.
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[1, 0, 1, 1], [4, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 1, 0), arrive={(1, 1, 0): (1, 4, 0)})
+    assert road.ride_pad(io, truth, set(), 1, {(5, 0)}, rides=2) is True
+    assert qm.read_pos(io) == (1, 5, 0)
+
+
+def test_ride_pad_reaches_every_standing_body_in_sabrinas_gym():
+    # The measured shape: 32 warps, every same-map pad riding in 2-cycles (each landing is
+    # another pad tile), five unengaged bodies, and a baton bench at (17,14). The old engine
+    # rode its budget standing in two pockets on all five; the routed engine must reach each,
+    # and stand on the facing cell, within six rides.
+    import rom_truth as rt
+
+    truth = rt.load_truth()
+    pairs = rt.loaded_pairs(truth)
+    m = truth["maps"]["178"]
+    arrive = {
+        (178, w[0], w[1]): (178, land[0], land[1])
+        for w in m["warps"]
+        if (land := road.pad_land(truth, 178, w)) is not None
+    }
+    bodies = {(3, 1), (3, 7), (3, 13), (9, 8), (10, 1), (10, 15)}
+    for body in ((9, 8), (10, 1), (3, 7), (3, 13), (3, 1)):
+        x, y = body
+        ring = {(x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y), (x, y - 2)}
+        ring = {c for c in ring if 0 <= c[0] < m["width"] and 0 <= c[1] < m["height"]}
+        io = RoadIO({"maps": {"178": m}}, (178, 17, 14), arrive=arrive)
+        assert road.ride_pad(io, {"maps": {"178": m}}, pairs, 178, ring, rides=6) is True, f"no ride reaches {body}"
+        assert qm.read_pos(io)[1:] in ring, f"did not stand on the {body} facing cell"
+    # And leaving a dead pocket: standing on (11,11), the (9,8) pocket's only pad, the (10,1)
+    # facing cells are two rides away — the first ride is re-firing the pad under us.
+    ring = {(9, 1), (11, 1), (10, 0), (10, 2)}
+    io = RoadIO({"maps": {"178": m}}, (178, 11, 11), arrive=arrive)
+    assert road.pad_route({"maps": {"178": m}}, pairs, 178, (11, 11), ring, bodies) == [(11, 11), (5, 3)]
+    assert road.ride_pad(io, {"maps": {"178": m}}, pairs, 178, ring, rides=4) is True
+    assert qm.read_pos(io)[1:] in ring
