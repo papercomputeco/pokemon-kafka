@@ -744,3 +744,15 @@ def test_ride_pad_reaches_every_standing_body_in_sabrinas_gym():
     assert road.pad_route({"maps": {"178": m}}, pairs, 178, (11, 11), ring, bodies) == [(11, 11), (5, 3)]
     assert road.ride_pad(io, {"maps": {"178": m}}, pairs, 178, ring, rides=4) is True
     assert qm.read_pos(io)[1:] in ring
+
+
+def test_pad_route_can_target_a_warp_tile_itself():
+    """A gym's exit mat is a warp tile, and `walkable` calls every warp a wall — so a route TO one
+    is unreachable by construction unless the target stays open. Badge 6 was won at (9,9) behind
+    Sabrina's pads and the next leg burned its whole budget re-trying the mat at (8,17)."""
+    # Pad (2,0) lands on pad (5,0); (6,0) is the exit door to map 9. Walking east from (0,0)
+    # is stopped by the pad at (2,0), exactly as `walk` blocks door tiles.
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [6, 0, 9, 0]])}}
+    assert road.pad_route(truth, set(), 1, (0, 0), {(6, 0)}) == [(2, 0)]  # ride, then step to it
+    assert road.pad_route(truth, set(), 1, (5, 0), {(6, 0)}) == []  # already beside the door
+    assert road.pad_route(truth, set(), 1, (0, 0), {(1, 0)}) == []  # a plain walk reaches it

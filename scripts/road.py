@@ -212,7 +212,13 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
     if not targets:
         return None
     bodies = set(bodies)
-    if walkable(truth, pairs, map_id, start, bodies) & targets:
+    # The targets stay open. `walkable` treats every warp tile as a wall, which is right for
+    # routing *through* one and wrong when the target IS one — and a gym's exit mat is exactly
+    # that. Without this the goal is unreachable by construction: badge 6 was won at (9,9) behind
+    # thirty pads and the leg then re-tried the mat at (8,17) until its budget ran out, because
+    # the BFS could never report the mat as reached. `walk` excludes its own targets from the
+    # warp block for the same reason.
+    if walkable(truth, pairs, map_id, start, bodies, keep=targets) & targets:
         return []
     m = truth["maps"].get(str(map_id))
     if m is None:
@@ -231,7 +237,7 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
                 continue
             routes[land] = routes[anchor] + [pad]
             queue.append(land)
-            if walkable(truth, pairs, map_id, land, bodies) & targets:
+            if walkable(truth, pairs, map_id, land, bodies, keep=targets) & targets:
                 return routes[land]
     return None
 
