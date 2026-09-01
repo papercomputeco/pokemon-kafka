@@ -1078,7 +1078,23 @@ class Rig:
         step swallowed) and one banked standing ON a warp mat, which boots back through the door
         it just came out of. Settle first, step off the door if we are on it, then save.
         """
+        import io as _io
+
+        arrival = self.pos()[0]
+        entry = _io.BytesIO()
+        self.pb.save_state(entry)  # the map we were asked to bank; anything else is not it
+        mp, x, y = self.pos()
+        if (x, y) in self.warp_tiles(mp):
+            # Step off BEFORE settling. `settle`'s probe will use a door when every neighbour is
+            # one, and Silph 3F's (11,11) mat is surrounded by them — so settling first fired the
+            # warp and the baton recorded (212,5,3), a floor away from the leg that had just
+            # arrived. Two chained legs booted on the wrong side of the building that way.
+            self._step_off_mat(mp, x, y)
         self.settle()
+        if self.pos()[0] != arrival:
+            print(f"  banking on {arrival} but settling left us on {self.pos()[0]} — rolling back", flush=True)
+            entry.seek(0)
+            self.pb.load_state(entry)
         mp, x, y = self.pos()
         if (x, y) in self.warp_tiles(mp):
             # A real step, not a probe. `probe_step` presses and *undoes*, which leaves us on the
