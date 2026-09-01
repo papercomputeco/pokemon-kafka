@@ -27,6 +27,7 @@ from world_map import WorldMap
 WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
 LEDGES_OFF = 0x0D00
 STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
+ITEMS_OFF = 0xB000  # the item-name list; found by content signature (it opens with MASTER BALL)
 WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
 EVOS_PTRS, EVOS_BLOCK, EVOS_BLOCK2 = 0x5000, 0x5200, 0x5220  # bank 1: addr == file offset
 TYPECHART_OFF = 0x0A00
@@ -109,6 +110,20 @@ def build_rom() -> bytearray:
     # Id 2 exercises the special-character branch: NIDORAN + the male symbol (0xEF).
     nido = bytes(0x80 + ord(c) - ord("A") for c in "NIDORAN") + bytes([0xEF, 0x50, 0x50])
     rom[NAMES_OFF + 10 : NAMES_OFF + 20] = nido
+
+    # Item names, at their real shape: a 0x50-terminated list opening with MASTER BALL, which is
+    # the signature `item_names` finds it by. Without it the synthetic image has no item table and
+    # the extraction's whole naming path goes unexercised wherever the real ROM is absent — which
+    # is CI, where rom/ does not ship.
+    def item_bytes(name: str) -> bytes:
+        out = bytearray()
+        for ch in name:
+            out.append(0x7F if ch == " " else 0x80 + ord(ch) - ord("A"))
+        out.append(0x50)
+        return bytes(out)
+
+    blob = b"".join(item_bytes(n) for n in ("MASTER BALL", "ULTRA BALL", "GREAT BALL")) + bytes([0x50])
+    rom[ITEMS_OFF : ITEMS_OFF + len(blob)] = blob
 
     for mid, hdr in ((0, HDR0), (1, HDR1), (2, HDR2), (3, HDR3)):
         rom[MAP_HEADER_BANKS + mid] = 0
@@ -719,3 +734,16 @@ def test_a_header_with_a_tileset_past_the_table_is_not_a_map(rom):
     rom_bytes = bytearray(data)
     rom_bytes[HDR0] = rom_truth.MAX_TILESET + 1
     assert parse_map(bytes(rom_bytes), 0) is None
+
+
+def test_item_names_are_read_from_the_list_that_opens_with_master_ball(rom):
+    """The list is located by content signature, never by address — and TMs/HMs live past it as a
+    numbered range, which is why 'HM03' is a label this code generates rather than ROM text."""
+    _, data = rom
+    items = rom_truth.item_names(data)
+    assert items["1"] == "MASTER BALL"
+    assert items["2"] == "ULTRA BALL" and items["3"] == "GREAT BALL"
+    assert items[str(rom_truth.HM_FIRST)] == "HM01"
+    assert items[str(rom_truth.HM_FIRST + 2)] == "HM03"  # the Surf HM, by generated name
+    assert items[str(rom_truth.TM_BASE + 1)] == "TM01"
+    assert rom_truth.item_names(bytes(0x100)) == {}  # no signature, no table
