@@ -87,6 +87,38 @@ MEASURED_GATES = Path(__file__).resolve().parent.parent / "references" / "measur
 _DIR_OF = {(0, -1): "up", (0, 1): "down", (-1, 0): "left", (1, 0): "right"}
 
 
+# A refused step whose sentence is a *door* talking, versus one where a body simply spoke. The
+# distinction cost this project a session: Silph 5F's (9,16) was recorded as a gate carrying
+# "I heard a kid was wandering around." — a wandering NPC's small talk, written down as a
+# permanent wall and applied symmetrically ever after. It sat on the single tile between the 9F
+# landing and the CARD KEY, so every route to the key was pruned before it was planned, on every
+# run, invisibly. Four of 5F's fifteen "gates" were bodies talking.
+#
+# The bias is deliberate and it is the opposite of what this file used to say. Over-blocking was
+# called the safe direction because under-blocking "costs a run"; measured, over-blocking costs
+# *every* run and says nothing, while under-blocking costs one hop that the leg then measures and
+# records. So a gate is honoured only when the sentence sounds like a lock. Anything else is a
+# body, and bodies move.
+DOOR_PHRASES = ("needs a", "locked", "won't open", "wont open", "no key", "can't open", "cant open")
+
+
+def is_door_text(said: str | None) -> bool:
+    """Does this refusal sentence sound like a door, rather than a body that happened to talk?"""
+    return bool(said) and any(phrase in said.lower() for phrase in DOOR_PHRASES)
+
+
+def door_gates(entries: dict) -> dict:
+    """One map's measured gates minus the ones that are a body talking.
+
+    A *silent* refusal is kept: nothing spoke, so nothing was standing there, and the step is a
+    wall the collision grid failed to express. What is dropped is a refusal that came with small
+    talk — "AAAAAAA got 1400 for winning!", "I am one of the 4 ROCKET BROTHERS!" — which is a
+    sprite in the way, not a locked door. Across the measured file that is 106 of 130 entries;
+    the pocket model every Silph route was planned on stood on 82% sprite chatter.
+    """
+    return {step: said for step, said in entries.items() if is_door_text(said) or not (said or "").strip()}
+
+
 def load_measured_gates(path: Path | None = None) -> dict:
     """Steps the *engine* refuses that the collision grid calls walkable.
 
@@ -590,10 +622,16 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
 
 
 def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
-    """Hang each map's measured gates on its own dict, where ``passable`` will find them."""
+    """Hang each map's measured gates on its own dict, where ``passable`` will find them.
+
+    Only the *doors* are hung. The survey records every refusal it meets, which is right — the
+    sentence is evidence and the file keeps it — but a refusal from a body that was standing
+    there is not a fact about the map, and honouring it walls off ground that is open the moment
+    the sprite wanders on. See ``is_door_text``.
+    """
     for map_id, entries in load_measured_gates(path).items():
         if map_id in truth.get("maps", {}):
-            truth["maps"][map_id]["gates"] = entries
+            truth["maps"][map_id]["gates"] = door_gates(entries)
     for map_id, tiles in load_dead_warps().items():
         if map_id in truth.get("maps", {}):
             truth["maps"][map_id]["dead_warps"] = tiles

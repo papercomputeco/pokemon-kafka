@@ -644,3 +644,39 @@ def test_pocket_exits_skip_a_door_mat_and_a_warp_outside_the_pocket():
     truth["maps"]["1"]["warps"] = [[0, 0, rom_truth.LAST_MAP, 0], [1, 1, 999, 0], [3, 3, 2, 0]]
     exits = rom_truth.pocket_exits(truth, 1, 0)
     assert [tuple(e["from"]) for e in exits] == [(3, 3)]  # the mat and the unknown map both drop
+
+
+def test_a_gate_is_a_door_only_when_the_sentence_is_a_lock():
+    """The survey records every refusal it meets; only some of them are doors.
+
+    Silph 5F's (9,16) was written down carrying "I heard a kid was wandering around." — a
+    wandering NPC's small talk, kept as a permanent wall and applied from both sides ever after.
+    It sat on the one tile between the 9F landing and the CARD KEY, so every route to the key was
+    pruned before it was planned. Across the measured file, 106 of 130 entries were bodies.
+    """
+    assert rom_truth.is_door_text("Darn! It needs a CARD KEY!")
+    assert rom_truth.is_door_text("The door is locked...")
+    assert not rom_truth.is_door_text("I heard a kid was wandering around.")
+    assert not rom_truth.is_door_text("AAAAAAA got 1400 for winning!")
+    assert not rom_truth.is_door_text("")
+
+
+def test_door_gates_keeps_silent_refusals_and_drops_chatter():
+    """A silent refusal is terrain the grid failed to express — nothing spoke, so nothing was
+    standing there. A refusal that came with a sentence about ROCKET BROTHERS is a sprite."""
+    entries = {
+        "8,4,left": "Darn! It needs a CARD KEY!",
+        "9,16,right": "I heard a kid was wandering around.",
+        "3,3,up": "",
+    }
+    assert rom_truth.door_gates(entries) == {"8,4,left": "Darn! It needs a CARD KEY!", "3,3,up": ""}
+
+
+def test_attach_measured_gates_hangs_only_the_doors(tmp_path):
+    path = tmp_path / "gates.json"
+    path.write_text(
+        json.dumps({"1": {"1,1,up": "Darn! It needs a CARD KEY!", "2,2,left": "Hey kid! What are you doing here?"}})
+    )
+    truth = {"maps": {"1": {"width": 4, "height": 4, "grid": ["1111"] * 4}}}
+    rom_truth.attach_measured_gates(truth, path)
+    assert truth["maps"]["1"]["gates"] == {"1,1,up": "Darn! It needs a CARD KEY!"}
