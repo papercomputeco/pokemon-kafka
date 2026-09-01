@@ -546,14 +546,19 @@ class Rig:
         # both plan over tiles and a pad is a tile you cannot stand on by planning. Ride it.
         # Measured on Silph 5F: the card-key corridor is unreachable on foot from every cell on
         # the floor and one step from the pad at (27,3), and three legs died on that difference.
-        if road.ride_pad(self.io, self.truth, self.pairs, mp, cells, battle=self.battle):
+        # Only on a facility floor. A "warp" on a city map is a building's front door, not a
+        # teleport pad: riding Saffron's Silph entrance walks into the lobby and back out, and a
+        # leg trying to reach the gym past its guard did that eighty times before the hop cap
+        # stopped it.
+        facility = self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET
+        if facility and road.ride_pad(self.io, self.truth, self.pairs, mp, cells, battle=self.battle):
             return True
         here = self.settled_pos()
         if here[0] == mp and here[1:] in cells:
             return True
         if here[0] != mp:  # a ride left us on another floor; the caller's map is no longer ours
             return False
-        if self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET:
+        if facility:
             self.oracle_goto(lambda p: p[0] == mp and (p[1], p[2]) in cells)
         here = self.pos()
         return here[0] == mp and here[1:] in cells
