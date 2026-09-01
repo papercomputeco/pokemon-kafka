@@ -73,34 +73,40 @@ solves this leg and teaches the repo nothing.
 
 ## Where this stands right now (read this first)
 
-**The CARD KEY is won.** `data/local_runs/roster-bench/b6_key_won.state` is banked on 5F at
-(20,16) with CARD KEY in the bag. Everything above about hunting it is history; do not re-hunt it.
+Silph is taken and the gym is open. What is left is one room.
 
-What was actually blocking it was ours: `survey_pocket` recorded every refused step with what the
-game said, and all of them were hung on the map as walls — 106 of 130 were sprites talking, not
-doors. `attach_measured_gates` now keeps only door text ("Darn! It needs a CARD KEY!") and silent
-refusals. Two other capabilities landed with it:
+- **CARD KEY won** (map 210 (21,16)); all 24 card-key doors open once it is in the bag.
+- **Giovanni beaten** on 11F — measured by his line, "Blast it all! You ruined our plans for
+  SILPH!", and the secretary thanking us afterwards.
+- **The Saffron gym guard stood down.** The body at (34,4) that used to say "Get out of the way!"
+  now says "We admire your courage.", and we walk through its tile. That hypothesis is settled.
+- **We are inside Sabrina's gym**, map 178. Baton: `badge6f2.state` at (178,17,14).
+- Its east-column trainers — (17,1), (17,7), (17,13) — are beaten. Still standing: (3,1), (3,7),
+  (3,13), (9,8), and **Sabrina at (10,1)**. The badge byte is still `0b00011111`.
 
-- `road.ride_pad` — reach a region whose only entrance is a teleport pad, by riding it and
-  stepping off the far side. `Rig.approach` tries this automatically now.
-- `road.rides_to(truth, pairs, map, targets, bodies)` — every door on *any* floor whose landing
-  can walk to a cell. This is the lookup to use before planning a route inside Silph.
+**The whole remaining problem is the pad maze.** 30 of the gym's 32 warps point at itself, so
+each trainer sits in a pocket reached by riding a specific chain of pads. The engine can now ride:
 
-`docs/learnings/saffron-floors-topology-20260901.md` is your own measured floor record; its
-CARD-KEY-door lists are still useful, but any claim that a pocket is sealed predates the gate fix
-and should be re-checked with `rides_to` rather than believed.
+- `road.ride_pad(io, truth, pairs, map, targets, rides=N)` — walk onto a reachable pad, take
+  whatever it does (same-map teleport or a round trip to another map), and re-try the walk; it
+  chains up to `rides` hops and will not ride the same pad twice in one call.
+- `road.pads_reaching(truth, pairs, map, targets, bodies)` — which pads *stand* in a target's
+  region; `road.rides_to(...)` — which door on any map lands somewhere that can reach a cell.
+- `Rig.approach` tries a ride automatically on tileset-22 floors, and `Rig.escape_pocket` rides
+  until we stand outside our own region.
+
+What the engine does **not** have is a search over the pad graph: it rides pads it can reach in
+table order and gives up after its budget. Reaching (3,x) and (10,1) needs the ride *sequence*,
+which is a measurement problem — ride a pad, record where it lands, and build the graph. Every
+landing is one `supervisor.py run --clear-floor` away, and the leg already prints the pads beside
+each unreachable body.
 
 ## Your legs, in order
 
-1. **Heal first.** Charizard, Dugtrio and Gloom are at 0 HP in that baton. Giovanni is a real
-   fight; take the party to a Pokemon Center before it.
-2. **Giovanni, 11F (map 235).** He is at (7,5) and his sprite is `kind: "npc"`, so `--clear-floor`
-   (trainers only) walks past him — `engage_bodies(("trainer","npc"))` is what meets him. Bank
-   `b6_giovanni.state`.
-3. **Sabrina, gym map 178.** Out of Silph, to Saffron (map 10); the gym door is the warp at (34,3)
-   and the body at (34,4) said "Get out of the way!" before Silph fell. Test whether it stands
-   down now; do not assume. Sabrina's room has ~30 intra-map pads — `Rig.escape_pocket` and
-   `ride_pad` are the tools for that floor. Bank `badge6.state`.
-
-**Start by running a leg, not by re-deriving one.** The first command of this session should be a
-`supervisor.py run`.
+1. **Map the gym's pad graph.** From `badge6f2.state`, ride each reachable pad and record
+   (pad -> landing). `survey`/`explore` do this for pockets; the gym is small enough to do
+   exhaustively. Write it to `docs/learnings/`.
+2. **Reach Sabrina at (10,1)** using that graph, and beat her. `BADGES` going `0b00011111` ->
+   `0b00111111` is the only proof. Bank `badge6.state`.
+3. If the pad graph makes a general capability obvious (a BFS over measured landings), put it in
+   `scripts/road.py` with a test rather than in a scratchpad.
