@@ -1593,3 +1593,31 @@ def test_a_map_that_is_not_a_center_has_no_counter():
     that happens to hold an npc is not a Center, and a leg must not stand in it pressing A."""
     assert FakeRig(truth=_truth()).center_counter(2) is None
     assert FakeRig(truth=_center_truth()).center_counter(2) == ((3, 3), "up")
+
+
+def test_a_door_no_walk_reaches_is_ridden_to_not_retried(tmp_path):
+    """Badge 6 was won at (9,9) inside Sabrina's gym — behind thirty teleport pads — and the next
+    leg spent its entire budget re-trying the exit mat at (8,17) from there. A door on this map
+    that no walk reaches is a ride, the same rule bodies and item balls already get."""
+
+    class PadGymRig(FakeRig):
+        def __init__(self):
+            super().__init__(start=(1, 5, 5))  # map 1's (2,7) door leads to the house, map 9
+            self.approached = []
+
+        def warp(self, cur, wx, wy, **kw):
+            self.calls.append(("warp", (wx, wy)))
+            if not self.approached:  # nothing walks to the mat from where we stand
+                return "no-path"
+            self._pos = (9, 0, 0)
+            return True
+
+        def approach(self, cells):
+            self.approached.append(sorted(cells))
+            return True
+
+    rig = PadGymRig()
+    runner = LegRunner(rig, goal=9, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result
+    assert rig.approached, "the leg never tried to ride to the door"

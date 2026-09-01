@@ -451,6 +451,16 @@ class LegRunner:
         now = self.rig.pos()[0]
         if now == hop["to"]:
             return None
+        if now == cur and hop["via"] != "edge" and str(result) in ("no-path", "refused", "cap"):
+            # The door is on this map but no walk reaches it. That is a ride, not a wall — the
+            # rule already applied to bodies and item balls, and the hop is the third place that
+            # needs it: badge 6 was won at (9,9) inside Sabrina's gym, and the leg then spent its
+            # whole budget re-trying the exit mat at (8,17) from behind thirty teleport pads.
+            if self.rig.approach({(hop["x"], hop["y"])}):
+                result = self.rig.warp(cur, hop["x"], hop["y"])
+                now = self.rig.pos()[0]
+                if now == hop["to"]:
+                    return None
         if now != cur:  # an interior swallowed the hop — a gate room, not a failure
             self.log(f"  interior {now} swallowed the hop")
             inner = self.rig.traverse(now)
