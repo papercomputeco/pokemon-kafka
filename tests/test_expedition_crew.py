@@ -237,3 +237,13 @@ def test_decide_from_stream_falls_back_to_the_conclusion_at_end_of_stream():
 def test_chat_body_asks_for_a_stream_only_when_told_to():
     assert "stream" not in crew.chat_body("m", "p")
     assert crew.chat_body("m", "p", stream=True)["stream"] is True
+
+
+def test_decide_from_stream_does_not_reparse_on_every_token():
+    """A thinking seat emits tens of thousands of short deltas; re-parsing each one is wasted work.
+    Short pieces with no newline accumulate and are judged at the next line boundary."""
+    menu = ["RIDE_PAD", "GIVE_UP"]
+    stream = _sse(*[{"reasoning": "hm "} for _ in range(5)], {"content": "ACTION: RIDE_PAD\nWHY: measured\n"})
+    action, why, text = crew.decide_from_stream(stream, menu)
+    assert action == "RIDE_PAD" and why == "measured"
+    assert text.startswith("hm hm ")

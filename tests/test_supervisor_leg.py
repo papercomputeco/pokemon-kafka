@@ -1621,3 +1621,78 @@ def test_a_door_no_walk_reaches_is_ridden_to_not_retried(tmp_path):
     result = runner.run()
     assert result["ok"], result
     assert rig.approached, "the leg never tried to ride to the door"
+
+
+def test_a_heal_whose_counter_cannot_be_reached_says_so(tmp_path):
+    """A Center whose nurse we cannot stand in front of is a fact worth recording, not a silent
+    fall-through to sweeping bodies."""
+
+    class NoCounterRig(FakeRig):
+        def approach(self, cells):
+            self.calls.append(("approach", sorted(cells)))
+            return False
+
+    rig = NoCounterRig(
+        start=(2, 3, 3), truth=_center_truth(), badges=0b11111, party=[("CHARIZARD", 100, 0)], bodies={(8, 3)}
+    )
+    runner = LegRunner(rig, goal=2, heal=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("could not reach the nurse's counter" in n for n in runner.notes)
+
+
+def test_engage_until_badge_reports_whether_the_byte_moved(tmp_path):
+    """`_engage_until_badge` is judged on the BADGES byte, never on having talked to everyone."""
+
+    class BadgeRig(FakeRig):
+        def talk(self, face):
+            self.calls.append(("talk", face))
+            self._badges |= 0b00100000
+            return "I dislike fighting, but if you wish..."
+
+    rig = BadgeRig(start=(2, 7, 6), badges=0b11111, bodies={(7, 7)}, truth=_center_truth())
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["ok"]
+
+
+def test_a_seat_that_runs_out_of_clock_is_asked_to_close(monkeypatch):
+    """The Extractor gets 300 seconds from this gateway and spends them all thinking: six
+    attempts, six non-answers. What clears it is a second call handing its own cut-off reasoning
+    back — 289s of silence became a decision in 49s."""
+    import expedition_crew as crew
+
+    bodies = []
+
+    class _Resp:
+        def __init__(self, chunks):
+            self.chunks = chunks
+
+        def __iter__(self):
+            for c in self.chunks:
+                yield ("data: " + json.dumps({"choices": [{"delta": c}]}) + "\n").encode()
+            yield b"data: [DONE]\n"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        bodies.append(json.loads(req.data))
+        if len(bodies) == 1:  # ran out of clock mid-thought: plenty of text, no ACTION line
+            return _Resp([{"reasoning": "weighing " * 200}])
+        return _Resp([{"content": "ACTION: GIVE_UP\nWHY: the door is a wall\n"}])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    action, why, model = supervisor.TapesConsult(log=lambda *_: None)("puzzle", "facts", ["GIVE_UP"])
+    assert (action, why) == ("GIVE_UP", "the door is a wall")
+    assert len(bodies) == 2, "the seat was never asked to close"
+    assert "Do not reason further" in bodies[1]["messages"][0]["content"]
+    assert model == crew.CREW["puzzle"]["model"]
+
+
+def test_engage_until_badge_on_an_empty_floor_reports_the_byte(tmp_path):
+    """A floor with nobody on it is not a failure to engage — it is a floor with nobody on it."""
+    rig = FakeRig(start=(2, 3, 3), badges=0b11111, bodies=set(), truth=_center_truth())
+    runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.run()["outcome"] == "engaged-no-badge"

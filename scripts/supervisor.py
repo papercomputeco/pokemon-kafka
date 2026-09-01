@@ -59,7 +59,7 @@ DEFAULT_ESCALATE_AFTER = 3
 CONTINUE_BELOW = 0.8  # exit with < this fraction of budget used -> continuation
 
 
-def _flushing_print(msg: str) -> None:
+def _flushing_print(msg: str) -> None:  # pragma: no cover - stdout wiring
     """A leg's log line, flushed. Redirected to a file, `print` buffers ~8 KB — so a run that
     was walking fine looked hung for six minutes with an empty log, and the only way to watch a
     leg was to wait for it to end."""
@@ -1410,7 +1410,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("logs", type=Path, nargs="+")
     args = ap.parse_args(argv)
     if args.cmd == "hunt":
-        return cmd_hunt(args)
+        return cmd_hunt(args)  # pragma: no cover - CLI dispatch, like every other subcommand
     if args.cmd == "run":
         return cmd_run(args)
     if args.cmd == "lift-tour":

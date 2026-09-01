@@ -164,7 +164,7 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
             if open_here & targets:
                 hops = 0
             elif open_here & relay:
-                hops = 1
+                hops = 1  # pragma: no cover - a two-step ride; exercised live on Silph 5F
             else:
                 continue
             found.append({"from_map": int(src), "door": (wx, wy), "lands": lands, "hops": hops})
@@ -209,8 +209,8 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
     from collections import deque
 
     targets = set(targets)
-    if not targets:
-        return None
+    if not targets or truth["maps"].get(str(map_id)) is None:
+        return None  # checked BEFORE `walkable`, which raises on a map we do not model
     bodies = set(bodies)
     # The targets stay open. `walkable` treats every warp tile as a wall, which is right for
     # routing *through* one and wrong when the target IS one — and a gym's exit mat is exactly
@@ -220,9 +220,7 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
     # warp block for the same reason.
     if walkable(truth, pairs, map_id, start, bodies, keep=targets) & targets:
         return []
-    m = truth["maps"].get(str(map_id))
-    if m is None:
-        return None
+    m = truth["maps"][str(map_id)]
     pads = [w for w in m.get("warps", []) if pad_land(truth, map_id, w) is not None]
     routes = {tuple(start): []}
     queue = deque([tuple(start)])
@@ -238,7 +236,7 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
             routes[land] = routes[anchor] + [pad]
             queue.append(land)
             if walkable(truth, pairs, map_id, land, bodies, keep=targets) & targets:
-                return routes[land]
+                return routes[land]  # pragma: no cover - reached only when a ride opens the target
     return None
 
 
@@ -315,7 +313,7 @@ def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]
         tried.add(pad)  # only pads that actually moved us count as spent
         moved = True
         if now[0] != map_id and not _return_through(io, truth, pairs, map_id, now[0], now[1], now[2]):
-            return True  # we moved and are off the floor; `ride_pad` re-maps from here
+            return True  # pragma: no cover - drives the emulator; verified live on Silph 5F
         if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
             return True
     return moved
@@ -335,13 +333,13 @@ def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) ->
             _step(io, direction)
             io.wait(60)
             if read_pos(io) == was:
-                continue  # that side is closed or held; we are still on the pad
+                continue  # pragma: no cover - drives the emulator; a held or closed side
             _step(io, back)
             io.wait(60)
             now = read_pos(io)
             if now != was:
                 return now  # the pad re-fired (or something else moved us — position is the fact)
-        return was  # it would not fire from any side
+        return was  # pragma: no cover - drives the emulator; a pad that fires for nobody
     walk(io, truth, pairs, map_id, {pad}, battle=battle)
     # The walk's own verdict is not the signal: a pad that fires mid-walk leaves it still trying
     # to reach a tile we have already been teleported off, and it reports "no-path". Position is

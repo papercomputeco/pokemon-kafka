@@ -713,3 +713,136 @@ def test_say_puts_what_the_game_said_into_the_sink(tmp_path):
     assert lines[0]["event"] == "discovery"
     assert lines[0]["map"] == 163 and (lines[0]["x"], lines[0]["y"]) == (2, 5)
     assert "FISHING GURU" in lines[0]["text"] and lines[0]["kind"] == "dialogue"
+
+
+def test_ball_contents_names_what_each_ball_holds():
+    """The lookup that ended the CARD KEY hunt: a ball's contents are in the cartridge."""
+    r = _reader_rig(
+        {},
+        {
+            "items": {"48": "CARD KEY", "20": "SUPER POTION"},
+            "maps": {
+                "210": {
+                    "sprites": [
+                        {"kind": "item", "x": 21, "y": 16, "item": 48},
+                        {"kind": "item", "x": 2, "y": 13, "item": 20},
+                        {"kind": "trainer", "x": 8, "y": 3},
+                    ]
+                }
+            },
+        },
+    )
+    assert r.ball_contents(210) == {(21, 16): "CARD KEY", (2, 13): "SUPER POTION"}
+    assert r.ball_contents(999) == {}
+
+
+def test_unlock_gates_drops_the_doors_the_bag_can_open():
+    """A locked door is only a wall while the key is missing — and the leg that took the CARD KEY
+    then planned its next hop as though it had not."""
+    truth = {
+        "items": {"48": "CARD KEY"},
+        "maps": {
+            "208": {"gates": {"11,11,left": "Darn! It needs a CARD KEY!", "3,3,up": "The door is locked..."}},
+            "210": {"gates": {}},
+            "1": {},
+        },
+    }
+    r = _reader_rig({}, truth)
+    r.bag_named = lambda: [("CARD KEY", 1), ("POTION", 3)]
+    assert r.unlock_gates() == 1
+    assert truth["maps"]["208"]["gates"] == {"3,3,up": "The door is locked..."}
+    r.bag_named = lambda: []
+    assert r.unlock_gates() == 0  # an empty bag opens nothing
+
+
+def test_advance_text_stops_at_the_roster_rather_than_pressing_into_it():
+    """A stops a text box and CONFIRMS inside a list. Recognise the roster by its own contents."""
+
+    class Roster(_MenuRig):
+        def party(self):
+            return [("GLOOM", 99, 313), ("DUGTRIO", 100, 259)]
+
+    menu = Roster({2: "DE GLOOM", 4: "RE DUGTRIO"})
+    assert rig.Rig.advance_text(menu, "DEPOSIT") is False
+    assert menu.presses == []
+
+
+def test_advance_text_presses_through_a_box_until_the_menu_it_wants():
+    class Box(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "BILL's PC"})
+            self.seen = 0
+
+        def party(self):
+            return [("GLOOM", 99, 313)]
+
+        def menu_rows(self, first=0, last=18):
+            self.seen += 1
+            return [(2, "DEPOSIT")] if self.seen > 1 else [(2, "BILL's PC")]
+
+    box = Box()
+    assert rig.Rig.advance_text(box, "DEPOSIT") is True
+    assert box.presses.count("a") >= 1
+
+
+def test_advance_text_gives_up_after_its_budget():
+    """A box that never changes is not a menu we can reach; say so rather than press forever."""
+
+    class Stuck(_MenuRig):
+        def party(self):
+            return [("GLOOM", 99, 313)]
+
+    stuck = Stuck({2: "BILL's PC"})
+    assert rig.Rig.advance_text(stuck, "DEPOSIT", tries=3) is False
+    assert stuck.presses.count("a") == 3
+
+
+def test_menu_cursor_to_reports_failure_when_the_cursor_will_not_move():
+    class Frozen(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "A", 4: "B"})
+            self.ctl.press = lambda *a, **k: self.presses.append(a[0] if a else "?")
+
+    frozen = Frozen()
+    assert rig.Rig.menu_cursor_to(frozen, 3, presses=4) is False
+
+
+def test_menu_choose_and_center_lookups_refuse_what_they_cannot_find():
+    menu = _MenuRig({})
+    assert rig.Rig.menu_choose(menu, "DEPOSIT") is False  # nothing on screen
+    plain = _reader_rig({}, {"maps": {"9": {"width": 10, "height": 9, "tileset": 0, "sprites": []}}})
+    assert plain.center_counter(9) is None
+    assert plain.step_off_targets(404, 0, 0) == []  # a map we do not model
+    assert plain.grass_lanes(9) == []  # no grass listed
+
+
+def test_menu_choose_refuses_when_the_cursor_will_not_reach_the_entry():
+    """Reporting a miss beats pressing A somewhere we did not aim — the PC menu holds RELEASE."""
+
+    class Stuck(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "WITHDRAW", 4: "DEPOSIT"})
+            self.ctl.press = lambda *a, **k: self.presses.append(a[0] if a else "?")  # cursor frozen
+
+    stuck = Stuck()
+    assert rig.Rig.menu_choose(stuck, "DEPOSIT") is False
+    assert "a" not in stuck.presses
+
+
+def test_center_counter_needs_the_nurse_tile_not_just_the_shell():
+    """A room the same size and tileset as a Center is not a Center without the nurse at (3,1)."""
+    shell = _reader_rig(
+        {}, {"maps": {"64": {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 7, "y": 4}]}}}
+    )
+    assert shell.center_counter(64) is None
+
+
+def test_step_off_targets_skips_cells_a_tile_pair_refuses(monkeypatch):
+    """Both cells walkable is not enough — the engine refuses some moves between them."""
+    import rom_truth as rt_mod
+
+    truth = {"maps": {"1": {"width": 3, "height": 3, "grid": ["111"] * 3, "warps": [[1, 1, 9, 0]]}}}
+    r = _reader_rig({0xD35E: 1, 0xD362: 1, 0xD361: 1}, truth)
+    r.pairs = set()
+    monkeypatch.setattr(rt_mod, "passable", lambda *a, **k: False)
+    assert r.step_off_targets(1, 1, 1) == []

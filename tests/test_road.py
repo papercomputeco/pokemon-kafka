@@ -766,3 +766,47 @@ def test_a_walk_that_starts_on_a_door_can_still_plan():
     io = RoadIO(truth, (1, 0, 0))  # standing on the door at (0,0)
     assert road.walk(io, truth, set(), 1, {(3, 0)}) is True
     assert (io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y]) == (3, 0)
+
+
+def _silph_like():
+    """A floor with two pockets: the left half walks, the right half is entered only by its pad."""
+    return {
+        "maps": {
+            "5": _map(["1111011"], warps=[[2, 0, 7, 0], [6, 0, 7, 1]]),
+            "7": _map(["111"], warps=[[0, 0, 5, 0], [2, 0, 5, 1]]),
+        }
+    }
+
+
+def test_rides_to_names_every_door_that_lands_where_a_target_is_walkable():
+    """The cross-floor question a gated building actually poses: not 'which pad is beside the
+    target' but 'which door, anywhere, lands somewhere that can reach it'."""
+    truth = _silph_like()
+    rides = road.rides_to(truth, set(), 5, {(6, 0)})
+    assert rides, "no door found for a cell only its own pad reaches"
+    assert all(set(r) == {"from_map", "door", "lands", "hops"} for r in rides)
+    assert any(r["from_map"] == 7 and r["lands"] == (6, 0) for r in rides)
+    assert rides == sorted(rides, key=lambda r: (r["hops"], r["from_map"], r["door"]))
+
+
+def test_rides_to_is_empty_for_a_map_we_do_not_model():
+    assert road.rides_to({"maps": {}}, set(), 404, {(0, 0)}) == []
+
+
+def test_pads_reaching_skips_a_pad_that_is_itself_the_target():
+    truth = {"maps": {"1": _map(["111"], warps=[[1, 0, 9, 0]])}}
+    assert road.pads_reaching(truth, set(), 1, {(1, 0)}) == []
+
+
+def test_pad_land_reads_the_landing_out_of_the_maps_own_warp_list():
+    truth = {"maps": {"1": _map(["1111"], warps=[[0, 0, 1, 1], [3, 0, 1, 0]])}}
+    m = truth["maps"]["1"]
+    assert road.pad_land(truth, 1, m["warps"][0]) == (3, 0)  # same-map pad: index into its own list
+    assert road.pad_land(truth, 1, [0, 0, 9, 0]) is None  # a door to another map is not a pad
+    assert road.pad_land(truth, 404, m["warps"][0]) is None  # a map we do not model
+    assert road.pad_land(truth, 1, [0, 0, 1, 99]) is None  # an index its warp list does not have
+
+
+def test_pad_route_returns_none_for_a_map_we_do_not_model():
+    assert road.pad_route({"maps": {}}, set(), 404, (0, 0), {(1, 1)}) is None
+    assert road.pad_route({"maps": {}}, set(), 404, (0, 0), set()) is None
