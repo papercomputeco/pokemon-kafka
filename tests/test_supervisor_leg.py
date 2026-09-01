@@ -18,13 +18,25 @@ from supervisor import LADDER_ATTEMPTS, LegRunner, menu_for
 class FakeRig:
     """Enough Rig to drive a leg: a position, a scripted hop outcome per call, a call log."""
 
-    def __init__(self, *, start=(1, 5, 5), hops=None, truth=None, badges=0b11111, bodies=()):
+    def __init__(
+        self,
+        *,
+        start=(1, 5, 5),
+        hops=None,
+        truth=None,
+        badges=0b11111,
+        bodies=(),
+        party=(("CHARIZARD", 99, 337),),
+        heals_on_talk=False,
+    ):
         self._pos = start
         self._hops = list(hops or [])  # each entry: the map id we land on after cross/warp
         self.truth = truth or _truth()
         self.pairs = set()
         self._badges = badges
         self._bodies = set(bodies)
+        self._party = list(party)
+        self._heals_on_talk = heals_on_talk
         self.run_id = "testrun00"
         self.calls: list[tuple] = []
         self.events: list[dict] = []
@@ -41,7 +53,7 @@ class FakeRig:
         return self._badges
 
     def party(self):
-        return [("CHARIZARD", 99, 337)]
+        return list(self._party)
 
     def dialogue(self):
         return ""
@@ -126,6 +138,8 @@ class FakeRig:
 
     def talk(self, face):
         self.calls.append(("talk", face))
+        if self._heals_on_talk:  # the Center nurse's line is the game's heal verb
+            self._party = [(name, lvl, lvl or 1) for name, lvl, _hp in self._party]
         return self.said
 
     def text_from(self, action):
@@ -338,6 +352,56 @@ def test_engage_that_changes_nothing_is_reported_as_such():
     rig = FakeRig(start=(2, 3, 3), badges=0b11111, bodies={(4, 3)})
     result = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
     assert result["outcome"] == "engaged-no-badge" and not result["ok"]
+
+
+def _truth_with_a_nurse():
+    """The fake world plus a Center nurse ON MAP 2, because `engage_bodies` meets the bodies the
+    *cartridge* lists, not the live sprite table — and in the real game the nurse is one of them.
+    Without her the heal has nobody to talk to and the leg is right to report a refusal."""
+    truth = _truth()
+    truth["maps"]["2"]["sprites"] = [{"kind": "npc", "x": 4, "y": 3}]
+    return truth
+
+
+def test_heal_is_engagement_judged_on_the_party_not_the_badges():
+    rig = FakeRig(
+        start=(2, 3, 3),
+        truth=_truth_with_a_nurse(),
+        badges=0b11111,
+        bodies={(4, 3)},
+        party=[("CHARIZARD", 100, 0), ("DUGTRIO", 99, 0)],
+        heals_on_talk=True,
+    )
+    result = LegRunner(rig, goal=2, heal=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["ok"], result
+    assert ("talk", "right") in rig.calls, "the leg met the body that heals"
+    assert all(hp > 0 for _name, _lvl, hp in rig.party())
+
+
+def test_heal_that_heals_nothing_is_reported_as_such():
+    """A body that talks and heals nothing leaves the readings at zero, and the leg says so
+    rather than carrying a fainted party into the next fight."""
+    rig = FakeRig(
+        start=(2, 3, 3),
+        truth=_truth_with_a_nurse(),
+        badges=0b11111,
+        bodies={(4, 3)},
+        party=[("CHARIZARD", 100, 0)],
+    )
+    result = LegRunner(rig, goal=2, heal=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["outcome"] == "heal-refused" and not result["ok"]
+
+
+def test_heal_that_is_already_done_talks_to_nobody():
+    rig = FakeRig(
+        start=(2, 3, 3),
+        truth=_truth_with_a_nurse(),
+        bodies={(4, 3)},
+        party=[("CHARIZARD", 100, 100)],
+        heals_on_talk=True,
+    )
+    result = LegRunner(rig, goal=2, heal=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["ok"] and ("talk", "right") not in rig.calls
 
 
 # --------------------------------------------------------------------------- the facts
@@ -1345,3 +1409,27 @@ def test_engage_until_badge_reports_the_byte_after_its_rounds_run_out():
     runner = LegRunner(rig, goal=2, engage=True, engage_rounds=1, consult=_consult("GIVE_UP"), log=lambda *_: None)
     assert runner.run()["outcome"] == "engaged-no-badge"
     assert len([c for c in rig.calls if c[0] == "talk"]) == 1  # one round, one conversation
+
+
+def test_a_body_parked_on_a_door_is_routed_around_once_the_ladder_is_spent(tmp_path):
+    """Silph 5F parks a Rocket on the (24,0) pad, and the floor has six other doors. The loop
+    asked both seats about that one door, was told "wait for the wanderer" by each, waited, and
+    exhausted — with five roads out of the room unexamined. After the ladder, a body that will
+    not move is structural for this leg: ban the hop and take another chain."""
+
+    class ParkedBodyRig(FakeRig):
+        def __init__(self):
+            super().__init__(truth=_fork_truth(), start=(1, 5, 5))
+
+        def cross(self, cur, nxt, **kw):
+            self.calls.append(("cross", nxt))
+            if (cur, nxt) == (1, 2):
+                return "body-blocked"  # a trainer on the pad; it never moves
+            self._pos = (nxt, 1, 1)
+            return True
+
+    rig = ParkedBodyRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("WAIT_AND_RETRY"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], "the leg died on one door while the map had another"
+    assert (1, 2) in runner.banned

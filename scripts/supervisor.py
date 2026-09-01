@@ -401,6 +401,7 @@ class LegRunner:
         log=_flushing_print,
         max_hops: int = DEFAULT_MAX_HOPS,
         engage: bool = False,
+        heal: bool = False,
         sweep: bool = False,
         clear_floor: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
@@ -415,6 +416,7 @@ class LegRunner:
         self.log = log
         self.max_hops = max_hops
         self.engage = engage
+        self.heal = heal
         self.sweep = sweep
         self.clear_floor = clear_floor
         self.engage_rounds = engage_rounds
@@ -747,6 +749,35 @@ class LegRunner:
                 return True
         return True
 
+    def party_up(self) -> bool:
+        # rig.party() is ``[name, level, curHP]`` (curHP at struct +1, level at +33) — the
+        # nurse's heal is proven by every fainted reading coming back above zero, not by a
+        # max we would have to recall an address for.
+        return bool(self.rig.party()) and all(hp > 0 for _name, _lvl, hp in self.rig.party())
+
+    def heal_party(self) -> bool:
+        """Go be healed — the only difference from --engage is the success condition.
+
+        The measured world has no heal action: a Center body says it heals the party and the
+        HP readings come back. So healing is ``engage_bodies`` judged on the party instead of
+        the BADGES byte, and the report carries the readings before and after so a leg that
+        arrives at the wrong door (Saffron has two that look alike) is told so plainly.
+        """
+
+        def report():
+            return [f"{name} lv{lvl} hp{hp}" for name, lvl, hp in self.rig.party()]
+
+        self.log(f"party before heal: {report()}")
+        for _ in range(self.engage_rounds):
+            if self.party_up():
+                self.log(f"party after heal:  {report()}")
+                self.notes.append("the party came back standing")
+                return True
+            self.engage_bodies(("trainer", "npc"))
+            self.log(f"party round:      {report()}")
+        self.notes.append("talked every body on the map and the fainted readings stayed at zero")
+        return self.party_up()
+
     def name_the_ride(self, spot: tuple[int, int]) -> None:
         """When a cell cannot be walked to, say whether a pad stands beside it.
 
@@ -872,6 +903,10 @@ class LegRunner:
                     self.engage_trainers()
                 if self.sweep:
                     self.sweep_items(self.want)
+                if self.heal and not self.heal_party():
+                    return self._finish(
+                        "heal-refused", f"arrived on map {self.goal} but the fainted readings stay at zero"
+                    )
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
@@ -905,6 +940,13 @@ class LegRunner:
             #    (16,10) pad is dead, and the floor has two other ways up — (26,0) and (20,0).
             #    Routing around it is a lookup; the crew spent a whole ladder on it instead.
             structural = failure == "warp-dead" or (failure == "no-path" and (cur, hop["to"]) in self.gated)
+            # A body that will not move off a door is structural *for this leg*, once the ladder
+            # has been spent on it. Silph 5F parks a Rocket on the (24,0) pad and the floor has
+            # six other doors; the loop asked both seats to think about that one door, was told
+            # "wait for the wanderer" by each, waited, and exhausted — while five roads out of
+            # the room stayed unexamined. Banning it costs a route we might have had after a
+            # longer wait; not banning it costs the leg.
+            structural = structural or (failure == "body-blocked" and attempt >= LADDER_ATTEMPTS)
             if hop is not None and structural:
                 if self._reroute_around(hop):
                     continue
@@ -1167,7 +1209,10 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
             budget_s=share,
             # Engaging is what turns arrival into a badge, so it belongs to the last goal only:
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
+            # Heal is the same shape with a different success condition: the party readings
+            # coming back, judged only on the goal that is a Center.
             engage=args.engage and index == len(goals),
+            heal=args.heal and index == len(goals),
             sweep=args.sweep_items,
             want=args.want,
             # Unlike --engage, which watches for a badge and so belongs to the final gym, a
@@ -1202,6 +1247,11 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--bank", default=None, help="bank the end state under this name")
     rn.add_argument("--live-label", default=None, help="stream to the viewer under this label")
     rn.add_argument("--engage", action="store_true", help="on arrival, engage bodies until the BADGES byte changes")
+    rn.add_argument(
+        "--heal",
+        action="store_true",
+        help="on the last goal, engage the map's bodies until the fainted readings come back",
+    )
     rn.add_argument(
         "--sweep-items", action="store_true", help="on arrival, open every item ball the cartridge lists for the map"
     )
