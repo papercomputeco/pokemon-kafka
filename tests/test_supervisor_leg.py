@@ -71,6 +71,12 @@ class FakeRig:
             if s.get("kind") == "item"
         ]
 
+    def center_counter(self, map_id):
+        """The real lookup, run against the fake truth — it is pure, so the fake need not fake it."""
+        import expedition_rig
+
+        return expedition_rig.Rig.center_counter(self, map_id)
+
     def ball_contents(self, map_id):
         items = self.truth.get("items", {"48": "CARD KEY", "20": "SUPER POTION"})
         return {
@@ -1433,3 +1439,55 @@ def test_a_body_parked_on_a_door_is_routed_around_once_the_ladder_is_spent(tmp_p
     result = runner.run()
     assert result["ok"], "the leg died on one door while the map had another"
     assert (1, 2) in runner.banned
+
+
+def _center_truth():
+    """A Pokemon Center interior at the measured template: 14x8, tileset 6, nurse npc at (3,1)
+    behind the counter. The idle NPCs are the ones a body-sweep would find instead."""
+    truth = _truth()
+    truth["maps"]["2"] = {
+        "width": 14,
+        "height": 8,
+        "tileset": 6,
+        "grid": ["1" * 14 for _ in range(8)],
+        "warps": [],
+        "connections": {},
+        "sprites": [
+            {"kind": "npc", "x": 3, "y": 1},
+            {"kind": "npc", "x": 8, "y": 3},
+        ],
+    }
+    return truth
+
+
+def test_the_heal_talks_to_the_nurse_across_the_counter_not_to_the_idle_npcs(tmp_path):
+    """The nurse is behind a counter, so no cell is adjacent to her and a body-sweep never meets
+    her. A leg reached Saffron's Center, talked to all three idle NPCs, and reported the heal
+    refused with three fainted party members."""
+
+    class CenterRig(FakeRig):
+        def approach(self, cells):
+            self.calls.append(("approach", sorted(cells)))
+            self._pos = (self._pos[0], *sorted(cells)[0])
+            return True
+
+        def talk(self, face):
+            self.calls.append(("talk", face))
+            if self._pos[1:] == (3, 3) and face == "up":  # only from the counter, facing the nurse
+                self._party = [(n, lvl, lvl) for n, lvl, _hp in self._party]
+            return "Your POKeMON are fighting fit!"
+
+    rig = CenterRig(
+        start=(2, 6, 6), truth=_center_truth(), badges=0b11111, party=[("CHARIZARD", 100, 0)], bodies={(8, 3)}
+    )
+    result = LegRunner(rig, goal=2, heal=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["ok"], result
+    assert ("approach", [(3, 3)]) in rig.calls, "the leg never went to the counter"
+    assert all(hp > 0 for _n, _l, hp in rig.party())
+
+
+def test_a_map_that_is_not_a_center_has_no_counter():
+    """The template is the whole test: 14x8, tileset 6, a nurse tile at (3,1). An ordinary room
+    that happens to hold an npc is not a Center, and a leg must not stand in it pressing A."""
+    assert FakeRig(truth=_truth()).center_counter(2) is None
+    assert FakeRig(truth=_center_truth()).center_counter(2) == ((3, 3), "up")

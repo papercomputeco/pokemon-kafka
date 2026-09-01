@@ -768,6 +768,22 @@ class LegRunner:
             return [f"{name} lv{lvl} hp{hp}" for name, lvl, hp in self.rig.party()]
 
         self.log(f"party before heal: {report()}")
+        # The nurse first, when there is one. She stands behind a counter, so she is not adjacent
+        # to any cell and `engage_bodies` cannot reach her — a leg once talked to all three idle
+        # NPCs in Saffron's Center and reported the heal refused with three fainted members.
+        counter = self.rig.center_counter(self.rig.pos()[0])
+        if counter is not None:
+            cell, face = counter
+            if self.rig.approach({cell}):
+                for _ in range(self.engage_rounds):
+                    said = self.rig.talk(face)
+                    self.log(f"  nurse says: {said[:90]}")
+                    if self.party_up():
+                        self.log(f"party after heal:  {report()}")
+                        self.notes.append("the nurse healed the party")
+                        return True
+            else:
+                self.notes.append(f"could not reach the nurse's counter at {cell}")
         for _ in range(self.engage_rounds):
             if self.party_up():
                 self.log(f"party after heal:  {report()}")

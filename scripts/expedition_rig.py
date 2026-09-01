@@ -977,6 +977,27 @@ class Rig:
 
     # ---- banking --------------------------------------------------------------------------
 
+    def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
+        """Where to stand and which way to face to be healed, if this map is a Pokemon Center.
+
+        A nurse is not an ordinary body: she stands *behind a counter*, so no cell is adjacent to
+        her and `engage_bodies` — which only ever walks to a neighbouring tile — cannot meet her.
+        Measured cost: a leg reached Saffron's Center, talked to all three idle NPCs (growth
+        rates, Silph gossip, the Cable Club), and reported the heal refused with three fainted
+        party members.
+
+        The geometry is one template, verified live at Cerulean, Pewter and Vermilion
+        (`quartermaster.CENTERS`): nurse sprite at (3,1), player at (3,3), facing up. Saffron's
+        map 182 is the same 14x8 tileset-6 interior with the same nurse tile, which is how it was
+        identified — by signature, not by recall.
+        """
+        m = self.truth["maps"].get(str(map_id))
+        if not m or (m["width"], m["height"], m["tileset"]) != (14, 8, 6):
+            return None
+        if not any(s["kind"] == "npc" and (s["x"], s["y"]) == (3, 1) for s in m.get("sprites", [])):
+            return None
+        return (3, 3), "up"
+
     def step_off_targets(self, map_id: int, x: int, y: int) -> list[tuple[str, tuple[int, int]]]:
         """Directions off a warp tile that land on ordinary floor — doors excluded, in order."""
         m = self.truth["maps"].get(str(map_id))
