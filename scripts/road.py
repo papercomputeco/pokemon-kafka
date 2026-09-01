@@ -121,6 +121,89 @@ def pads_reaching(truth, pairs, map_id: int, targets, bodies=()) -> list[tuple[t
     return out
 
 
+def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
+    """Every door **on any map** whose landing can walk to ``targets``, nearest-first by hops.
+
+    ``pads_reaching`` answers "which pad on this floor", which is not the question a gated
+    building poses. Silph asks the cross-floor one: the CARD KEY's corridor on 5F is entered only
+    from the pad at (27,3), which is entered only by riding 7F's (21,15), which sits in a 7F
+    pocket that is itself behind card-key doors — so the useful question is never "which pad is
+    beside the target" but "which door, anywhere in the building, lands somewhere that can reach
+    it". Three legs died re-deriving that by hand, one floor at a time.
+
+    Each entry is ``{"from_map", "door", "lands", "hops"}``: ride ``door`` on ``from_map`` and you
+    arrive at ``lands``, from which the target is walkable. ``hops`` is 0 when the landing walks
+    straight to the target and 1 when it reaches a pad that does. Landings are read from the
+    destination's own warp list, the same way the router resolves a hop, and reachability is the
+    movement question (``walkable``), not the terrain one.
+    """
+    targets = set(targets)
+    here = truth["maps"].get(str(map_id))
+    if here is None:
+        return []
+    direct = {(w[0], w[1]) for w in here["warps"]}
+    # Landings on this map that walk to the target, plus landings that reach a pad that does.
+    relay = {pad for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)}
+    found: list[dict] = []
+    for src, m in truth["maps"].items():
+        for wx, wy, dest, wid in m["warps"]:
+            if dest != map_id or wid >= len(here["warps"]):
+                continue
+            lands = (here["warps"][wid][0], here["warps"][wid][1])
+            open_here = walkable(truth, pairs, map_id, lands, bodies, keep={lands} | targets | relay)
+            if open_here & targets:
+                hops = 0
+            elif open_here & relay:
+                hops = 1
+            else:
+                continue
+            found.append({"from_map": int(src), "door": (wx, wy), "lands": lands, "hops": hops})
+    found.sort(key=lambda r: (r["hops"], r["from_map"], r["door"]))
+    return [r for r in found if r["door"] not in direct or r["from_map"] != map_id]
+
+
+def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
+    """Reach ``targets`` by riding a pad that stands in their region and stepping off its far side.
+
+    The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
+    stepping on one fires it — so a region whose only entrance *is* a pad is unreachable to it, and
+    the leg reports "could not reach" with nothing on screen to explain why. Measured on 5F: from
+    (26,3) a step east fires the pad at (27,3) and lands on 7F (21,15); step off it and back on and
+    we return **standing on (27,3)**, inside the region the walk could never enter, with (28,3) one
+    step away. Same tiles, same engine; the only difference is riding rather than routing.
+
+    The round trip matters: arriving on a pad does not re-fire it, so the far side is left and
+    re-entered to come back. Returns True when we end on ``map_id`` inside the target region.
+    """
+    import rom_truth as rt
+
+    for pad, _dest in pads_reaching(truth, pairs, map_id, targets, live_bodies(io)):
+        if walk(io, truth, pairs, map_id, {pad}, battle=battle) not in (True, "map-change"):
+            continue
+        mp, x, y = read_pos(io)
+        if mp == map_id:  # the pad did not fire on arrival — a threshold, so step onto it again
+            _step(io, "right")
+            mp, x, y = read_pos(io)
+        if mp == map_id:
+            continue  # not a pad we can ride; try the next one
+        # On the far side, standing on its warp tile: step off, then back on, to come home.
+        far = truth["maps"][str(mp)]
+        for direction, (dx, dy) in (("down", (0, 1)), ("up", (0, -1)), ("left", (-1, 0)), ("right", (1, 0))):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < far["width"] and 0 <= ny < far["height"]):
+                continue
+            if far["grid"][ny][nx] != "1" or not rt.passable(far, pairs, x, y, nx, ny):
+                continue
+            _step(io, direction)
+            if read_pos(io)[1:] != (nx, ny):
+                continue  # a body or a script ate the step; try another side
+            _step(io, {"down": "up", "up": "down", "left": "right", "right": "left"}[direction])
+            if read_pos(io)[0] == map_id:
+                return walk(io, truth, pairs, map_id, targets, battle=battle) is True
+            break
+    return False
+
+
 def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
     """The doors on this map that belong to a gate building rather than a dead-end house.
 

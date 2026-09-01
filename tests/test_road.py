@@ -496,23 +496,28 @@ def test_cut_until_open_proves_the_cut_by_stepping(monkeypatch):
     assert "up" in io.presses
 
 
-def test_cut_until_open_gives_up_after_its_tries():
+@pytest.fixture
+def cut_read_pos(monkeypatch):
+    """`cut_until_open`'s fake reads position off `io.pos`. Patch it through monkeypatch so the
+    replacement is undone: assigning `road.read_pos` directly leaked into every later test in
+    this file, and the first one to use another fake io died on `'RoadIO' has no attribute pos`."""
+    monkeypatch.setattr(road, "read_pos", lambda i: i.pos)
+
+
+def test_cut_until_open_gives_up_after_its_tries(cut_read_pos):
     io = CutIO(cuts=99)
     import rom_truth  # noqa: F401  (road.read_pos is imported at module scope)
 
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up", tries=2) is False
 
 
-def test_cut_until_open_succeeds_on_the_step_after_the_cut():
+def test_cut_until_open_succeeds_on_the_step_after_the_cut(cut_read_pos):
     io = CutIO(cuts=1)
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up") is True
 
 
-def test_cut_until_open_returns_at_once_when_the_way_is_already_clear():
+def test_cut_until_open_returns_at_once_when_the_way_is_already_clear(cut_read_pos):
     io = CutIO(cuts=0)
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up") is True
     assert "a" not in io.presses  # no menu was opened; the step just worked
 
@@ -561,3 +566,26 @@ def test_pads_reaching_names_the_ride_into_a_cut_off_corridor():
     }
     assert road.pads_reaching(truth, set(), 1, {(4, 0)}) == [((2, 0), 7)]
     assert road.pads_reaching(truth, set(), 1, {(0, 0)}) == [((2, 0), 7)]
+
+
+def test_ride_pad_enters_a_region_whose_only_door_is_a_pad():
+    """Silph 5F in miniature. Row 3 is `..P#` — the pad at x=2 is the only way to x=3, so `walk`
+    (which treats pads as walls) can never deliver us there. Riding it lands on the far map,
+    stepping off and back on returns us STANDING on the pad, and from there x=3 is one step."""
+    truth = {
+        "maps": {
+            "1": _map(["1111"], warps=[[2, 0, 2, 0]]),
+            "2": _map(["111"], warps=[[1, 0, 1, 0]]),
+        }
+    }
+    # Each pad fires on arrival, sending us to the other map's warp tile.
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (2, 1, 0), (2, 1, 0): (1, 2, 0)})
+    assert road.walkable(truth, set(), 1, (0, 0)) == {(0, 0), (1, 0)}  # the walk cannot get there
+    assert road.ride_pad(io, truth, set(), 1, {(3, 0)}) is True
+    assert (io.mem[qm.ADDR_MAP], io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y]) == (1, 3, 0)
+
+
+def test_ride_pad_reports_failure_when_no_pad_stands_in_the_region():
+    truth = {"maps": {"1": _map(["1101"], warps=[])}}
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.ride_pad(io, truth, set(), 1, {(3, 0)}) is False

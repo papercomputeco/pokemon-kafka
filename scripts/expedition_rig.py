@@ -538,6 +538,17 @@ class Rig:
         here = self.pos()
         if here[0] == mp and here[1:] in cells:
             return True
+        # A region whose only door is a pad is invisible to both the walk and the oracle, because
+        # both plan over tiles and a pad is a tile you cannot stand on by planning. Ride it.
+        # Measured on Silph 5F: the card-key corridor is unreachable on foot from every cell on
+        # the floor and one step from the pad at (27,3), and three legs died on that difference.
+        if road.ride_pad(self.io, self.truth, self.pairs, mp, cells, battle=self.battle):
+            return True
+        here = self.settled_pos()
+        if here[0] == mp and here[1:] in cells:
+            return True
+        if here[0] != mp:  # a ride left us on another floor; the caller's map is no longer ours
+            return False
         if self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET:
             self.oracle_goto(lambda p: p[0] == mp and (p[1], p[2]) in cells)
         here = self.pos()
