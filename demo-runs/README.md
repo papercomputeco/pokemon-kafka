@@ -91,6 +91,17 @@ Two things this leg exposed, both now fixed:
   off a Route 3 trainer, on a badge won by a different run. Brock is the fight that
   *earns* the badge, so holding it first now disqualifies the fight.
 
+Beat 15 is the first *blocker* beat — a wall that stood for a whole session, resolved by
+reading the cartridge instead of the map:
+
+- `beat15-surf-unblocked` — badges 7-8 need SURF, and the TM/HM bitfield says **no member of the
+  party can learn HM03** (Charizard has Cut+Strength, Pidgeot Fly, Hypno Flash, Dugtrio none).
+  HM03 sits in no item ball on any map, so it is an NPC's to give. The ROM's own text names the
+  place — "FISHING GURU in VERMILION CITY!" — and the beat walks it: find him in map 163 (three
+  decoy houses first: a Farfetch'd trader, a letter to PIPPI, the Fan Club chair), take the OLD
+  ROD, cast off the dock at (18,29), and land the Magikarp that becomes a Gyarados — which learns
+  Surf *and* Strength. 241 turns, one cast.
+
 ## Grid order
 
 `viewer/store.py` sorts run folders reverse-alphabetically, so `beat10`/`beat11`

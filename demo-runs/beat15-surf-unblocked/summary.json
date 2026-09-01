@@ -1,0 +1,11 @@
+{
+  "outcome": "rod-and-karp",
+  "party": "['Charizard', 'Dugtrio', 'Primeape', 'Pidgeot', 'Hypno', 'Magikarp']",
+  "turns": 241,
+  "pos": "(5, 18, 29)",
+  "params": {
+    "label": "15 \u00b7 Surf unblocked \u2014 the guru's rod",
+    "rom": "/home/bdougie/code/pcc-labs/pokemon-kafka/rom/pokemon_red.gb"
+  },
+  "run_id": "20260901-145751-3816"
+}
