@@ -70,3 +70,37 @@ solves this leg and teaches the repo nothing.
    `data/telemetry/game/<UTC-date>.jsonl`.
 3. What the next run needs is in the repo — engine fix, test, or `docs/learnings/` — not only in
    your summary.
+
+## Where this stands right now (read this first)
+
+**The CARD KEY is won.** `data/local_runs/roster-bench/b6_key_won.state` is banked on 5F at
+(20,16) with CARD KEY in the bag. Everything above about hunting it is history; do not re-hunt it.
+
+What was actually blocking it was ours: `survey_pocket` recorded every refused step with what the
+game said, and all of them were hung on the map as walls — 106 of 130 were sprites talking, not
+doors. `attach_measured_gates` now keeps only door text ("Darn! It needs a CARD KEY!") and silent
+refusals. Two other capabilities landed with it:
+
+- `road.ride_pad` — reach a region whose only entrance is a teleport pad, by riding it and
+  stepping off the far side. `Rig.approach` tries this automatically now.
+- `road.rides_to(truth, pairs, map, targets, bodies)` — every door on *any* floor whose landing
+  can walk to a cell. This is the lookup to use before planning a route inside Silph.
+
+`docs/learnings/saffron-floors-topology-20260901.md` is your own measured floor record; its
+CARD-KEY-door lists are still useful, but any claim that a pocket is sealed predates the gate fix
+and should be re-checked with `rides_to` rather than believed.
+
+## Your legs, in order
+
+1. **Heal first.** Charizard, Dugtrio and Gloom are at 0 HP in that baton. Giovanni is a real
+   fight; take the party to a Pokemon Center before it.
+2. **Giovanni, 11F (map 235).** He is at (7,5) and his sprite is `kind: "npc"`, so `--clear-floor`
+   (trainers only) walks past him — `engage_bodies(("trainer","npc"))` is what meets him. Bank
+   `b6_giovanni.state`.
+3. **Sabrina, gym map 178.** Out of Silph, to Saffron (map 10); the gym door is the warp at (34,3)
+   and the body at (34,4) said "Get out of the way!" before Silph fell. Test whether it stands
+   down now; do not assume. Sabrina's room has ~30 intra-map pads — `Rig.escape_pocket` and
+   `ride_pad` are the tools for that floor. Bank `badge6.state`.
+
+**Start by running a leg, not by re-deriving one.** The first command of this session should be a
+`supervisor.py run`.
