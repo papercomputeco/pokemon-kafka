@@ -84,6 +84,43 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
     return seen
 
 
+def walkable(truth, pairs, map_id: int, start, bodies=(), keep=()) -> set[tuple[int, int]]:
+    """The cells ``walk`` can actually deliver us to: bodies *and* every warp tile are walls.
+
+    ``reachable`` answers a terrain question and ``walk`` answers a movement one, and inside a
+    facility the two disagree wildly — because ``walk`` refuses to thread a door tile as floor
+    (a pad fires the moment you step on it, so a route "through" one is a route off the floor).
+    Silph 5F is the measurement: the corridor holding the CARD KEY is *reachable* from anywhere
+    on the floor, and the only path to it crosses the teleport pad at (27,3). Every approach that
+    trusted ``reachable`` was refused live, on both of the two sessions that hunted that key,
+    with no sentence on screen to explain it. Ride the pad and the same corridor is nine steps.
+
+    ``keep`` are warp tiles that stay open — the targets of the walk itself, which ``walk``
+    excludes from its own warp block for the same reason.
+    """
+    warps = {(w[0], w[1]) for w in truth["maps"][str(map_id)]["warps"]} - set(keep)
+    return reachable(truth, pairs, map_id, start, set(bodies) | warps)
+
+
+def pads_reaching(truth, pairs, map_id: int, targets, bodies=()) -> list[tuple[tuple[int, int], int]]:
+    """``(pad, the map it pairs with)`` for every warp tile on this map that *stands* inside a
+    region holding ``targets`` — the ride hidden behind a bare "could not reach".
+
+    A leg that cannot walk to a cell is not stuck if a pad lands beside it: Silph 5F's card-key
+    corridor is nine steps from the pad at (27,3), which pairs with 7F, and zero routes from
+    anywhere else on the floor. Naming the pad is the difference between a wall and a detour.
+    """
+    targets = set(targets)
+    out = []
+    for wx, wy, dest, _wid in truth["maps"][str(map_id)]["warps"]:
+        pad = (wx, wy)
+        if pad in targets:
+            continue
+        if walkable(truth, pairs, map_id, pad, bodies, keep={pad} | targets) & targets:
+            out.append((pad, dest))
+    return out
+
+
 def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
     """The doors on this map that belong to a gate building rather than a dead-end house.
 

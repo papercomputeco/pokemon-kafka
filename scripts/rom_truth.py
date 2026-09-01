@@ -209,13 +209,18 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         pic, y, x, _mv, _rng, text = rom[q], rom[q + 1] - 4, rom[q + 2] - 4, rom[q + 3], rom[q + 4], rom[q + 5]
         kind = "npc"
         q += 6
+        sprite = {"kind": kind, "x": x, "y": y, "pic": pic}
         if text & 0x40:  # trainer: +2 bytes (class/pokemon set, level/roster id)
-            kind = "trainer"
+            sprite["kind"] = "trainer"
             q += 2
-        elif text & 0x80:  # item ball: +1 byte
-            kind = "item"
+        elif text & 0x80:  # item ball: +1 byte, the item id it holds
+            # That byte is what turns an item hunt into a lookup: a floor's balls carry their
+            # contents in the cartridge, so "which ball holds the CARD KEY" is extraction, not
+            # a sweep. Cross-checked against the ids the bag reported after live pickups.
+            sprite["kind"] = "item"
+            sprite["item"] = rom[q]
             q += 1
-        sprites.append({"kind": kind, "x": x, "y": y, "pic": pic})
+        sprites.append(sprite)
     te = TILESETS + 12 * tileset
     tbank = rom[te]
     blocks = _faddr(tbank, _u16(rom, te + 1))

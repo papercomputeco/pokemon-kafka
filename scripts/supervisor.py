@@ -59,6 +59,13 @@ DEFAULT_ESCALATE_AFTER = 3
 CONTINUE_BELOW = 0.8  # exit with < this fraction of budget used -> continuation
 
 
+def _flushing_print(msg: str) -> None:
+    """A leg's log line, flushed. Redirected to a file, `print` buffers ~8 KB — so a run that
+    was walking fine looked hung for six minutes with an empty log, and the only way to watch a
+    leg was to wait for it to end."""
+    print(msg, flush=True)
+
+
 def spring_counts(text: str) -> Counter:
     """Count A<->B round trips from a lane log's MAP CHANGE lines. A round trip is a transition
     immediately undone (58->2 then 2->58): the door-mat spring signature, hundreds per second
@@ -335,7 +342,7 @@ class TapesConsult:
     parameter a caller can casually redirect, it is the crew module's constant.
     """
 
-    def __init__(self, *, timeout: float | None = None, log=print) -> None:
+    def __init__(self, *, timeout: float | None = None, log=_flushing_print) -> None:
         self.timeout = timeout  # None = each seat is waited for as long as its budget needs
         self.log = log
 
@@ -374,13 +381,14 @@ class LegRunner:
         budget_s: float = 7200,
         consult=None,
         clock=time.monotonic,
-        log=print,
+        log=_flushing_print,
         max_hops: int = DEFAULT_MAX_HOPS,
         engage: bool = False,
         sweep: bool = False,
         clear_floor: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
+        want: str | None = None,
     ) -> None:
         self.rig = rig
         self.goal = goal
@@ -393,6 +401,7 @@ class LegRunner:
         self.sweep = sweep
         self.clear_floor = clear_floor
         self.engage_rounds = engage_rounds
+        self.want = want  # item name this leg came for; its ball is opened before any other
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
         self.tried: list[str] = []  # every action executed, for the exhaustion record
@@ -621,7 +630,7 @@ class LegRunner:
             self.notes.append(f"the body at ({bx}, {by}) says: {said[:300]}")
             return
         if action == "SWEEP_ITEMS":
-            self.sweep_items()
+            self.sweep_items(self.want)
             return
         if action == "ORACLE_SEARCH":
             if hop is None:
@@ -647,22 +656,31 @@ class LegRunner:
 
     # ---- the gym engage ---------------------------------------------------------------------
 
-    def sweep_items(self) -> list[tuple[int, int]]:
+    def sweep_items(self, want: str | None = None) -> list[tuple[int, int]]:
         """Collect every item ball the cartridge lists for this map. Returns what the bag gained.
 
         A locked door whose own NPC names the key it wants (Silph 209's (11,7): "requires a CARD
-        KEY") is not a navigation problem — the key is an object somewhere, and this floor's item
-        balls are extracted, not guessed. Bag growth is the only proof a pickup happened.
+        KEY") is not a navigation problem — the key is an object somewhere, and both the balls
+        *and what they hold* are extracted, not guessed. So a leg can name the item it came for:
+        the wanted ball is opened first, before a full bag or a lost trainer fight can cost it.
+        Bag growth is the only proof a pickup happened.
         """
         mp = self.rig.pos()[0]
         gained: list[tuple[int, int]] = []
-        for ball in self.rig.item_balls(mp):
+        contents = self.rig.ball_contents(mp)
+        balls = self.rig.item_balls(mp)
+        if want:
+            balls.sort(key=lambda b: contents.get(b, "") != want)
+        for ball in balls:
             if (mp, ball) in self.looted:
                 continue
             self.looted.add((mp, ball))
             before = self.rig.bag()
+            holds = contents.get(ball, "?")
             if not self.rig.collect_item(*ball):
-                self.log(f"  could not open the ball at {ball} on map {mp}")
+                self.log(f"  could not open the ball at {ball} on map {mp} (cartridge says {holds})")
+                self.name_the_ride(ball)
+                self.rig.emit("supervisor.item_refused", map=mp, at=list(ball), holds=holds)
                 continue
             new = [item for item in self.rig.bag() if item not in before]
             gained.extend(new)
@@ -700,6 +718,7 @@ class LegRunner:
                 continue
             self.engaged.add(spot)
             if not self._go_and_talk(spot):
+                self.name_the_ride(spot)
                 # Logged, not just noted: this line silently swallowed a whole debugging cycle
                 # on Silph's top floor, where "could not reach" was really "a card-key door the
                 # collision grid calls floor". A refusal the operator cannot see is a refusal
@@ -711,6 +730,26 @@ class LegRunner:
                 return True
         return True
 
+    def name_the_ride(self, spot: tuple[int, int]) -> None:
+        """When a cell cannot be walked to, say whether a pad stands beside it.
+
+        "Could not reach" is the least useful true sentence a leg can write, and Silph spent two
+        sessions on it: the CARD KEY's corridor was nine steps from the pad at (27,3) and
+        unreachable from every other cell on the floor. A pad named here is a route the next hop
+        can take; an unnamed one is a wall the next session re-derives.
+        """
+        import road
+
+        mp, _, _ = self.rig.pos()
+        adjacent = {(spot[0] + 1, spot[1]), (spot[0] - 1, spot[1]), (spot[0], spot[1] + 1), (spot[0], spot[1] - 1)}
+        pads = road.pads_reaching(self.rig.truth, self.rig.pairs, mp, adjacent, self.rig.bodies() - {spot})
+        if not pads:
+            return
+        ride = ", ".join(f"{pad} (pairs with map {dest})" for pad, dest in pads)
+        self.log(f"  {spot} is not walkable from here, but these pads stand beside it: {ride}")
+        self.notes.append(f"{spot} on map {mp} is only reachable by riding a pad: {ride}")
+        self.rig.emit("supervisor.pad_named", map=mp, target=list(spot), pads=[[list(p), d] for p, d in pads])
+
     def _go_and_talk(self, spot: tuple[int, int]) -> bool:
         """Walk to a cell beside ``spot`` (body-aware) and face it. Battles resolve on the way."""
         import road
@@ -719,7 +758,10 @@ class LegRunner:
         mp, x, y = self.rig.pos()
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
-            near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
+            near = (
+                road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}, keep=adjacent)
+                & adjacent
+            )
             if not near or not self.rig.approach(near):
                 return False
             mp, x, y = self.rig.pos()
@@ -812,7 +854,7 @@ class LegRunner:
                 if self.clear_floor:
                     self.engage_trainers()
                 if self.sweep:
-                    self.sweep_items()
+                    self.sweep_items(self.want)
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
@@ -1110,6 +1152,7 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
             engage=args.engage and index == len(goals),
             sweep=args.sweep_items,
+            want=args.want,
             # Unlike --engage, which watches for a badge and so belongs to the final gym, a
             # floor clear is worth doing on every goal in the chain: the thing a story floor
             # yields is usually carried by one of its trainers.
@@ -1148,6 +1191,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument(
         "--clear-floor", action="store_true", help="on the last goal, fight every trainer the cartridge lists there"
     )
+    rn.add_argument("--want", help="item name this leg came for; its ball is opened first")
     rn.add_argument("--no-consult", action="store_true", help="deterministic only — never call a model")
     ce = sub.add_parser("classify-exit", help="decide resume/continue/next/retry/escalate after an operator exit")
     ce.add_argument("--state", type=Path, required=True)

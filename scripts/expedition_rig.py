@@ -319,6 +319,22 @@ class Rig:
         sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
         return [(s["x"], s["y"]) for s in sprites if s.get("kind") == "item"]
 
+    def ball_contents(self, map_id: int) -> dict[tuple[int, int], str]:
+        """``(x, y) -> item name`` for this map's balls, from the object data's item byte.
+
+        A ball's contents are in the cartridge, so "where is the CARD KEY" is a lookup rather
+        than a building-wide sweep — the hunt that cost two sessions. Cross-checked against the
+        Rocket Hideout, whose two balls extract as SILPH SCOPE and LIFT KEY, both of which this
+        run picked up live.
+        """
+        sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
+        items = self.truth.get("items", {})
+        return {
+            (s["x"], s["y"]): items.get(str(s.get("item")), f"item {s.get('item')}")
+            for s in sprites
+            if s.get("kind") == "item"
+        }
+
     def collect_item(
         self, bx: int, by: int
     ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
@@ -335,7 +351,9 @@ class Rig:
             return False
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
-            near = road.reachable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
+            near = (
+                road.walkable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}, keep=adjacent) & adjacent
+            )
             if not near or not self.approach(near):
                 return False
             mp, x, y = self.pos()

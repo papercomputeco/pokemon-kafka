@@ -213,6 +213,9 @@ def test_parse_map_reads_dims_warps_connections_and_sprites(rom):
     assert m0["connections"] == {}
     kinds = [(s["kind"], s["x"], s["y"]) for s in m0["sprites"]]
     assert kinds == [("npc", 1, 2), ("trainer", 0, 3), ("item", 0, -4)]
+    # An item ball's extra byte is the item id it holds — the fact that turns "where is the
+    # CARD KEY" into a lookup. Only item balls carry it.
+    assert [s.get("item") for s in m0["sprites"]] == [None, None, 5]
     assert m0["grid"] == ["1111", "1111", "1111", "1111"]
     m1 = parse_map(data, 1)
     assert m1["connections"] == {"east": 2}

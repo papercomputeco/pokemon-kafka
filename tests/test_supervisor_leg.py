@@ -59,6 +59,14 @@ class FakeRig:
             if s.get("kind") == "item"
         ]
 
+    def ball_contents(self, map_id):
+        items = self.truth.get("items", {"48": "CARD KEY", "20": "SUPER POTION"})
+        return {
+            (s["x"], s["y"]): items.get(str(s.get("item")), f"item {s.get('item')}")
+            for s in self.truth["maps"].get(str(map_id), {}).get("sprites", [])
+            if s.get("kind") == "item"
+        }
+
     def bag(self):
         return list(self._bag)
 
@@ -737,8 +745,8 @@ def _floor_with_balls():
                 "warps": [[6, 6, 234, 0]],
                 "connections": {},
                 "sprites": [
-                    {"kind": "item", "x": 3, "y": 4},
-                    {"kind": "item", "x": 5, "y": 2},
+                    {"kind": "item", "x": 3, "y": 4, "item": 48},
+                    {"kind": "item", "x": 5, "y": 2, "item": 20},
                     {"kind": "trainer", "x": 1, "y": 1},
                 ],
             },
@@ -763,6 +771,43 @@ def test_the_sweep_opens_every_ball_the_cartridge_lists_and_reports_the_bag(tmp_
     assert sorted(gained) == [(20, 3), (48, 1)]
     assert sorted(c[1] for c in rig.calls if c[0] == "collect") == [(3, 4), (5, 2)]
     assert any(e["event"] == "supervisor.item_collected" for e in rig.events)
+
+
+def test_an_unreachable_ball_names_the_pad_that_stands_beside_it(tmp_path):
+    """ "Could not reach" is the least useful true sentence a leg can write. When a pad stands in
+    the region the target lives in, the leg says so — that is the CARD KEY's (27,3) on 5F."""
+    truth = _floor_with_balls()
+    floor = truth["maps"]["209"]
+    floor["width"], floor["height"] = 8, 8
+    floor["grid"] = ["11111111"] * 8
+    floor["warps"] = [[4, 4, 210, 0]]  # the pad severs the right half from the left on foot
+    floor["sprites"] = [{"kind": "item", "x": 7, "y": 4, "item": 48}]
+    rig = FakeRig(start=(209, 0, 4), truth=truth)
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.sweep_items()
+    named = [e for e in rig.events if e["event"] == "supervisor.pad_named"]
+    assert named and named[0]["pads"] == [[[4, 4], 210]]
+
+
+def test_the_wanted_ball_is_opened_before_any_other(tmp_path):
+    """A leg that came for the CARD KEY opens its ball first. The cartridge says which ball
+    holds it, so a full bag, a lost fight, or a spent budget can no longer cost the one pickup
+    the leg exists for — Silph's key sat in map 210's (21,16) through two sweep sessions."""
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())
+    rig._pickups = {(3, 4): (48, 1), (5, 2): (20, 3)}
+    runner = LegRunner(
+        rig, goal=234, want="CARD KEY", consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    runner.sweep_items(runner.want)
+    assert [c[1] for c in rig.calls if c[0] == "collect"] == [(3, 4), (5, 2)]
+
+
+def test_a_refused_ball_says_what_the_cartridge_put_in_it(tmp_path):
+    rig = FakeRig(start=(209, 1, 4), truth=_floor_with_balls())  # no pickups: every open fails
+    runner = LegRunner(rig, goal=234, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.sweep_items()
+    refused = [e for e in rig.events if e["event"] == "supervisor.item_refused"]
+    assert {e["holds"] for e in refused} == {"CARD KEY", "SUPER POTION"}
 
 
 def test_a_ball_is_only_tried_once_per_leg(tmp_path):

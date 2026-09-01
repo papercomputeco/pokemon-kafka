@@ -515,3 +515,49 @@ def test_cut_until_open_returns_at_once_when_the_way_is_already_clear():
     road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up") is True
     assert "a" not in io.presses  # no menu was opened; the step just worked
+
+
+def test_walkable_treats_pads_as_walls_and_reachable_does_not():
+    """Silph 5F in miniature: the only path to the right-hand corridor crosses a warp pad.
+
+    `reachable` (terrain) says the corridor is open; `walk` refuses to thread a door tile as
+    floor, so the corridor is unreachable on foot and nine steps from the pad. Two sessions of
+    "the model says reachable and the engine refuses" were this disagreement.
+    """
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 22,
+                "grid": ["11111"],
+                "warps": [[2, 0, 7, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    pairs = set()
+    assert (4, 0) in road.reachable(truth, pairs, 1, (0, 0))
+    assert (4, 0) not in road.walkable(truth, pairs, 1, (0, 0))
+    assert (4, 0) in road.walkable(truth, pairs, 1, (3, 0))  # already past the pad
+    # The pad itself stays open when it is the target of the walk, matching `walk`'s own rule.
+    assert (2, 0) in road.walkable(truth, pairs, 1, (0, 0), keep={(2, 0)})
+
+
+def test_pads_reaching_names_the_ride_into_a_cut_off_corridor():
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 22,
+                "grid": ["11111"],
+                "warps": [[2, 0, 7, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    assert road.pads_reaching(truth, set(), 1, {(4, 0)}) == [((2, 0), 7)]
+    assert road.pads_reaching(truth, set(), 1, {(0, 0)}) == [((2, 0), 7)]
