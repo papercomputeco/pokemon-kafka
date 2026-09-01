@@ -1036,6 +1036,27 @@ class Rig:
             self.ctl.wait(40)
         return any(wanted.upper() in text.upper() for _i, text in self.menu_rows())
 
+    def advance_text(self, expect: str, tries: int = 8) -> bool:
+        """Press A through a text box until the window changes, then judge the new menu.
+
+        Safe *only* where the screen is known to be a box rather than a list: "Accessed BILL's
+        PC." takes several presses to clear, and one press is not enough. It stops the moment the
+        rows change, so it can never walk on into a list and confirm an entry there — which is
+        exactly what an unbounded version did when it deposited Charizard and then Dugtrio.
+        """
+        avoid = [name.upper() for name, _lvl, _hp in self.party()]
+        for _ in range(tries):
+            rows = self.menu_rows()
+            if any(expect.upper() in text.upper() for _i, text in rows):
+                return True
+            # The party list is the one screen where A commits something. Recognise it by its own
+            # contents — the roster is right there in RAM — and stop before pressing into it.
+            if any(any(who in text.upper() for who in avoid) for _i, text in rows):
+                return False
+            self.ctl.press("a")
+            self.ctl.wait(50)
+        return any(expect.upper() in text.upper() for _i, text in self.menu_rows())
+
     def menu_cursor_to(self, index: int, presses: int = 12) -> bool:
         """Walk the list cursor to ``index`` using the cursor register as ground truth."""
         for _ in range(presses):
@@ -1061,7 +1082,16 @@ class Rig:
         hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
         if hit is None:
             return False
-        want = (hit - rows[0][0]) // 2
+        # Menus OVERLAY: choosing DEPOSIT renders the party list on top of the box menu, and the
+        # follow-up DEPOSIT/STATS/CANCEL renders on top of *that* — measured rows read
+        # ('WI', 'DE'+nickname, 'RE GLOOM', ..., (12, 'DEPOSIT')). So the cursor index is measured
+        # from the first row of the block the match sits in, not from the first row on screen; the
+        # old arithmetic put the cursor five entries down a five-entry list.
+        present = {i for i, _t in rows}
+        block_start = hit
+        while block_start - 2 in present:
+            block_start -= 2
+        want = (hit - block_start) // 2
         for _ in range(presses):
             cur = self.mem[qm.ADDR_MENU_CUR]
             if cur == want:
@@ -1098,9 +1128,9 @@ class Rig:
                 break
         if not self.menu_choose("BILL"):
             return False
-        self.ctl.press("a")  # "Accessed BILL's PC." -> the box submenu
-        self.ctl.wait(55)
-        if not self.menu_shows("DEPOSIT") or not self.menu_choose("DEPOSIT"):
+        if not self.advance_text("DEPOSIT"):  # "Accessed BILL's PC." -> the box submenu
+            return False
+        if not self.menu_choose("DEPOSIT"):
             return False
         if not self.menu_cursor_to(index):
             return False
