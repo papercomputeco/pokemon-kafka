@@ -977,6 +977,34 @@ class Rig:
 
     # ---- banking --------------------------------------------------------------------------
 
+    def step_off_targets(self, map_id: int, x: int, y: int) -> list[tuple[str, tuple[int, int]]]:
+        """Directions off a warp tile that land on ordinary floor — doors excluded, in order."""
+        m = self.truth["maps"].get(str(map_id))
+        if not m:
+            return []
+        warps = self.warp_tiles(map_id)
+        out = []
+        for direction, (dx, dy) in (("up", (0, -1)), ("down", (0, 1)), ("left", (-1, 0)), ("right", (1, 0))):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < m["width"] and 0 <= ny < m["height"]):
+                continue
+            if m["grid"][ny][nx] != "1" or (nx, ny) in warps:
+                continue
+            if not rt.passable(m, self.pairs, x, y, nx, ny):
+                continue
+            out.append((direction, (nx, ny)))
+        return out
+
+    def _step_off_mat(self, mp: int, x: int, y: int) -> bool:  # pragma: no cover - drives the emulator
+        for direction, cell in self.step_off_targets(mp, x, y):
+            self.ctl.press(direction)
+            self.ctl.wait(30)
+            if self.pos() == (mp, *cell):
+                print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
+                return True
+        print(f"  WARNING: could not step off the warp mat at ({x}, {y}) on {mp}", flush=True)
+        return False
+
     def bank(
         self, name: str, *, directory: Path | None = None
     ) -> Path:  # pragma: no cover - writes and reloads a real save state
@@ -989,9 +1017,13 @@ class Rig:
         self.settle()
         mp, x, y = self.pos()
         if (x, y) in self.warp_tiles(mp):
-            self.probe_step()  # step off the mat; the undo is skipped when the step warps
-            if self.pos()[:1] == (mp,) and self.pos()[1:] != (x, y):
-                print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
+            # A real step, not a probe. `probe_step` presses and *undoes*, which leaves us on the
+            # mat, and the reload check cannot see the problem because an in-process reload does
+            # not settle. Booting that baton in a fresh process does, and the settle walks out
+            # through the door: Saffron's Center banked at (182,3,7) came back up in the city,
+            # and the leg spent its ladder trying to get back in. A Center has two mats side by
+            # side, so the escape has to prefer a neighbour that is not itself a door.
+            self._step_off_mat(mp, x, y)
         path = (directory or BATON_DIR) / f"{name}.state"
         path.parent.mkdir(parents=True, exist_ok=True)
         expected = self.settled_pos()

@@ -450,3 +450,18 @@ def test_settle_returns_immediately_when_the_world_already_moves():
     r = _stub_rig(parked=0)
     assert r.settle() is True
     assert "b" not in r.io.presses  # nothing was blocking, so nothing was pressed at it
+
+
+def test_step_off_targets_prefers_floor_and_never_another_door():
+    """A Pokemon Center has two exit mats side by side. Banking on one and "stepping off" onto
+    the other leaves the baton in the doorway, and booting it settles straight out of the
+    building — which is exactly what Saffron's (182,3,7) baton did, costing a leg its ladder
+    trying to get back in."""
+    r = _reader_rig(
+        {0xD35E: 182, 0xD362: 3, 0xD361: 7},
+        {"maps": {"182": {"width": 6, "height": 8, "grid": ["111111"] * 8, "warps": [[3, 7, 10, 0], [4, 7, 10, 0]]}}},
+    )
+    moves = r.step_off_targets(182, 3, 7)
+    assert ("up", (3, 6)) in moves  # into the building
+    assert all(cell != (4, 7) for _d, cell in moves)  # never the mat next door
+    assert moves[0][0] == "up"  # and the interior is tried first
