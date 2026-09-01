@@ -386,12 +386,12 @@ def test_heal_mashes_a_until_the_party_reads_full():
 
     io = FakeIO(on_press=on_press)
     set_party(io, [(0xB2, 22, 25, 63)])
-    qm.heal(io, qm.CENTERS[3])
+    qm.heal(io, qm.CENTERS[3].face)
     assert qm.read_party(io)[0]["hp"] == 63
     io2 = FakeIO()
     set_party(io2, [(0xB2, 22, 25, 63)])
     with pytest.raises(qm.QuartermasterError, match="nurse heal"):
-        qm.heal(io2, qm.CENTERS[3])
+        qm.heal(io2, qm.CENTERS[3].face)
 
 
 # --------------------------------------------------------------------------- errand composition

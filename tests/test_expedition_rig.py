@@ -609,3 +609,90 @@ def test_grass_lanes_only_offers_grass_we_can_stand_on(monkeypatch):
     assert r.grass_lanes(13) == []  # none of the map's grass is in our region
     monkeypatch.setattr(road_mod, "walkable", lambda *a, **k: {(12, 10), (0, 2), (9, 51)})
     assert r.grass_lanes(13) == [(0, 2), (9, 51)]
+
+
+# --------------------------------------------------------------------------- healing at a Center
+
+_CENTER_MAP = {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 3, "y": 1}]}
+
+
+def test_heal_at_center_refuses_a_map_that_is_not_a_center(capsys):
+    """The grind leg that crashed here (run 20260901-164132-3962) had driven to map 89 and then
+    called a method that did not exist; the honest failure on a wrong map is False, said aloud."""
+    r = _reader_rig({0xD35E: 157, 0xD362: 3, 0xD361: 3}, {"maps": {"157": {"width": 10, "height": 9, "tileset": 0}}})
+    assert r.heal_at_center() is False
+    assert "not a Center" in capsys.readouterr().out
+
+
+def test_heal_at_center_is_a_no_op_when_the_party_already_reads_full(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 63, "max_hp": 63}])
+    r.approach = lambda cells: (_ for _ in ()).throw(AssertionError("walked for nothing"))
+    assert r.heal_at_center() is True
+
+
+def test_heal_at_center_talks_the_template_cell_until_the_party_reads_full(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    world = {"healed": False, "stood": None}
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 63 if world["healed"] else 12, "max_hp": 63}])
+
+    def approach(cells):
+        world["stood"] = cells
+        return True
+
+    def nurse(io, face):
+        assert face == "up"  # the counter template: player at (3,3) facing the nurse at (3,1)
+        world["healed"] = True
+
+    r.approach = approach
+    monkeypatch.setattr(rig.qm, "heal", nurse)
+    assert r.heal_at_center() is True
+    assert world["stood"] == {(3, 3)}
+
+
+def test_heal_at_center_reports_an_unreachable_counter(monkeypatch, capsys):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 12, "max_hp": 63}])
+    r.approach = lambda cells: False
+    assert r.heal_at_center() is False
+    assert "could not reach" in capsys.readouterr().out
+
+
+def test_heal_at_center_gives_up_honestly_when_the_nurse_never_heals(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 12, "max_hp": 63}])
+    r.approach = lambda cells: True
+    calls = {"n": 0}
+
+    def refuses(io, face):
+        calls["n"] += 1
+        raise rig.qm.QuartermasterError("nurse heal")
+
+    monkeypatch.setattr(rig.qm, "heal", refuses)
+    assert r.heal_at_center() is False
+    assert calls["n"] == 3  # it retried, then told the truth instead of spinning
+
+
+class _Recorder:
+    """A controller that only remembers what was pressed — menus are stubbed per test."""
+
+    def __init__(self):
+        self.presses: list[str] = []
+
+    def press(self, button, *a, **kw):
+        self.presses.append(button)
+
+    def wait(self, frames=30):
+        pass
+
+
+def test_a_failed_lead_swap_closes_the_menus_it_opened():
+    """Measured on the karp grind: a silent failure here left the START menu up, every step after
+    was swallowed, and the heal trip's first hop reported "refused" against a clear road."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.party = lambda: [("MAGIKARP", 16, 5), ("HYPNO", 99, 341)]
+    r.ctl = _Recorder()
+    r.menu_choose = lambda wanted: False  # the start menu never showed POKeMON
+    assert r.lead_swap(1) is False
+    opened = r.ctl.presses.index("start")
+    assert r.ctl.presses[opened + 1 :].count("b") >= 8  # what it opened, it closed

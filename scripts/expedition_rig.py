@@ -784,6 +784,34 @@ class Rig:
                 self.ctl.wait(30)
         return False
 
+    def battle_flee(self) -> bool:  # pragma: no cover - drives the emulator
+        """Run from the current battle. RUN is the bottom-right of the 2x2 battle menu.
+
+        The escape hatch a fragile lead needs: when the swap fails, fighting on with SPLASH is
+        how a level-5 Magikarp faints, and a fainted participant earns nothing. Fleeing costs the
+        experience of one encounter and keeps the recruit.
+        """
+        if not self.ag._await_battle_menu():
+            return False
+        for _ in range(4):
+            if self.mem[qm.ADDR_MENU_CUR] == 1:
+                break
+            self.ctl.press("down")
+            self.ctl.wait(20)
+        for _ in range(4):
+            if self.mem[self.ADDR_BATTLE_COL] >= 15:
+                break
+            self.ctl.press("right")
+            self.ctl.wait(20)
+        self.ctl.press("a")
+        self.ctl.wait(60)
+        for _ in range(6):
+            if not self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        return not self.mem[qm.ADDR_IN_BATTLE]
+
     def lead_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
         """Move the party member at ``index`` into slot 0, so it is sent out first.
 
@@ -796,30 +824,40 @@ class Rig:
         roster = [name for name, _lvl, _hp in self.party()]
         if not 0 <= index < len(roster) or index == 0:
             return index == 0
+
+        def bail() -> bool:
+            # A failed swap must not strand its own menus open. Measured on the karp grind:
+            # a silent failure here left the START menu up, every following step was swallowed,
+            # and the heal trip's first hop reported "refused" against a road that was clear.
+            for _ in range(8):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
+
         for _ in range(6):
             self.ctl.press("b")
             self.ctl.wait(25)
         self.ctl.press("start")
         self.ctl.wait(70)
         if not self.menu_choose("MON"):
-            return False
+            return bail()
         self.ctl.wait(60)
         if not self.menu_cursor_to(index):
-            return False
+            return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
         if not any("SWITCH" in t.upper() for _i, t in self.menu_rows(0, 20)):
-            return False
+            return bail()
         # Measured on this screen: the submenu renders STATS(12) / SWITCH(14) / CANCEL(16) with
         # the cursor capped at 2, so SWITCH is index 1 — and the highlighted row is the one whose
         # space is eaten by the cursor glyph ('Choose a PSWITCH'). Index arithmetic over the rows
         # cannot be used here because the roster underneath is also two rows apart.
         if not self.menu_cursor_to(1, presses=6):
-            return False
+            return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
         if not self.menu_cursor_to(0, presses=8):
-            return False
+            return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
         for _ in range(8):
@@ -1447,6 +1485,38 @@ class Rig:
         if not any(s["kind"] == "npc" and (s["x"], s["y"]) == (3, 1) for s in m.get("sprites", [])):
             return None
         return (3, 3), "up"
+
+    def heal_at_center(self) -> bool:
+        """Stand at this map's nurse counter and A through the heal until the party reads full.
+
+        ``center_counter`` knows where to stand — the nurse is *behind* the counter, adjacent to
+        no cell, so talking to bodies can never meet her. The judge is quartermaster's party
+        read, every member back at its own max: ``party()`` carries no max HP, and "nobody
+        fainted" is already true before the top-off heal a grind leg comes in for.
+        """
+        counter = self.center_counter(self.pos()[0])
+        if counter is None:
+            print(f"  map {self.pos()[0]} is not a Center — nowhere to heal", flush=True)
+            return False
+        cell, face = counter
+
+        def full() -> bool:
+            party = qm.read_party(self.io)
+            return bool(party) and all(p["hp"] == p["max_hp"] for p in party)
+
+        if full():
+            return True
+        if not self.approach({cell}):
+            print(f"  could not reach the nurse's counter at {cell}", flush=True)
+            return False
+        for _ in range(3):
+            try:
+                qm.heal(self.io, face)
+            except qm.QuartermasterError:
+                continue
+            if full():
+                return True
+        return full()
 
     def step_off_targets(self, map_id: int, x: int, y: int) -> list[tuple[str, tuple[int, int]]]:
         """Directions off a warp tile that land on ordinary floor — doors excluded, in order."""
