@@ -472,7 +472,7 @@ class _MenuRig:
 
     def __init__(self, rows, cursor=0):
         self._rows = rows
-        self.mem = {rig.qm.ADDR_MENU_CUR: cursor}
+        self.mem = {rig.qm.ADDR_MENU_CUR: cursor, rig.ADDR_LIST_SCROLL: 0}
         self.presses = []
 
         class Ctl:
@@ -500,6 +500,9 @@ class _MenuRig:
 
     def dialogue(self):
         return ""
+
+    def list_index(self):
+        return rig.Rig.list_index(self)
 
 
 def test_menu_choose_selects_by_text_not_by_position():
@@ -546,10 +549,34 @@ def test_menu_shows_never_presses_anything_while_it_looks():
     assert menu.presses == []
 
 
-def test_menu_cursor_to_walks_by_the_register_not_by_counting():
-    """The party list renders nicknames, so an entry is chosen by index; the cursor register is
-    the only ground truth for where the highlight actually sits."""
-    menu = _MenuRig({2: "AAAAAAAAAA", 4: "DUGTRIO", 6: "GLOOM", 8: "PRIMEAPE"}, cursor=0)
-    assert rig.Rig.menu_cursor_to(menu, 2) is True
-    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 2
-    assert menu.presses == ["down", "down"]  # walked, and never pressed A
+def test_menu_cursor_to_counts_the_scroll_not_just_the_cursor():
+    """The deposit roster shows three rows: 0xCC26 caps at 2 while 0xCC36 counts how far the list
+    has scrolled, so the highlight is cursor + scroll. Reading only the cursor deposits the wrong
+    member for anything past the third slot — measured on Cerulean's PC."""
+    menu = _MenuRig({2: "AAAAAAAAAA", 4: "DUGTRIO", 6: "GLOOM"}, cursor=0)
+    menu.mem[rig.ADDR_LIST_SCROLL] = 0
+
+    def press(button, *a, **kw):  # the window caps at 2 and then the list scrolls under it
+        menu.presses.append(button)
+        if button == "down":
+            if menu.mem[rig.qm.ADDR_MENU_CUR] < 2:
+                menu.mem[rig.qm.ADDR_MENU_CUR] += 1
+            else:
+                menu.mem[rig.ADDR_LIST_SCROLL] += 1
+
+    menu.ctl.press = press
+    assert rig.Rig.menu_cursor_to(menu, 4) is True
+    assert rig.Rig.list_index(menu) == 4
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 2 and menu.mem[rig.ADDR_LIST_SCROLL] == 2
+    assert "a" not in menu.presses  # walked, never confirmed
+
+
+def test_menu_choose_indexes_within_the_block_when_menus_overlay():
+    """Choosing DEPOSIT renders the party list on top of the box menu, and the follow-up
+    DEPOSIT/STATS/CANCEL renders on top of that. Measured rows from Cerulean's PC — the cursor
+    index must be counted from the block the match is in, not from the first row on screen."""
+    overlaid = _MenuRig(
+        {2: "WI", 4: "DEDUGTRIO", 5: "99", 6: "RE GLOOM", 7: "99", 8: "CH PRIMEAPE", 12: "DEPOSIT", 14: "CANCEL"}
+    )
+    assert rig.Rig.menu_choose(overlaid, "DEPOSIT") is True
+    assert overlaid.mem[rig.qm.ADDR_MENU_CUR] == 0  # first entry of ITS OWN block, not the fifth

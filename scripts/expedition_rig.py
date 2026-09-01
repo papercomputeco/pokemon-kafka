@@ -1057,15 +1057,24 @@ class Rig:
             self.ctl.wait(50)
         return any(expect.upper() in text.upper() for _i, text in self.menu_rows())
 
-    def menu_cursor_to(self, index: int, presses: int = 12) -> bool:
-        """Walk the list cursor to ``index`` using the cursor register as ground truth."""
+    def list_index(self) -> int:
+        """Which entry a scrolling list has highlighted: cursor within the window PLUS scroll.
+
+        Measured on the deposit roster: ``0xCC26`` caps at 2 (a three-row window) while ``0xCC36``
+        counts how far the list has scrolled, so reading only the cursor picks the wrong member
+        for anything past the third slot.
+        """
+        return self.mem[qm.ADDR_MENU_CUR] + self.mem[ADDR_LIST_SCROLL]
+
+    def menu_cursor_to(self, index: int, presses: int = 16) -> bool:
+        """Walk a scrolling list's highlight to ``index``, judged by cursor + scroll."""
         for _ in range(presses):
-            cur = self.mem[qm.ADDR_MENU_CUR]
-            if cur == index:
+            at = self.list_index()
+            if at == index:
                 return True
-            self.ctl.press("down" if cur < index else "up")
+            self.ctl.press("down" if at < index else "up")
             self.ctl.wait(20)
-        return self.mem[qm.ADDR_MENU_CUR] == index
+        return self.list_index() == index
 
     def menu_choose(self, wanted: str, *, presses: int = 12) -> bool:
         """Move the menu cursor onto the entry whose text contains ``wanted`` and press A.
@@ -1089,7 +1098,11 @@ class Rig:
         # old arithmetic put the cursor five entries down a five-entry list.
         present = {i for i, _t in rows}
         block_start = hit
-        while block_start - 2 in present:
+        # A block is entries two rows apart with nothing between them. The roster interleaves its
+        # levels on the odd rows ((8,'CHGLOOM'),(9,'99')), and the DEPOSIT/STATS/CANCEL confirm
+        # renders *below* all of that at row 12 — so walking back without checking the odd row
+        # crossed into the roster and put the cursor five entries down a three-entry menu.
+        while block_start - 2 in present and block_start - 1 not in present:
             block_start -= 2
         want = (hit - block_start) // 2
         for _ in range(presses):
@@ -1132,21 +1145,48 @@ class Rig:
             return False
         if not self.menu_choose("DEPOSIT"):
             return False
-        if not self.menu_cursor_to(index):
+        roster = [name for name, _lvl, _hp in self.party()]
+        if not 0 <= index < len(roster) or not self.menu_cursor_to(index):
             return False
-        self.ctl.press("a")  # pick that party member -> DEPOSIT / STATS / CANCEL
+        self.ctl.press("a")  # pick that party member -> the confirm menu
         self.ctl.wait(50)
-        if not self.menu_shows("DEPOSIT") or not self.menu_choose("DEPOSIT"):
+        if not self.menu_shows("DEPOSIT"):
             return False
-        for _ in range(3):
+        # The confirm menu names its own order on screen: "DEPOSIT What? STATS CANCEL". Its rows
+        # cannot be told apart from the roster's by shape — the roster's sixth level row is cut
+        # off, so DEPOSIT at row 12 looks like a continuation of the entry at row 10, and the
+        # block arithmetic picked STATS. So drive it by position and *verify*: STATS is harmless
+        # and backs out with B, which makes a wrong pick recoverable rather than a guess.
+        for candidate in range(3):
+            if not self.menu_cursor_to(candidate, presses=6):
+                continue
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            for _ in range(3):
+                if len(self.party()) < before:
+                    break
+                self.ctl.press("a")
+                self.ctl.wait(45)
             if len(self.party()) < before:
                 break
-            self.ctl.press("a")
-            self.ctl.wait(45)
+            rows = self.menu_rows()
+            if any("ATTACK" in t.upper() or "EXP POINTS" in t.upper() for _i, t in rows):
+                for _ in range(3):  # a stats page: back out and try the next entry
+                    self.ctl.press("b")
+                    self.ctl.wait(30)
         for _ in range(8):
             self.ctl.press("b")
             self.ctl.wait(25)
-        return len(self.party()) < before
+        # The species that left must be the one we chose. A deposit is irreversible from the
+        # leg's point of view, and this run has already watched a menu bug take Charizard off
+        # the bench twice; "the party got smaller" is not proof that the right one went.
+        left = [n for n in roster if roster.count(n) > [x for x, _l, _h in self.party()].count(n)]
+        if left != [roster[index]]:
+            self.emit("pc.deposit_mismatch", wanted=roster[index], left=left)
+            print(f"  WARNING: meant to deposit {roster[index]}, the party lost {left}", flush=True)
+            return False
+        print(f"  deposited {roster[index]}; party is now {[n for n, _l, _h in self.party()]}", flush=True)
+        return True
 
     def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
         """Where to stand and which way to face to be healed, if this map is a Pokemon Center.
