@@ -431,6 +431,60 @@ def item_names(rom: bytes, count: int = 250) -> dict[str, str]:
     return out
 
 
+def move_names(rom: bytes, count: int = 165) -> dict[str, str]:
+    """Move id -> name, from the ROM's own 0x50-terminated list (found by POUND at id 1)."""
+    base = rom.find(bytes(0x80 + ord(c) - ord("A") for c in "POUND"))
+    if base < 0:
+        return {}
+    out, off = {}, base
+    for mid in range(1, count + 1):
+        name, i = "", off
+        while i < len(rom) and rom[i] != 0x50:
+            byte = rom[i]
+            name += chr(ord("A") + byte - 0x80) if 0x80 <= byte <= 0x99 else _ITEM_CHARS.get(byte, "")
+            i += 1
+        if not name.strip():
+            break
+        out[str(mid)] = name.strip()
+        off = i + 1
+    return out
+
+
+def machine_moves(rom: bytes) -> dict[str, str]:
+    """``"HM03" -> "SURF"`` — what each TM and HM actually teaches.
+
+    An item's name does not say what it is. The cartridge stores machines as a numbered range with
+    no text, so ``item_names`` generates "HM03" and nothing anywhere says *Surf* — which is how a
+    whole session can be spent hunting an item nobody can name. The mapping is in the ROM: fifty
+    TM move ids followed by the five HM ids.
+
+    Located by content signature, never by address: the five HM entries are exactly the field
+    moves CUT, FLY, SURF, STRENGTH and FLASH, so the run of their ids (15, 19, 57, 70, 148) with
+    fifty valid move ids before it identifies the table, and no other run of ROM bytes does.
+    """
+    moves = move_names(rom)
+    if not moves:
+        return {}
+    field = [
+        next((int(i) for i, n in moves.items() if n == want), 0) for want in ("CUT", "FLY", "SURF", "STRENGTH", "FLASH")
+    ]
+    if not all(field):
+        return {}
+    marker = bytes(field)
+    off = 0
+    while True:
+        hit = rom.find(marker, off)
+        if hit < 0:
+            return {}
+        table = rom[hit - 50 : hit]
+        if len(table) == 50 and all(1 <= b <= len(moves) for b in table):
+            break
+        off = hit + 1
+    out = {f"TM{n:02d}": moves.get(str(table[n - 1]), "?") for n in range(1, 51)}
+    out.update({f"HM{n:02d}": moves[str(field[n - 1])] for n in range(1, 6)})
+    return out
+
+
 def species_table(rom: bytes) -> dict[str, dict]:
     """Internal species id -> {name, dex, types, catch_rate}, from the ROM's own three tables:
     the name table (10 bytes/entry, internal order — found by RHYDON at id 1), the internal->dex
@@ -648,6 +702,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "evolutions": evolutions_table(rom),
         "type_chart": type_chart(rom),
         "items": item_names(rom),
+        "machines": machine_moves(rom),
         "maps": maps,
     }
 

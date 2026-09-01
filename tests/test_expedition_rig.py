@@ -846,3 +846,14 @@ def test_step_off_targets_skips_cells_a_tile_pair_refuses(monkeypatch):
     r.pairs = set()
     monkeypatch.setattr(rt_mod, "passable", lambda *a, **k: False)
     assert r.step_off_targets(1, 1, 1) == []
+
+
+def test_the_bag_spells_a_machine_out():
+    """ "HM03" tells an operator nothing. The cartridge knows it teaches SURF, so the bag can say
+    so — this is the answer to "tell me what the item is" that the number was hiding."""
+    r = _bag_rig([(198, 1), (60, 2)], items={"198": "HM03", "60": "FRESH WATER"})
+    r.truth["machines"] = {"HM03": "SURF", "TM26": "EARTHQUAKE"}
+    assert r.bag_named() == [("HM03", 1), ("FRESH WATER", 2)]
+    assert r.bag_named(full=True) == [("HM03 SURF", 1), ("FRESH WATER", 2)]
+    assert r.item_full_name("TM26") == "TM26 EARTHQUAKE"
+    assert r.item_full_name("POKe FLUTE") == "POKe FLUTE"  # not a machine: unchanged

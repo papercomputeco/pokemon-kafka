@@ -202,12 +202,21 @@ class Rig:
         """
         return self.mem[ADDR_BAG_COUNT] >= BAG_SLOTS
 
+    def item_full_name(self, name: str) -> str:
+        """``HM03`` -> ``HM03 SURF``. A machine's number does not say what it teaches, and an
+        operator asking "what is the item?" deserves the answer the number hides."""
+        move = (self.truth.get("machines") or {}).get(name)
+        return f"{name} {move}" if move else name
+
     def item_name(self, item_id: int) -> str:
         """What the cartridge calls this id. TMs/HMs live past the name list and keep their id."""
         return self.truth.get("items", {}).get(str(item_id), f"#{item_id}")
 
-    def bag_named(self) -> list[tuple[str, int]]:
-        return [(self.item_name(item), qty) for item, qty in self.bag()]
+    def bag_named(self, full: bool = False) -> list[tuple[str, int]]:
+        """The bag as names. ``full=True`` spells a machine out — "HM03 SURF" — because the
+        number alone tells an operator nothing about what the item is."""
+        names = [(self.item_name(item), qty) for item, qty in self.bag()]
+        return [(self.item_full_name(n), q) for n, q in names] if full else names
 
     def toss_stack(
         self, item_id: int

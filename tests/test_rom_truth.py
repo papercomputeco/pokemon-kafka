@@ -28,6 +28,8 @@ WALK, WALL, GRASS, LIP, LEDGE = 0x00, 0x01, 0x52, 0x03, 0x05
 LEDGES_OFF = 0x0D00
 STATS_OFF, DEX_OFF, NAMES_OFF = 0x8000, 0x9800, 0xA000
 ITEMS_OFF = 0xB000  # the item-name list; found by content signature (it opens with MASTER BALL)
+MOVES_OFF = 0xB400  # the move-name list; found by POUND at id 1
+MACHINES_OFF = 0xBC00  # 50 TM move ids then the five HM ids
 WILD_PTRS, WILD_BLOCK = 0x4600, 0x4800
 EVOS_PTRS, EVOS_BLOCK, EVOS_BLOCK2 = 0x5000, 0x5200, 0x5220  # bank 1: addr == file offset
 TYPECHART_OFF = 0x0A00
@@ -124,6 +126,18 @@ def build_rom() -> bytearray:
 
     blob = b"".join(item_bytes(n) for n in ("MASTER BALL", "ULTRA BALL", "GREAT BALL")) + bytes([0x50])
     rom[ITEMS_OFF : ITEMS_OFF + len(blob)] = blob
+
+    # Move names at their real shape (POUND is id 1), with the five field moves at the ids the
+    # machine table points at, and the machine table itself: 50 TM ids then the HM ids. The HM run
+    # is the signature `machine_moves` finds the table by.
+    field = {15: "CUT", 19: "FLY", 57: "SURF", 70: "STRENGTH", 148: "FLASH"}
+    moves = b""
+    for mid in range(1, 149):
+        name = "POUND" if mid == 1 else field.get(mid, f"MOVE{chr(65 + mid % 26)}{chr(65 + mid // 26)}")
+        moves += item_bytes(name)
+    rom[MOVES_OFF : MOVES_OFF + len(moves)] = moves
+    machines = bytes([(i % 140) + 1 for i in range(50)]) + bytes([15, 19, 57, 70, 148])
+    rom[MACHINES_OFF : MACHINES_OFF + len(machines)] = machines
 
     for mid, hdr in ((0, HDR0), (1, HDR1), (2, HDR2), (3, HDR3)):
         rom[MAP_HEADER_BANKS + mid] = 0
@@ -747,3 +761,70 @@ def test_item_names_are_read_from_the_list_that_opens_with_master_ball(rom):
     assert items[str(rom_truth.HM_FIRST + 2)] == "HM03"  # the Surf HM, by generated name
     assert items[str(rom_truth.TM_BASE + 1)] == "TM01"
     assert rom_truth.item_names(bytes(0x100)) == {}  # no signature, no table
+
+
+def test_machine_moves_says_what_each_tm_and_hm_teaches(rom):
+    """An item's name does not say what it is: the cartridge stores machines as a numbered range
+    with no text, so "HM03" is generated and nothing anywhere says SURF. The mapping is in the
+    ROM — fifty TM move ids followed by the five HM ids — and it is found by content signature:
+    the HM entries are exactly CUT, FLY, SURF, STRENGTH, FLASH."""
+    import rom_truth as rt
+
+    _, data = rom
+    machines = rt.machine_moves(data)
+    assert machines["HM01"] == "CUT" and machines["HM03"] == "SURF"
+    assert machines["HM02"] == "FLY" and machines["HM04"] == "STRENGTH" and machines["HM05"] == "FLASH"
+    assert len([k for k in machines if k.startswith("TM")]) == 50
+    assert rt.machine_moves(bytes(0x100)) == {}  # no move list, no mapping
+
+
+def test_move_names_come_from_the_list_that_opens_with_pound(rom):
+    import rom_truth as rt
+
+    _, data = rom
+    moves = rt.move_names(data)
+    assert moves["1"] == "POUND"
+    assert moves["57"] == "SURF" and moves["15"] == "CUT"
+    assert rt.move_names(bytes(0x100)) == {}
+
+
+def test_machine_moves_refuses_an_image_it_cannot_verify(rom):
+    """The table is found by signature or not at all: no move list, no field moves among the
+    names, or no run of fifty valid ids before the HM marker each mean we do not know what a
+    machine teaches — and saying nothing beats guessing."""
+    import rom_truth as rt
+
+    _, data = rom
+    assert rt.machine_moves(bytes(0x200)) == {}  # no move list at all
+
+    # A move list that has POUND but none of the field moves: the marker cannot be built.
+    letters = bytes([0x80 + ord("P") - ord("A"), 0x50])
+    blob = bytearray(0x400)
+    pound = bytes([0x80 + ord(c) - ord("A") for c in "POUND"]) + bytes([0x50])
+    blob[0x100 : 0x100 + len(pound)] = pound
+    blob[0x100 + len(pound) : 0x100 + len(pound) + len(letters) * 160] = letters * 160
+    assert rt.machine_moves(bytes(blob)) == {}
+
+    # The marker present but with nothing usable before it, and no other candidate: report nothing.
+    forged = bytearray(0x400)
+    forged[0x100 : 0x100 + len(pound)] = pound
+    off = 0x100 + len(pound)
+    field = {15: "CUT", 19: "FLY", 57: "SURF", 70: "STRENGTH", 148: "FLASH"}
+    for mid in range(2, 149):
+        nm = field.get(mid, "M")
+        enc = bytes([0x80 + ord(c) - ord("A") if c != " " else 0x7F for c in nm]) + bytes([0x50])
+        forged[off : off + len(enc)] = enc
+        off += len(enc)
+    assert rt.machine_moves(bytes(forged)) == {}  # the HM ids never appear as a run
+
+
+def test_machine_moves_keeps_searching_past_a_false_marker(rom):
+    """The HM ids can appear as data before the real table does — this cartridge has three such
+    runs and only one has fifty valid move ids in front of it. Take the one that holds up."""
+    import rom_truth as rt
+
+    _, data = rom
+    decoy = bytes([0, 0, 0]) + bytes([15, 19, 57, 70, 148])
+    forged = bytearray(0x200) + bytearray(decoy) + bytearray(data)
+    machines = rt.machine_moves(bytes(forged))
+    assert machines["HM03"] == "SURF"  # skipped the decoy, found the table
