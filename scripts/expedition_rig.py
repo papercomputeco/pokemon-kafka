@@ -735,6 +735,63 @@ class Rig:
             self.ctl.wait(30)
         return False
 
+    def use_item(self, name: str, face: str | None = None) -> bool:  # pragma: no cover - drives the emulator
+        """Use a bag item by *name* from the ITEM menu. Returns whether it was selected.
+
+        The engine could use field MOVES and had no way to use an ITEM, which is what a rod is —
+        so with the OLD ROD in the bag there was still no way to fish. The item list scrolls like
+        every other list here (cursor 0xCC26 inside its window, scroll 0xCC36), so the row is read
+        rather than counted, and the entry is matched by the name the game prints.
+
+        Whether it *worked* is the caller's predicate — a rod is proved by a bite, never by a menu
+        having been navigated.
+        """
+        if face:
+            self.ctl.press(face)
+            self.ctl.wait(25)
+        for _ in range(6):  # close anything already open before opening ours
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.press("start")
+        self.ctl.wait(60)
+        # By text, not by index: the start menu grows a PLAYER entry as the game goes on, so
+        # "ITEM is the third row" is the kind of assumption that has cost this project runs.
+        if not self.menu_choose("ITEM"):
+            print("  the START menu did not open", flush=True)
+            return False
+        self.ctl.wait(50)
+        target = name.strip().upper().replace(" ", "")
+        # The bag renders entries on rows 4/6/8/10 with their quantities interleaved, the cursor
+        # caps at 2, and the list scrolls under it — so the highlighted row is 4 + 2*cursor and
+        # the walk needs one step per item, not a fixed count.
+        for _ in range(len(self.bag()) + 4):
+            row = self.window_row(4 + 2 * self.mem[qm.ADDR_MENU_CUR]).upper().replace(" ", "")
+            if target and target in row:
+                self.ctl.press("a")
+                self.ctl.wait(55)
+                return self.menu_choose("USE") or True  # some items skip the USE/TOSS submenu
+            self.ctl.press("down")
+            self.ctl.wait(18)
+        print(f"  no bag item called {name!r}", flush=True)
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return False
+
+    def fish(self, rod: str, face: str) -> bool:  # pragma: no cover - drives the emulator
+        """Cast ``rod`` while facing ``face``. A bite is a battle; that is the only proof."""
+        if not self.use_item(rod, face=face):
+            return False
+        # "Oh! It's a bite!" comes several frames before the battle flag flips, and reading the
+        # flag too early reports a cast that hooked something as a miss — measured on Vermilion's
+        # dock, twelve casts that all bit and all read as failures.
+        for _ in range(12):
+            if self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(60)
+        return bool(self.mem[qm.ADDR_IN_BATTLE])
+
     def surf_onto(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Ride onto water. The predicate is the position, never the menu."""
         before = self.pos()
@@ -1116,6 +1173,55 @@ class Rig:
         self.ctl.press("a")
         self.ctl.wait(45)
         return True
+
+    def pc_store_item(self, name: str) -> bool:  # pragma: no cover - drives the emulator
+        """Put one bag item into the PC's item storage. The bag shrinking is the proof.
+
+        The bag caps at twenty slots and a full bag refuses purchases outright — Vermilion's mart
+        failed at "confirm purchase" with no explanation, and the leg needed Poke Balls for a
+        catch. `make_room` only helps when something is stacked; everything here is a single key
+        item or TM. Storage is the player's OWN PC — the one whose menu is WITHDRAW ITEM /
+        DEPOSIT ITEM / TOSS ITEM — which is the same screen that was mistaken for the Pokemon box.
+        """
+        spot = self.center_pc(self.pos()[0])
+        if spot is None or not self.approach({spot[0]}):
+            return False
+        before = self.bag_named()
+        if not any(item == name for item, _qty in before):
+            return False
+        self.ctl.press(spot[1])
+        self.ctl.wait(25)
+        for _ in range(4):
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            if self.menu_rows():
+                break
+        own = next(
+            (
+                t
+                for _i, t in self.menu_rows()
+                if "PC" in t.upper() and "BILL" not in t.upper() and "OAK" not in t.upper()
+            ),
+            None,
+        )
+        if own is None or not self.menu_choose(own):
+            return False
+        if not self.advance_text("DEPOSIT") or not self.menu_choose("DEPOSIT ITEM"):
+            return False
+        if not self.menu_shows(name) or not self.menu_choose(name):
+            return False
+        for _ in range(4):  # quantity prompt defaults to one, then the confirm
+            if len(self.bag_named()) < len(before):
+                break
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.wait(40)  # the bag count settles a few frames after the box closes
+        stored = len(self.bag_named()) < len(before)
+        print(f"  {'stored' if stored else 'could not store'} {name}; bag now {len(self.bag_named())}/20", flush=True)
+        return stored
 
     def pc_deposit(self, index: int) -> bool:  # pragma: no cover - drives the emulator
         """Deposit the party member at ``index`` into Bill's PC. The party shrinking is the proof.
