@@ -242,7 +242,9 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
     return None
 
 
-def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, rides: int = 6):
+def ride_pad(  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    io, truth, pairs, map_id: int, targets, *, battle=_default_battle, rides: int = 6
+):
     """Reach ``targets`` by riding pads, when no walk can get there.
 
     The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
@@ -347,7 +349,9 @@ def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) ->
     return read_pos(io)
 
 
-def _return_through(io, truth, pairs, map_id: int, mp: int, x: int, y: int) -> bool:
+def _return_through(  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    io, truth, pairs, map_id: int, mp: int, x: int, y: int
+) -> bool:
     """Standing on the far side's warp tile, step off and back on to come home. True if we did."""
     import rom_truth as rt
 

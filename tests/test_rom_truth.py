@@ -708,3 +708,14 @@ def test_a_warp_outside_its_own_map_is_not_a_warp(rom):
     rom_bytes[OBJ0 + 7] = 9  # x
     m0 = parse_map(bytes(rom_bytes), 0)
     assert m0["warps"] == [[1, 3, LAST_MAP, 0]]  # the in-bounds one survives; the phantom is gone
+
+
+def test_a_header_with_a_tileset_past_the_table_is_not_a_map(rom):
+    """Map 231 parses with tileset 103 while all 226 real maps use 0-23, 28x64 dimensions, and 113
+    warps of which 110 sit outside its own edges. Nothing in the game can enter it, but `route`
+    links a LAST_MAP interior to every map that warps *into* it, so those phantoms made it a
+    wormhole joined to most of the world."""
+    _, data = rom
+    rom_bytes = bytearray(data)
+    rom_bytes[HDR0] = rom_truth.MAX_TILESET + 1
+    assert parse_map(bytes(rom_bytes), 0) is None
