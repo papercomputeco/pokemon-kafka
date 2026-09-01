@@ -735,6 +735,52 @@ class Rig:
             self.ctl.wait(30)
         return False
 
+    def lead_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Move the party member at ``index`` into slot 0, so it is sent out first.
+
+        Only a Pokemon that is *sent out* earns a share of the fight, which is the whole mechanic
+        behind grinding a weak recruit with a strong bench. The flow is read, not counted: the
+        start menu's POKeMON entry must be matched on "MON" because "POK" also matches POKeDEX
+        (measured — that mis-match opened the Pokedex), the roster shows nicknames so the member
+        is chosen by index, and its submenu is STATS / SWITCH / CANCEL.
+        """
+        roster = [name for name, _lvl, _hp in self.party()]
+        if not 0 <= index < len(roster) or index == 0:
+            return index == 0
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.press("start")
+        self.ctl.wait(70)
+        if not self.menu_choose("MON"):
+            return False
+        self.ctl.wait(60)
+        if not self.menu_cursor_to(index):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        if not any("SWITCH" in t.upper() for _i, t in self.menu_rows(0, 20)):
+            return False
+        # Measured on this screen: the submenu renders STATS(12) / SWITCH(14) / CANCEL(16) with
+        # the cursor capped at 2, so SWITCH is index 1 — and the highlighted row is the one whose
+        # space is eaten by the cursor glyph ('Choose a PSWITCH'). Index arithmetic over the rows
+        # cannot be used here because the roster underneath is also two rows apart.
+        if not self.menu_cursor_to(1, presses=6):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        if not self.menu_cursor_to(0, presses=8):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        now = [name for name, _lvl, _hp in self.party()]
+        swapped = now and now[0] == roster[index]
+        print(f"  lead is now {now[0] if now else '?'}" if swapped else f"  swap failed; lead is {now[0]}", flush=True)
+        return bool(swapped)
+
     def use_item(self, name: str, face: str | None = None) -> bool:  # pragma: no cover - drives the emulator
         """Use a bag item by *name* from the ITEM menu. Returns whether it was selected.
 
@@ -1074,7 +1120,7 @@ class Rig:
         """Where to stand and face to turn on the PC, if this map is a Pokemon Center."""
         return self.CENTER_PC if self.center_counter(map_id) else None
 
-    def menu_rows(self, first: int = 0, last: int = 14) -> list[tuple[int, str]]:
+    def menu_rows(self, first: int = 0, last: int = 18) -> list[tuple[int, str]]:
         """The window layer's non-empty rows — menus render there, never to the background."""
         return [(i, t) for i in range(first, last) if (t := self.window_row(i)).strip()]
 
