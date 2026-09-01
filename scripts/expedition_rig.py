@@ -353,7 +353,7 @@ class Rig:
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
             near = road.walkable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
-            if not near or not self.approach(near):
+            if not self.approach(near or adjacent):  # no walk reaches it: let a ride try
                 return False
             mp, x, y = self.pos()
             if (x, y) not in adjacent:

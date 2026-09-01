@@ -822,8 +822,12 @@ class LegRunner:
         mp, x, y = self.rig.pos()
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
+            # An empty `near` is not a verdict: it means no *walk* reaches this body, which is
+            # exactly when a ride might. Sabrina sits behind thirty intra-map pads, and a leg that
+            # returned here without ever calling `approach` met the guide at the door and reported
+            # the gym cleared.
             near = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
-            if not near or not self.rig.approach(near):
+            if not self.rig.approach(near or adjacent):
                 return False
             mp, x, y = self.rig.pos()
             if (x, y) not in adjacent:
