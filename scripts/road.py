@@ -173,44 +173,75 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
 
 
 def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
-    """Reach ``targets`` by riding a pad that stands in their region and stepping off its far side.
+    """Reach ``targets`` by riding a pad, when no walk can get there.
 
     The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
     stepping on one fires it — so a region whose only entrance *is* a pad is unreachable to it, and
-    the leg reports "could not reach" with nothing on screen to explain why. Measured on 5F: from
-    (26,3) a step east fires the pad at (27,3) and lands on 7F (21,15); step off it and back on and
-    we return **standing on (27,3)**, inside the region the walk could never enter, with (28,3) one
-    step away. Same tiles, same engine; the only difference is riding rather than routing.
+    the leg reports "could not reach" with nothing on screen to explain why.
 
-    The round trip matters: arriving on a pad does not re-fire it, so the far side is left and
-    re-entered to come back. Returns True when we end on ``map_id`` inside the target region.
+    Two shapes, both measured. A pad that pairs with **another map** is ridden as a round trip:
+    Silph 5F's (26,3) step east fires (27,3), lands on 7F (21,15), and stepping off it and back on
+    returns us *standing on (27,3)* — inside the region the walk could never enter, with (28,3) one
+    step away. Arriving on a pad does not re-fire it, which is why the far side must be left and
+    re-entered. A pad that points at **its own map** simply moves us: Sabrina's gym is thirty of
+    those (30 of its 32 warps), and there is no far side to come back from.
+
+    Pads are tried nearest-use first — the ones standing in the target's own region, then any
+    other pad we can actually walk onto, since in a maze the useful pad is the one we can reach
+    rather than the one beside the goal.
     """
-    import rom_truth as rt
-
-    for pad, _dest in pads_reaching(truth, pairs, map_id, targets, live_bodies(io)):
-        if walk(io, truth, pairs, map_id, {pad}, battle=battle) not in (True, "map-change"):
-            continue
+    targets = set(targets)
+    bodies = live_bodies(io)
+    here = read_pos(io)[1:]
+    best = [pad for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)]
+    others = [
+        (w[0], w[1])
+        for w in truth["maps"][str(map_id)]["warps"]
+        if (w[0], w[1]) not in best
+        and walkable(truth, pairs, map_id, here, bodies, keep={(w[0], w[1])}) & {(w[0], w[1])}
+    ]
+    for pad in best + others:
+        was = read_pos(io)
+        walk(io, truth, pairs, map_id, {pad}, battle=battle)
+        # The walk's own verdict is not the signal: a pad that fires mid-walk leaves `walk` still
+        # trying to reach a tile we have already been teleported off, and it reports "no-path".
+        # Position is the measurement.
         mp, x, y = read_pos(io)
+        if (mp, x, y) == was:
+            continue  # never got moving toward this pad
+        if mp == map_id and (x, y) != pad:
+            # An intra-map pad: we are already in the new pocket, with no far side to return from.
+            if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+                return True
+            continue
         if mp == map_id:  # the pad did not fire on arrival — a threshold, so step onto it again
             _step(io, "right")
             mp, x, y = read_pos(io)
         if mp == map_id:
             continue  # not a pad we can ride; try the next one
-        # On the far side, standing on its warp tile: step off, then back on, to come home.
-        far = truth["maps"][str(mp)]
-        for direction, (dx, dy) in (("down", (0, 1)), ("up", (0, -1)), ("left", (-1, 0)), ("right", (1, 0))):
-            nx, ny = x + dx, y + dy
-            if not (0 <= nx < far["width"] and 0 <= ny < far["height"]):
-                continue
-            if far["grid"][ny][nx] != "1" or not rt.passable(far, pairs, x, y, nx, ny):
-                continue
-            _step(io, direction)
-            if read_pos(io)[1:] != (nx, ny):
-                continue  # a body or a script ate the step; try another side
-            _step(io, {"down": "up", "up": "down", "left": "right", "right": "left"}[direction])
-            if read_pos(io)[0] == map_id:
-                return walk(io, truth, pairs, map_id, targets, battle=battle) is True
-            break
+        if _return_through(io, truth, pairs, map_id, mp, x, y):
+            return walk(io, truth, pairs, map_id, targets, battle=battle) is True
+    return False
+
+
+def _return_through(io, truth, pairs, map_id: int, mp: int, x: int, y: int) -> bool:
+    """Standing on the far side's warp tile, step off and back on to come home. True if we did."""
+    import rom_truth as rt
+
+    far = truth["maps"].get(str(mp))
+    if not far:
+        return False
+    for direction, (dx, dy) in (("down", (0, 1)), ("up", (0, -1)), ("left", (-1, 0)), ("right", (1, 0))):
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < far["width"] and 0 <= ny < far["height"]):
+            continue
+        if far["grid"][ny][nx] != "1" or not rt.passable(far, pairs, x, y, nx, ny):
+            continue
+        _step(io, direction)
+        if read_pos(io)[1:] != (nx, ny):
+            continue  # a body or a script ate the step; try another side
+        _step(io, _OPPOSITE[direction])
+        return read_pos(io)[0] == map_id
     return False
 
 

@@ -635,3 +635,14 @@ def test_a_warp_tile_is_never_an_approach_cell():
     }
     adjacent = {(3, 0), (1, 0)}  # (3,0) is the door beside the body at (4,0); (1,0) is floor
     assert road.walkable(truth, set(), 1, (0, 0)) & adjacent == {(1, 0)}
+
+
+def test_ride_pad_handles_an_intra_map_pad_that_teleports_within_the_floor():
+    """Sabrina's gym is a pad maze: 30 of its 32 warps point at itself, so riding one lands you
+    elsewhere on the SAME map and there is no far side to come back from. A leg that only knew
+    how to ride between maps met the guide at the door and called the floor engaged."""
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[2, 0, 1, 0], [5, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 5, 0)})
+    assert (6, 0) not in road.walkable(truth, set(), 1, (0, 0))  # unreachable on foot
+    assert road.ride_pad(io, truth, set(), 1, {(6, 0)}) is True
+    assert (io.mem[qm.ADDR_MAP], io.mem[qm.ADDR_X]) == (1, 6)
