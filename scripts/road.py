@@ -193,16 +193,22 @@ def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, 
     the door, so ``rides`` bounds how many hops one call will take.
     """
     targets = set(targets)
+    tried: set[tuple[int, int]] = set()  # pads already ridden this call, so a maze cannot cycle
     for _ in range(rides):
-        if _ride_once(io, truth, pairs, map_id, targets, battle=battle):
+        if _ride_once(io, truth, pairs, map_id, targets, battle=battle, tried=tried):
             return True
         if read_pos(io)[0] != map_id:
             return False  # a ride took us off this floor and could not come back
     return False
 
 
-def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
-    """One hop: onto a reachable pad, then try to walk to the targets from wherever it landed us."""
+def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, tried=None):
+    """One hop: onto a reachable pad, then try to walk to the targets from wherever it landed us.
+
+    ``tried`` carries the pads already ridden, because a maze of pads is a graph with cycles and
+    riding the same one each hop is how a leg spends its budget standing in two rooms.
+    """
+    tried = tried if tried is not None else set()
     bodies = live_bodies(io)
     here = read_pos(io)[1:]
     if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
@@ -214,7 +220,7 @@ def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle
         if (w[0], w[1]) not in best
         and walkable(truth, pairs, map_id, here, bodies, keep={(w[0], w[1])}) & {(w[0], w[1])}
     ]
-    for pad in best + others:
+    for pad in [p for p in best + others if p not in tried]:
         was = read_pos(io)
         walk(io, truth, pairs, map_id, {pad}, battle=battle)
         # The walk's own verdict is not the signal: a pad that fires mid-walk leaves `walk` still
@@ -222,7 +228,8 @@ def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle
         # Position is the measurement.
         mp, x, y = read_pos(io)
         if (mp, x, y) == was:
-            continue  # never got moving toward this pad
+            continue  # never got moving toward this pad — not a ride, so it stays untried
+        tried.add(pad)  # only pads that actually moved us count as spent
         if mp == map_id and (x, y) != pad:
             # An intra-map pad: we are already in the new pocket, with no far side to return from.
             if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
