@@ -172,7 +172,7 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
     return [r for r in found if r["door"] not in direct or r["from_map"] != map_id]
 
 
-def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
+def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, rides: int = 6):
     """Reach ``targets`` by riding a pad, when no walk can get there.
 
     The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
@@ -188,11 +188,25 @@ def ride_pad(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
 
     Pads are tried nearest-use first — the ones standing in the target's own region, then any
     other pad we can actually walk onto, since in a maze the useful pad is the one we can reach
-    rather than the one beside the goal.
+    rather than the one beside the goal. And rides *chain*: one hop is enough for Silph's floors,
+    but Sabrina's gym is a maze of thirty pads where a trainer's pocket sits several rides from
+    the door, so ``rides`` bounds how many hops one call will take.
     """
     targets = set(targets)
+    for _ in range(rides):
+        if _ride_once(io, truth, pairs, map_id, targets, battle=battle):
+            return True
+        if read_pos(io)[0] != map_id:
+            return False  # a ride took us off this floor and could not come back
+    return False
+
+
+def _ride_once(io, truth, pairs, map_id: int, targets, *, battle=_default_battle):
+    """One hop: onto a reachable pad, then try to walk to the targets from wherever it landed us."""
     bodies = live_bodies(io)
     here = read_pos(io)[1:]
+    if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+        return True
     best = [pad for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)]
     others = [
         (w[0], w[1])

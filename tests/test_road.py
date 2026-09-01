@@ -646,3 +646,19 @@ def test_ride_pad_handles_an_intra_map_pad_that_teleports_within_the_floor():
     assert (6, 0) not in road.walkable(truth, set(), 1, (0, 0))  # unreachable on foot
     assert road.ride_pad(io, truth, set(), 1, {(6, 0)}) is True
     assert (io.mem[qm.ADDR_MAP], io.mem[qm.ADDR_X]) == (1, 6)
+
+
+def test_ride_pad_chains_hops_through_a_maze():
+    """One ride is enough for Silph's floors; Sabrina's gym is thirty pads deep, and the pocket
+    holding a trainer sits several rides from the door."""
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 0], [4, 0, 1, 0], [6, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 4, 0), (1, 4, 0): (1, 6, 0)})
+    assert (8, 0) not in road.walkable(truth, set(), 1, (0, 0))
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}) is True
+    assert io.mem[qm.ADDR_X] == 8
+
+
+def test_ride_pad_stops_after_its_hop_budget():
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 0, 0)})  # a pad that loops us home
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}, rides=2) is False
