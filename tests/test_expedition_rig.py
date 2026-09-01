@@ -584,8 +584,28 @@ def test_menu_choose_indexes_within_the_block_when_menus_overlay():
 
 def test_grass_lanes_are_the_rom_s_own_extremes():
     """Where to roam comes from the extracted grass tiles, not from lore — and pacing the
-    extremes keeps crossing fresh tiles instead of rolling the same one."""
-    r = _reader_rig({}, {"maps": {"33": {"grass": [[5, 9], [2, 3], [7, 3], [2, 9]]}, "1": {"grass": []}}})
+    extremes keeps crossing fresh tiles instead of rolling the same one. (Reachability is
+    filtered only when the rig is standing on that map; see the next test.)"""
+    # Standing on a different map, so the reachability filter does not apply.
+    r = _reader_rig(
+        {0xD35E: 99, 0xD362: 0, 0xD361: 0},
+        {"maps": {"33": {"grass": [[5, 9], [2, 3], [7, 3], [2, 9]]}, "1": {"grass": []}}},
+    )
     assert r.grass_lanes(33) == [(2, 3), (5, 9)]
     assert r.grass_lanes(1) == []  # a map with no grass has no lane to pace
     assert r.grass_lanes(999) == []  # and neither has one we do not model
+
+
+def test_grass_lanes_only_offers_grass_we_can_stand_on(monkeypatch):
+    """Route 2's 84 grass cells all sit outside the 144-cell region a leg arriving from Diglett's
+    Cave can reach. Aimed at them, the roam walked nowhere and rolled no encounters at all —
+    twelve thousand laps with a level-5 Magikarp still level 5."""
+    import road as road_mod
+
+    truth = {"maps": {"13": {"grass": [[0, 2], [9, 51]], "width": 20, "height": 72}}}
+    r = _reader_rig({0xD35E: 13, 0xD362: 12, 0xD361: 10}, truth)
+    r.bodies = lambda: set()
+    monkeypatch.setattr(road_mod, "walkable", lambda *a, **k: {(12, 10), (12, 11)})
+    assert r.grass_lanes(13) == []  # none of the map's grass is in our region
+    monkeypatch.setattr(road_mod, "walkable", lambda *a, **k: {(12, 10), (0, 2), (9, 51)})
+    assert r.grass_lanes(13) == [(0, 2), (9, 51)]

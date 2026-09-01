@@ -735,6 +735,55 @@ class Rig:
             self.ctl.wait(30)
         return False
 
+    ADDR_BATTLE_COL = 0xCC25  # the battle menu's column: 9 = left (FIGHT/ITEM), 15 = right (PKMN/RUN)
+
+    def battle_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Switch the active battler to party slot ``index``, mid-fight.
+
+        This is what lets a level-5 recruit earn from a level-16 wild: it is sent out first, then
+        swapped before it can be hit, and a Pokemon that was out — and did not faint — takes a
+        share of the experience. Magikarp knows only SPLASH, so leaving it in is not an option:
+        the first grind lap on Route 6 ended with it fainted and earning nothing while Dugtrio
+        banked 125 EXP.
+
+        The battle menu is two-dimensional and neither axis is the list cursor used everywhere
+        else: 0xCC26 is the row (0 = FIGHT/PKMN, 1 = ITEM/RUN) and 0xCC25 the column (9 left,
+        15 right), so PKMN is row 0 in the right column.
+        """
+        if not self.ag._await_battle_menu():
+            return False
+        for _ in range(4):
+            if self.mem[qm.ADDR_MENU_CUR] == 0:
+                break
+            self.ctl.press("up")
+            self.ctl.wait(20)
+        for _ in range(4):
+            if self.mem[self.ADDR_BATTLE_COL] >= 15:
+                break
+            self.ctl.press("right")
+            self.ctl.wait(20)
+        if self.mem[qm.ADDR_MENU_CUR] != 0 or self.mem[self.ADDR_BATTLE_COL] < 15:
+            return False
+        self.ctl.press("a")  # PKMN -> the party list
+        self.ctl.wait(70)
+        if not self.menu_cursor_to(index):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        # SWITCH / STATS / CANCEL, drawn over the roster exactly as the field menu is.
+        for candidate in range(3):
+            if not self.menu_cursor_to(candidate, presses=5):
+                continue
+            self.ctl.press("a")
+            self.ctl.wait(70)
+            said = self.dialogue().upper()
+            if "GO!" in said or "COME BACK" in said or "ENOUGH" in said:
+                return True
+            for _ in range(2):
+                self.ctl.press("b")
+                self.ctl.wait(30)
+        return False
+
     def lead_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
         """Move the party member at ``index`` into slot 0, so it is sent out first.
 
@@ -1350,6 +1399,18 @@ class Rig:
         cells = [tuple(c) for c in self.truth["maps"].get(str(map_id), {}).get("grass", [])]
         if not cells:
             return []
+        # Only grass we can actually stand on. The extremes of the whole map are not a lane:
+        # Route 2's 84 grass cells are all outside the 144-cell region a leg arriving from
+        # Diglett's Cave can reach, so a roam aimed at them walked nowhere and rolled no
+        # encounters at all — twelve thousand laps of a level-5 Magikarp staying level 5.
+        mp, x, y = self.pos()
+        if mp == map_id:
+            here = road.walkable(self.truth, self.pairs, map_id, (x, y), self.bodies())
+            reachable_cells = [c for c in cells if c in here]
+            if not reachable_cells:
+                print(f"  no grass reachable on map {map_id} from {(x, y)}", flush=True)
+                return []
+            cells = reachable_cells
         return [min(cells, key=lambda c: (c[1], c[0])), max(cells, key=lambda c: (c[1], c[0]))]
 
     def roam_grass(self, map_id: int, until, laps: int = 40) -> bool:  # pragma: no cover - drives the emulator
