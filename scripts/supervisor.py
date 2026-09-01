@@ -956,17 +956,20 @@ class LegRunner:
             #    (16,10) pad is dead, and the floor has two other ways up — (26,0) and (20,0).
             #    Routing around it is a lookup; the crew spent a whole ladder on it instead.
             structural = failure == "warp-dead" or (failure == "no-path" and (cur, hop["to"]) in self.gated)
-            # A body that will not move off a door is structural *for this leg*, once the ladder
-            # has been spent on it. Silph 5F parks a Rocket on the (24,0) pad and the floor has
-            # six other doors; the loop asked both seats to think about that one door, was told
-            # "wait for the wanderer" by each, waited, and exhausted — while five roads out of
-            # the room stayed unexamined. Banning it costs a route we might have had after a
-            # longer wait; not banning it costs the leg.
-            structural = structural or (failure == "body-blocked" and attempt >= LADDER_ATTEMPTS)
+
             if hop is not None and structural:
                 if self._reroute_around(hop):
                     continue
             if attempt > LADDER_ATTEMPTS:
+                # Before giving up on the leg, give up on the *door*. Any hop the whole ladder
+                # could not open is structural for this leg, and two rooms taught that in one
+                # night: Silph 5F parks a Rocket on the (24,0) pad while five other doors out of
+                # the room went unexamined, and 7F's 11F-side pocket has no route to 8F at all,
+                # only back to 3F. Both times the loop spent both seats on one door and then died
+                # holding a map full of untried ones. Banning costs a route we might have had
+                # after a longer wait; `route` returning None still ends the leg honestly.
+                if hop is not None and self._reroute_around(hop):
+                    continue
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"

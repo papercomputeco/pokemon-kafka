@@ -1417,6 +1417,27 @@ def test_engage_until_badge_reports_the_byte_after_its_rounds_run_out():
     assert len([c for c in rig.calls if c[0] == "talk"]) == 1  # one round, one conversation
 
 
+def test_a_hop_the_ladder_cannot_open_is_banned_and_another_chain_tried(tmp_path):
+    """7F's 11F-side pocket has no route to 8F at all — only back to 3F. The leg spent both seats
+    on that one hop and then exhausted, holding a map full of untried doors."""
+
+    class NoPathRig(FakeRig):
+        def __init__(self):
+            super().__init__(truth=_fork_truth(), start=(1, 5, 5))
+
+        def cross(self, cur, nxt, **kw):
+            self.calls.append(("cross", nxt))
+            if (cur, nxt) == (1, 2):
+                return "no-path"
+            self._pos = (nxt, 1, 1)
+            return True
+
+    rig = NoPathRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("RETRY_SAME"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.run()["ok"], "the leg died on one door while the map had another"
+    assert (1, 2) in runner.banned
+
+
 def test_a_body_parked_on_a_door_is_routed_around_once_the_ladder_is_spent(tmp_path):
     """Silph 5F parks a Rocket on the (24,0) pad, and the floor has six other doors. The loop
     asked both seats about that one door, was told "wait for the wanderer" by each, waited, and
