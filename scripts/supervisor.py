@@ -1212,7 +1212,10 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
             # Heal is the same shape with a different success condition: the party readings
             # coming back, judged only on the goal that is a Center.
             engage=args.engage and index == len(goals),
-            heal=args.heal and index == len(goals),
+            # Healing belongs at the Center, which is a *mid-chain* goal — copying --engage's
+            # "last goal only" rule meant a chain of 182,235 healed at Giovanni's floor, i.e.
+            # never, and carried three fainted party members into the boss.
+            heal=args.heal,
             sweep=args.sweep_items,
             want=args.want,
             # Unlike --engage, which watches for a badge and so belongs to the final gym, a

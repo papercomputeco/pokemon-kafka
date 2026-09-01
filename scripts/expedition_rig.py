@@ -565,7 +565,10 @@ class Rig:
         return road.pass_gate(self.io, self.truth, self.pairs, cur, goal_cells, **kw)
 
     def bodies(self) -> set[tuple[int, int]]:
-        return road.live_bodies(self.io)
+        """Live sprites, clipped to this map. Unused sprite slots decode to off-map coordinates,
+        and an off-map "blocker" is one a leg will walk across the floor to argue with."""
+        m = self.truth["maps"].get(str(self.pos()[0]))
+        return road.live_bodies(self.io, (m["width"], m["height"]) if m else None)
 
     def talk(self, face: str) -> str:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Face and read: the pages a body gives up. What the game says IS the instruction stream."""

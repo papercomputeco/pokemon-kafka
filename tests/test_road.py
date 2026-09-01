@@ -589,3 +589,28 @@ def test_ride_pad_reports_failure_when_no_pad_stands_in_the_region():
     truth = {"maps": {"1": _map(["1101"], warps=[])}}
     io = RoadIO(truth, (1, 0, 0))
     assert road.ride_pad(io, truth, set(), 1, {(3, 0)}) is False
+
+
+def test_live_bodies_clips_to_the_map_it_is_standing_on():
+    """The sprite table has sixteen slots and the unused ones decode to coordinates that are not
+    on any map. Silph 3F is 30x18 and a leg was told the body severing its hop stood at (18,22),
+    four rows past the south wall — then walked over to engage it, opened the pause menu, and
+    recorded "OPTION EXIT" as what the blocker said."""
+
+    class SpriteIO:
+        def __init__(self, cells):
+            self.cells = cells
+
+        def read(self, addr):
+            for i, (x, y) in enumerate(self.cells, start=1):
+                if addr == road.SPRITE_STATE_BASE + i * 0x10:
+                    return 1
+                if addr == road.SPRITE_DATA_BASE + i * 0x10 + 5:
+                    return x + 4
+                if addr == road.SPRITE_DATA_BASE + i * 0x10 + 4:
+                    return y + 4
+            return 0
+
+    io = SpriteIO([(7, 9), (18, 22)])
+    assert road.live_bodies(io) == {(7, 9), (18, 22)}  # unclipped: the junk slot is a "body"
+    assert road.live_bodies(io, (30, 18)) == {(7, 9)}  # clipped to the floor we are standing on

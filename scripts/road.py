@@ -47,12 +47,22 @@ def _default_battle(io) -> None:
     raise QuartermasterError("road: a battle started and no battle handler was injected")
 
 
-def live_bodies(io) -> set[tuple[int, int]]:
-    """Positions of every live sprite — a beaten trainer still stands, and paths route around."""
+def live_bodies(io, bounds: tuple[int, int] | None = None) -> set[tuple[int, int]]:
+    """Positions of every live sprite — a beaten trainer still stands, and paths route around.
+
+    ``bounds`` is the current map's ``(width, height)``, and passing it matters: the sprite table
+    has sixteen slots and the unused ones decode to coordinates that are not on any map. Silph 3F
+    is 30x18 and a leg was told the body severing its hop stood at **(18,22)** — four rows past
+    the south wall. It then walked over to "engage" that body, which opened the pause menu, and
+    wrote down what the menu said ("OPTION EXIT") as the sentence the blocker spoke.
+    """
     out = set()
     for i in range(1, 16):
         if io.read(SPRITE_STATE_BASE + i * 0x10):
             out.add((io.read(SPRITE_DATA_BASE + i * 0x10 + 5) - 4, io.read(SPRITE_DATA_BASE + i * 0x10 + 4) - 4))
+    if bounds is not None:
+        w, h = bounds
+        out = {(x, y) for x, y in out if 0 <= x < w and 0 <= y < h}
     return out
 
 

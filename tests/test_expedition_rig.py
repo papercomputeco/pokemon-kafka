@@ -411,8 +411,17 @@ def test_the_road_delegations_pass_the_battle_handler_through(monkeypatch):
 def test_bodies_delegates_to_the_live_sprite_table(monkeypatch):
     import road as road_mod
 
-    monkeypatch.setattr(road_mod, "live_bodies", lambda io: {(1, 2)})
-    assert _reader_rig().bodies() == {(1, 2)}
+    # The rig passes the current map's bounds so off-map sprite slots cannot become blockers.
+    seen = {}
+
+    def fake(io, bounds=None):
+        seen["bounds"] = bounds
+        return {(1, 2)}
+
+    monkeypatch.setattr(road_mod, "live_bodies", fake)
+    r = _reader_rig({0xD35E: 208, 0xD362: 26, 0xD361: 1}, {"maps": {"208": {"width": 30, "height": 18}}})
+    assert r.bodies() == {(1, 2)}
+    assert seen["bounds"] == (30, 18)  # the floor we are standing on, so off-map slots are dropped
 
 
 def test_window_row_decodes_the_layer_menus_render_to():
