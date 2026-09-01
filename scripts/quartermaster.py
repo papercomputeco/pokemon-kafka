@@ -437,14 +437,18 @@ def buy(io, shop: Shop, plan: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return bought
 
 
-def heal(io, center: Center) -> None:
-    """Talk to the nurse and A through the heal until the whole party reads full."""
+def heal(io, face: str) -> None:
+    """Talk to the nurse and A through the heal until the whole party reads full.
+
+    Takes the facing direction rather than a ``Center``: the counter geometry is one template
+    (see ``Rig.center_counter``), so callers that found the nurse by signature — not from the
+    ``CENTERS`` table — heal the same way."""
 
     def healed() -> bool:
         party = read_party(io)
         return bool(party) and all(p["hp"] == p["max_hp"] for p in party)
 
-    io.press(center.face)
+    io.press(face)
     io.wait(12)
     settle(io, healed, lambda: io.press("a"), cap=30, label="nurse heal")
     # Dismiss the trailing "we hope to see you again" text.
@@ -544,7 +548,7 @@ def run_errand(io, truth, buy_plan: list[tuple[int, int]] | None, do_heal: bool)
             raise QuartermasterError(f"no known center in city map {read_pos(io)[0]}")
         walk_to(io, truth, pairs, center.city_map, center.door_xy)
         walk_to(io, truth, pairs, center.interior_map, center.counter_xy)
-        heal(io, center)
+        heal(io, center.face)
         report["healed"] = True
         walk_to(io, truth, pairs, center.interior_map, center.exit_mats)
         leave_interior(io, center.interior_map)

@@ -173,3 +173,77 @@ def test_the_wait_scales_with_the_seats_budget():
     """Raising the Extractor's tokens without its timeout only changed how it failed."""
     assert crew.answer_timeout("puzzle") > crew.answer_timeout("navigation")
     assert crew.answer_timeout("interpretive-dance") == crew.answer_timeout("navigation")
+
+
+def _sse(*chunks):
+    """An OpenAI-shaped SSE stream, one delta per chunk."""
+    import json as _json
+
+    for c in chunks:
+        yield ("data: " + _json.dumps({"choices": [{"delta": c}]}) + "\n").encode()
+    yield b"data: [DONE]\n"
+
+
+def test_stream_deltas_reads_content_and_reasoning_alike():
+    stream = _sse({"reasoning": "weighing "}, {"reasoning": "options"}, {"content": "ACTION: WAIT"})
+    assert list(crew.stream_deltas(stream)) == ["weighing ", "options", "ACTION: WAIT"]
+
+
+def test_stream_deltas_survives_keepalives_and_garbage():
+    def lines():
+        yield b": keepalive\n"
+        yield b"\n"
+        yield b"data: not json\n"
+        yield b'data: {"choices": [{"delta": {"content": "ok"}}]}\n'
+        yield b"data: [DONE]\n"
+
+    assert list(crew.stream_deltas(lines())) == ["ok"]
+
+
+def test_decide_from_stream_returns_the_moment_the_action_is_written():
+    """The Extractor spends minutes thinking and the gateway cuts a whole response off at 300s.
+    Streaming means the decision is taken when it is written, not when the model stops."""
+    menu = ["SWEEP_ITEMS", "RIDE_PAD", "GIVE_UP"]
+    tail_that_never_arrives = {"reasoning": "x" * 500}
+    stream = _sse(
+        {"reasoning": "RIDE_PAD or GIVE_UP? weighing both\n"},
+        {"content": "ACTION: RIDE_PAD\nWHY: the pad is the only way in\n"},
+        tail_that_never_arrives,
+    )
+    action, why, text = crew.decide_from_stream(stream, menu)
+    assert action == "RIDE_PAD"
+    assert why == "the pad is the only way in"
+    assert "x" * 500 not in text  # stopped reading at the answer
+
+
+def test_decide_from_stream_does_not_take_a_bare_word_mid_thought():
+    """Mid-stream a model names every option it is weighing — including the ones it rejects. Only
+    an explicit ACTION line stops the read; the bare-word fallback waits for end of stream."""
+    menu = ["SWEEP_ITEMS", "RIDE_PAD", "GIVE_UP"]
+    stream = _sse(
+        {"reasoning": "GIVE_UP looks wrong here\n"},
+        {"reasoning": "SWEEP_ITEMS was already tried\n"},
+        {"content": "ACTION: RIDE_PAD\nWHY: measured\n"},
+    )
+    assert crew.decide_from_stream(stream, menu)[0] == "RIDE_PAD"
+
+
+def test_decide_from_stream_falls_back_to_the_conclusion_at_end_of_stream():
+    menu = ["SWEEP_ITEMS", "RIDE_PAD", "GIVE_UP"]
+    action, _why, _text = crew.decide_from_stream(_sse({"content": "after all that, RIDE_PAD\n"}), menu)
+    assert action == "RIDE_PAD"
+
+
+def test_chat_body_asks_for_a_stream_only_when_told_to():
+    assert "stream" not in crew.chat_body("m", "p")
+    assert crew.chat_body("m", "p", stream=True)["stream"] is True
+
+
+def test_decide_from_stream_does_not_reparse_on_every_token():
+    """A thinking seat emits tens of thousands of short deltas; re-parsing each one is wasted work.
+    Short pieces with no newline accumulate and are judged at the next line boundary."""
+    menu = ["RIDE_PAD", "GIVE_UP"]
+    stream = _sse(*[{"reasoning": "hm "} for _ in range(5)], {"content": "ACTION: RIDE_PAD\nWHY: measured\n"})
+    action, why, text = crew.decide_from_stream(stream, menu)
+    assert action == "RIDE_PAD" and why == "measured"
+    assert text.startswith("hm hm ")

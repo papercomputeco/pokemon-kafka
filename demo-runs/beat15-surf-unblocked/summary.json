@@ -1,0 +1,12 @@
+{
+  "outcome": "rod-karp-grind",
+  "lead": "('Magikarp', 7, 20)",
+  "turns": 1237,
+  "party": "[('Magikarp', 7, 20), ('Dugtrio', 100, 246), ('Primeape', 99, 300), ('Pidgeot', 99, 347), ('Hypno', 99, 341), ('Charizard', 100, 341)]",
+  "pos": "(17, 0, 14)",
+  "params": {
+    "label": "15 \u00b7 Surf unblocked \u2014 the rod, the karp, the grind",
+    "rom": "/home/bdougie/code/pcc-labs/pokemon-kafka/rom/pokemon_red.gb"
+  },
+  "run_id": "20260901-164132-3962"
+}

@@ -59,6 +59,13 @@ DEFAULT_ESCALATE_AFTER = 3
 CONTINUE_BELOW = 0.8  # exit with < this fraction of budget used -> continuation
 
 
+def _flushing_print(msg: str) -> None:  # pragma: no cover - stdout wiring
+    """A leg's log line, flushed. Redirected to a file, `print` buffers ~8 KB — so a run that
+    was walking fine looked hung for six minutes with an empty log, and the only way to watch a
+    leg was to wait for it to end."""
+    print(msg, flush=True)
+
+
 def spring_counts(text: str) -> Counter:
     """Count A<->B round trips from a lane log's MAP CHANGE lines. A round trip is a transition
     immediately undone (58->2 then 2->58): the door-mat spring signature, hundreds per second
@@ -335,7 +342,7 @@ class TapesConsult:
     parameter a caller can casually redirect, it is the crew module's constant.
     """
 
-    def __init__(self, *, timeout: float | None = None, log=print) -> None:
+    def __init__(self, *, timeout: float | None = None, log=_flushing_print) -> None:
         self.timeout = timeout  # None = each seat is waited for as long as its budget needs
         self.log = log
 
@@ -347,18 +354,35 @@ class TapesConsult:
 
         seat = crew.seat_for(tier)
         prompt = crew.build_prompt(facts, menu)
-        body = json.dumps(crew.chat_body(seat["model"], prompt, crew.answer_tokens(tier))).encode()
-        req = urllib.request.Request(
-            crew.TAPES_CHAT_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
-        )
+        # Streamed, because a seat that thinks for four minutes cannot be asked for one whole
+        # response: the gateway 502s at a hard 300s ceiling, and a truncated non-stream reply is
+        # 30 KB of chain-of-thought with no answer in it. Streaming reads the answer the moment
+        # it is written; `timeout` becomes a per-chunk wait rather than a whole-answer deadline.
+        body = json.dumps(crew.chat_body(seat["model"], prompt, crew.answer_tokens(tier), stream=True)).encode()
+        wait = self.timeout if self.timeout is not None else crew.answer_timeout(tier)
+
+        def ask(payload: bytes) -> tuple[str | None, str, str]:
+            request = urllib.request.Request(
+                crew.TAPES_CHAT_URL, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(request, timeout=wait) as resp:
+                return crew.decide_from_stream(resp, menu)
+
         try:
-            wait = self.timeout if self.timeout is not None else crew.answer_timeout(tier)
-            with urllib.request.urlopen(req, timeout=wait) as resp:
-                payload = json.loads(resp.read())
+            action, why, text = ask(body)
+            # A seat that ran out of clock mid-thought is not out of ideas — it is out of clock.
+            # One closing call hands its own reasoning back and asks only for the line.
+            if action is None and len(text) > 500:
+                self.log(f"  {seat['title']} ran out of clock mid-thought ({len(text)}B) — asking it to close")
+                closing = json.dumps(
+                    crew.chat_body(
+                        seat["model"], crew.closing_prompt(text, menu), crew.answer_tokens(tier), stream=True
+                    )
+                ).encode()
+                action, why, _ = ask(closing)
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             self.log(f"  consult FAILED ({seat['title']}, {seat['model']}): {exc}")
             return None, f"consult failed: {exc}", seat["model"]
-        action, why = crew.parse_decision(crew.extract_text(payload), menu)
         self.log(f"  {seat['title']} ({seat['model']}) -> {action or 'NO-ANSWER'}: {why[:120]}")
         return action, why, seat["model"]
 
@@ -374,13 +398,15 @@ class LegRunner:
         budget_s: float = 7200,
         consult=None,
         clock=time.monotonic,
-        log=print,
+        log=_flushing_print,
         max_hops: int = DEFAULT_MAX_HOPS,
         engage: bool = False,
+        heal: bool = False,
         sweep: bool = False,
         clear_floor: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
+        want: str | None = None,
     ) -> None:
         self.rig = rig
         self.goal = goal
@@ -390,9 +416,11 @@ class LegRunner:
         self.log = log
         self.max_hops = max_hops
         self.engage = engage
+        self.heal = heal
         self.sweep = sweep
         self.clear_floor = clear_floor
         self.engage_rounds = engage_rounds
+        self.want = want  # item name this leg came for; its ball is opened before any other
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
         self.tried: list[str] = []  # every action executed, for the exhaustion record
@@ -423,6 +451,16 @@ class LegRunner:
         now = self.rig.pos()[0]
         if now == hop["to"]:
             return None
+        if now == cur and hop["via"] != "edge" and str(result) in ("no-path", "refused", "cap"):
+            # The door is on this map but no walk reaches it. That is a ride, not a wall — the
+            # rule already applied to bodies and item balls, and the hop is the third place that
+            # needs it: badge 6 was won at (9,9) inside Sabrina's gym, and the leg then spent its
+            # whole budget re-trying the exit mat at (8,17) from behind thirty teleport pads.
+            if self.rig.approach({(hop["x"], hop["y"])}):
+                result = self.rig.warp(cur, hop["x"], hop["y"])
+                now = self.rig.pos()[0]
+                if now == hop["to"]:
+                    return None
         if now != cur:  # an interior swallowed the hop — a gate room, not a failure
             self.log(f"  interior {now} swallowed the hop")
             inner = self.rig.traverse(now)
@@ -621,7 +659,7 @@ class LegRunner:
             self.notes.append(f"the body at ({bx}, {by}) says: {said[:300]}")
             return
         if action == "SWEEP_ITEMS":
-            self.sweep_items()
+            self.sweep_items(self.want)
             return
         if action == "ORACLE_SEARCH":
             if hop is None:
@@ -647,22 +685,31 @@ class LegRunner:
 
     # ---- the gym engage ---------------------------------------------------------------------
 
-    def sweep_items(self) -> list[tuple[int, int]]:
+    def sweep_items(self, want: str | None = None) -> list[tuple[int, int]]:
         """Collect every item ball the cartridge lists for this map. Returns what the bag gained.
 
         A locked door whose own NPC names the key it wants (Silph 209's (11,7): "requires a CARD
-        KEY") is not a navigation problem — the key is an object somewhere, and this floor's item
-        balls are extracted, not guessed. Bag growth is the only proof a pickup happened.
+        KEY") is not a navigation problem — the key is an object somewhere, and both the balls
+        *and what they hold* are extracted, not guessed. So a leg can name the item it came for:
+        the wanted ball is opened first, before a full bag or a lost trainer fight can cost it.
+        Bag growth is the only proof a pickup happened.
         """
         mp = self.rig.pos()[0]
         gained: list[tuple[int, int]] = []
-        for ball in self.rig.item_balls(mp):
+        contents = self.rig.ball_contents(mp)
+        balls = self.rig.item_balls(mp)
+        if want:
+            balls.sort(key=lambda b: contents.get(b, "") != want)
+        for ball in balls:
             if (mp, ball) in self.looted:
                 continue
             self.looted.add((mp, ball))
             before = self.rig.bag()
+            holds = contents.get(ball, "?")
             if not self.rig.collect_item(*ball):
-                self.log(f"  could not open the ball at {ball} on map {mp}")
+                self.log(f"  could not open the ball at {ball} on map {mp} (cartridge says {holds})")
+                self.name_the_ride(ball)
+                self.rig.emit("supervisor.item_refused", map=mp, at=list(ball), holds=holds)
                 continue
             new = [item for item in self.rig.bag() if item not in before]
             gained.extend(new)
@@ -700,6 +747,7 @@ class LegRunner:
                 continue
             self.engaged.add(spot)
             if not self._go_and_talk(spot):
+                self.name_the_ride(spot)
                 # Logged, not just noted: this line silently swallowed a whole debugging cycle
                 # on Silph's top floor, where "could not reach" was really "a card-key door the
                 # collision grid calls floor". A refusal the operator cannot see is a refusal
@@ -711,22 +759,105 @@ class LegRunner:
                 return True
         return True
 
+    def party_up(self) -> bool:
+        # rig.party() is ``[name, level, curHP]`` (curHP at struct +1, level at +33) — the
+        # nurse's heal is proven by every fainted reading coming back above zero, not by a
+        # max we would have to recall an address for.
+        return bool(self.rig.party()) and all(hp > 0 for _name, _lvl, hp in self.rig.party())
+
+    def heal_party(self) -> bool:
+        """Go be healed — the only difference from --engage is the success condition.
+
+        The measured world has no heal action: a Center body says it heals the party and the
+        HP readings come back. So healing is ``engage_bodies`` judged on the party instead of
+        the BADGES byte, and the report carries the readings before and after so a leg that
+        arrives at the wrong door (Saffron has two that look alike) is told so plainly.
+        """
+
+        def report():
+            return [f"{name} lv{lvl} hp{hp}" for name, lvl, hp in self.rig.party()]
+
+        self.log(f"party before heal: {report()}")
+        # The nurse first, when there is one. She stands behind a counter, so she is not adjacent
+        # to any cell and `engage_bodies` cannot reach her — a leg once talked to all three idle
+        # NPCs in Saffron's Center and reported the heal refused with three fainted members.
+        counter = self.rig.center_counter(self.rig.pos()[0])
+        if counter is not None:
+            cell, face = counter
+            if self.rig.approach({cell}):
+                for _ in range(self.engage_rounds):
+                    said = self.rig.talk(face)
+                    self.log(f"  nurse says: {said[:90]}")
+                    if self.party_up():
+                        self.log(f"party after heal:  {report()}")
+                        self.notes.append("the nurse healed the party")
+                        return True
+            else:
+                self.notes.append(f"could not reach the nurse's counter at {cell}")
+        for _ in range(self.engage_rounds):
+            if self.party_up():
+                self.log(f"party after heal:  {report()}")
+                self.notes.append("the party came back standing")
+                return True
+            self.engage_bodies(("trainer", "npc"))
+            self.log(f"party round:      {report()}")
+        self.notes.append("talked every body on the map and the fainted readings stayed at zero")
+        return self.party_up()
+
+    def name_the_ride(self, spot: tuple[int, int]) -> None:
+        """When a cell cannot be walked to, say whether a pad stands beside it.
+
+        "Could not reach" is the least useful true sentence a leg can write, and Silph spent two
+        sessions on it: the CARD KEY's corridor was nine steps from the pad at (27,3) and
+        unreachable from every other cell on the floor. A pad named here is a route the next hop
+        can take; an unnamed one is a wall the next session re-derives.
+        """
+        import road
+
+        mp, _, _ = self.rig.pos()
+        if self.rig.truth["maps"].get(str(mp)) is None:
+            return  # a floor the truth table does not know; naming a pad there is recall, not measurement
+        adjacent = {(spot[0] + 1, spot[1]), (spot[0] - 1, spot[1]), (spot[0], spot[1] + 1), (spot[0], spot[1] - 1)}
+        pads = road.pads_reaching(self.rig.truth, self.rig.pairs, mp, adjacent, self.rig.bodies() - {spot})
+        if not pads:
+            return
+        ride = ", ".join(f"{pad} (pairs with map {dest})" for pad, dest in pads)
+        self.log(f"  {spot} is not walkable from here, but these pads stand beside it: {ride}")
+        self.notes.append(f"{spot} on map {mp} is only reachable by riding a pad: {ride}")
+        self.rig.emit("supervisor.pad_named", map=mp, target=list(spot), pads=[[list(p), d] for p, d in pads])
+
     def _go_and_talk(self, spot: tuple[int, int]) -> bool:
         """Walk to a cell beside ``spot`` (body-aware) and face it. Battles resolve on the way."""
         import road
 
         bx, by = spot
         mp, x, y = self.rig.pos()
+        if str(mp) not in self.rig.truth.get("maps", {}):
+            # A ride carried us onto a floor the extraction does not model. There is nothing to
+            # plan here and nothing to engage; the caller re-reads position and moves on.
+            return False
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
-            near = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
-            if not near or not self.rig.approach(near):
+            # An empty `near` is not a verdict: it means no *walk* reaches this body, which is
+            # exactly when a ride might. Sabrina sits behind thirty intra-map pads, and a leg that
+            # returned here without ever calling `approach` met the guide at the door and reported
+            # the gym cleared.
+            near = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
+            if not self.rig.approach(near or adjacent):
                 return False
             mp, x, y = self.rig.pos()
             if (x, y) not in adjacent:
                 return False
         before = self.rig.bag()
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        # settle() closes the win / award box that a battle leaves open. It is the step that
+        # *commits* the result: it marks a fallen fighter as defeated (measured on map 178, that
+        # defeat is what releases the next body to battle) and it banks the badge on a leader.
+        # A win box poked with A stays pinned and the result never lands — the measured "got 1140
+        # for winning!" loop — while settle's B-then-A-then-probe-move is the closer that lets the
+        # cartridge finish what the fight started.
+        if hasattr(self.rig, "settle"):
+            self.rig.settle()
         gained = [item for item in self.rig.bag() if item not in before]
         self.log(f"  engaged {spot}: {said[:140]}")
         if gained:
@@ -742,30 +873,47 @@ class LegRunner:
         The badge byte is watched for *change*, not for a remembered bit: which bit belongs to
         which leader is exactly the kind of recalled fact this project has been burned by. A
         changed byte is measurement; a named bit would be recall.
+
+        Getting to a body goes through ``approach`` — the walk-or-ride path — not a raw walk.
+        Sabrina's gym is the standing measurement: nine standing bodies, and every one past the
+        nearest sits on a pocket that thirty intra-map pads hold from the baton's bench. The
+        walk-only version of this loop marked each of them tried and skipped them, and four legs
+        in a row spent their reports on "engaged every body, badge byte unchanged" — a verdict the
+        walk can never see past a pad.
         """
         before = self.rig.badges()
         spoken: set[tuple[int, int]] = set()
+        order: list[tuple[int, int]] = []  # stable roster, for the retry phase
+        cursor = 0
         for _ in range(self.engage_rounds):
             if self.rig.badges() != before:
                 return True
-            mp, x, y = self.rig.pos()
-            fresh = [b for b in self.rig.bodies() if b not in spoken]
-            if not fresh:
+            mp, _x, _y = self.rig.pos()
+            all_bodies = list(self.rig.bodies())
+            if not all_bodies:
                 return self.rig.badges() != before
-            bx, by = min(fresh, key=lambda b: abs(b[0] - x) + abs(b[1] - y))
+            # Keep a stable order for the retry phase: which bodies reappear is decided by the
+            # roster, not by whatever happens to be standing nearest.
+            order = [b for b in order if b in all_bodies] + [b for b in sorted(all_bodies) if b not in order]
+            unspoken = [b for b in all_bodies if b not in spoken]
+            if unspoken:
+                # First pass over new bodies, nearest-first: cheap, and it meets the whole roster.
+                bx, by = min(unspoken, key=lambda b: abs(b[0] - _x) + abs(b[1] - _y))
+            else:
+                # Every body is met once and the badge still has not moved. That is the gated-
+                # leader shape, measured on map 178: the leader reads a coach line until the gym's
+                # member falls, then — and only then — battles. Nearest-first would just keep
+                # re-picking the member that is still standing beside us, so the loop walks the
+                # roster in a fixed order (round-robin) instead, and the leader gets the turn the
+                # member's defeat opens within one full cycle.
+                cursor = (cursor + 1) % len(order)
+                bx, by = order[cursor]
             spoken.add((bx, by))
-            adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
-            if (x, y) not in adjacent:
-                self.rig.walk(mp, adjacent, cap=160)
-                _, x, y = self.rig.pos()
-                if self.rig.pos()[0] != mp:  # a fight or a warp moved us; re-read next round
-                    continue
-            if (x, y) not in adjacent:
-                continue
-            face = "right" if bx > x else "left" if bx < x else "down" if by > y else "up"
-            said = self.rig.talk(face)
-            self.log(f"  engaged ({bx}, {by}): {said[:140]}")
-            self.rig.emit("supervisor.engaged", pos=[bx, by], said=said[:300], badges=self.rig.badges())
+            if not self._go_and_talk((bx, by)):
+                # approach says no even after riding. Name the pads that could open it, so the
+                # record reads as a route the next leg can take instead of a wall.
+                self.name_the_ride((bx, by))
+                self.log(f"  could not reach the body at {(bx, by)} on map {mp}")
         return self.rig.badges() != before
 
     # ---- the exhaustion record ---------------------------------------------------------------
@@ -812,7 +960,11 @@ class LegRunner:
                 if self.clear_floor:
                     self.engage_trainers()
                 if self.sweep:
-                    self.sweep_items()
+                    self.sweep_items(self.want)
+                if self.heal and not self.heal_party():
+                    return self._finish(
+                        "heal-refused", f"arrived on map {self.goal} but the fainted readings stay at zero"
+                    )
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
                 return self._finish("arrived", f"reached map {self.goal}")
@@ -846,10 +998,20 @@ class LegRunner:
             #    (16,10) pad is dead, and the floor has two other ways up — (26,0) and (20,0).
             #    Routing around it is a lookup; the crew spent a whole ladder on it instead.
             structural = failure == "warp-dead" or (failure == "no-path" and (cur, hop["to"]) in self.gated)
+
             if hop is not None and structural:
                 if self._reroute_around(hop):
                     continue
             if attempt > LADDER_ATTEMPTS:
+                # Before giving up on the leg, give up on the *door*. Any hop the whole ladder
+                # could not open is structural for this leg, and two rooms taught that in one
+                # night: Silph 5F parks a Rocket on the (24,0) pad while five other doors out of
+                # the room went unexamined, and 7F's 11F-side pocket has no route to 8F at all,
+                # only back to 3F. Both times the loop spent both seats on one door and then died
+                # holding a map full of untried ones. Banning costs a route we might have had
+                # after a longer wait; `route` returning None still ends the leg honestly.
+                if hop is not None and self._reroute_around(hop):
+                    continue
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"
@@ -1080,6 +1242,54 @@ def cmd_lift_tour(args) -> int:  # pragma: no cover - drives the emulator; verif
     return 0
 
 
+def cmd_hunt(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    """Travel to a map and come back with a species in the party.
+
+    Badges 7 and 8 need Surf, and this cartridge's cheapest surfer is a chain, not a find:
+    Nidoran-M (map 33, levels 2-4) evolves at 16 into Nidorino and with the MOON STONE already in
+    the bag into Nidoking, which learns HM03. A hunt is therefore a leg like any other — route
+    there, then pace the ROM's own grass with the catch armed — except that its success condition
+    is the party growing rather than a position.
+    """
+    import quartermaster as qm
+    from expedition_rig import BattleWedge, Rig
+    from memory_reader import SPECIES_ID_MAP
+
+    wanted = qm.parse_catch(args.species)
+    rig = Rig(args.state, live_label=args.live_label)
+    names = {SPECIES_ID_MAP.get(i, str(i)) for i in wanted}
+    print(f"start {rig.pos()} party {[n for n, _l, _h in rig.party()]} hunting {sorted(names)}", flush=True)
+    if len(rig.party()) >= 6:
+        print("  the party is full — a catch would go to a box; deposit someone first", flush=True)
+        return 2
+    started = time.monotonic()
+    if rig.pos()[0] != args.map:
+        leg = LegRunner(rig, goal=args.map, budget_s=args.budget / 2, consult=None)
+        result = leg.run()
+        if not result.get("ok"):
+            print(json.dumps(result), flush=True)
+            return 1
+    rig.ag.catch_wanted = set(wanted)  # the agent's battle turn throws instead of attacking
+    before = len(rig.party())
+    rig.emit("supervisor.hunt_start", map=args.map, species=sorted(names), party=before)
+    try:
+        got = rig.roam_grass(
+            args.map,
+            lambda: len(rig.party()) > before or time.monotonic() - started > args.budget,
+        )
+    except BattleWedge as exc:
+        print(f"  battle wedged: {exc}", flush=True)
+        got = False
+    caught = len(rig.party()) > before
+    print(f"party now {[n for n, _l, _h in rig.party()]}", flush=True)
+    rig.emit("supervisor.hunt_end", caught=caught, party=[n for n, _l, _h in rig.party()])
+    if caught and args.bank:
+        rig.bank(args.bank)
+    rig.finish(outcome="caught" if caught else "no-catch")
+    print(json.dumps({"caught": caught, "roamed": got, "run_id": rig.run_id}), flush=True)
+    return 0 if caught else 1
+
+
 def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Boot a baton and drive the supervised leg chain. This is the loop body the skill promises.
 
@@ -1108,8 +1318,15 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
             budget_s=share,
             # Engaging is what turns arrival into a badge, so it belongs to the last goal only:
             # a mid-chain city is a waypoint, and talking to every body in it is not the leg.
+            # Heal is the same shape with a different success condition: the party readings
+            # coming back, judged only on the goal that is a Center.
             engage=args.engage and index == len(goals),
+            # Healing belongs at the Center, which is a *mid-chain* goal — copying --engage's
+            # "last goal only" rule meant a chain of 182,235 healed at Giovanni's floor, i.e.
+            # never, and carried three fainted party members into the boss.
+            heal=args.heal,
             sweep=args.sweep_items,
+            want=args.want,
             # Unlike --engage, which watches for a badge and so belongs to the final gym, a
             # floor clear is worth doing on every goal in the chain: the thing a story floor
             # yields is usually carried by one of its trainers.
@@ -1143,11 +1360,24 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--live-label", default=None, help="stream to the viewer under this label")
     rn.add_argument("--engage", action="store_true", help="on arrival, engage bodies until the BADGES byte changes")
     rn.add_argument(
+        "--heal",
+        action="store_true",
+        help="on the last goal, engage the map's bodies until the fainted readings come back",
+    )
+    rn.add_argument(
         "--sweep-items", action="store_true", help="on arrival, open every item ball the cartridge lists for the map"
     )
     rn.add_argument(
         "--clear-floor", action="store_true", help="on the last goal, fight every trainer the cartridge lists there"
     )
+    rn.add_argument("--want", help="item name this leg came for; its ball is opened first")
+    ht = sub.add_parser("hunt", help="travel to a map and come back with a species in the party")
+    ht.add_argument("--state", required=True)
+    ht.add_argument("--species", required=True, help="e.g. Nidoran-M, or a raw internal id")
+    ht.add_argument("--map", type=int, required=True)
+    ht.add_argument("--budget", type=float, default=1800)
+    ht.add_argument("--bank")
+    ht.add_argument("--live-label")
     rn.add_argument("--no-consult", action="store_true", help="deterministic only — never call a model")
     ce = sub.add_parser("classify-exit", help="decide resume/continue/next/retry/escalate after an operator exit")
     ce.add_argument("--state", type=Path, required=True)
@@ -1179,6 +1409,8 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="what the supervisor would have said, from a run's lane logs")
     rp.add_argument("logs", type=Path, nargs="+")
     args = ap.parse_args(argv)
+    if args.cmd == "hunt":
+        return cmd_hunt(args)  # pragma: no cover - CLI dispatch, like every other subcommand
     if args.cmd == "run":
         return cmd_run(args)
     if args.cmd == "lift-tour":

@@ -32,6 +32,14 @@ CREW: dict[str, dict] = {
     # has to move with the budget: raising it to 8,000 tokens while leaving a 120s timeout only
     # changed how the seat failed, from "truncated" to "timed out", twice, on the very next leg.
     # Puzzle is the tier we escalate TO — starving it either way is how a ladder ends in silence.
+    #
+    # 2026-09-01, measured on the Silph 7F wall: the budget was never the binding constraint.
+    # This gateway gives the seat **exactly 300 seconds**, and it spends all of them thinking —
+    # 8,000 tokens plain, `think=false`, `json_object`, 32,000 tokens, and both streamed variants:
+    # six attempts, six non-answers, 22-35 KB of reasoning apiece and not one ACTION line. A
+    # non-stream call past the ceiling comes back 502. What clears it is not more budget but a
+    # second call: `closing_prompt` hands the seat its own cut-off reasoning and asks only for the
+    # line, and that answered in 49s. The thinking was never the problem; finishing was.
     "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud", "tokens": 8000, "timeout": 420},
 }
 
@@ -95,14 +103,88 @@ def build_prompt(facts: str, menu: list[str]) -> str:
     )
 
 
-def chat_body(model: str, prompt: str, max_tokens: int = ANSWER_TOKENS) -> dict[str, Any]:
+def chat_body(model: str, prompt: str, max_tokens: int = ANSWER_TOKENS, *, stream: bool = False) -> dict[str, Any]:
     """OpenAI-shaped request body; the caller posts it at TAPES_CHAT_URL."""
-    return {
+    body: dict[str, Any] = {
         "model": model,
         "temperature": 0.2,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
+    if stream:
+        body["stream"] = True
+    return body
+
+
+def closing_prompt(prior_text: str, menu: list[str], keep: int = 4000) -> str:
+    """Ask a seat that ran out of clock to convert its own thinking into the one line we need.
+
+    Measured on the Silph 7F wall (2026-09-01): the Extractor gets exactly 300 seconds from this
+    gateway — streamed or not, at 8,000 tokens or 32,000 — and spends all of it reasoning, six
+    attempts out of six, ending mid-thought with no ACTION line. Its thinking is not wasted
+    though: it is the most expensive thing the leg bought. Handing that tail back turns a second
+    300 seconds into a conclusion instead of a fresh deliberation from zero.
+    """
+    return (
+        "You already reasoned about this expedition wall. Your own reasoning, cut off when the "
+        "clock ran out:\n\n"
+        + prior_text[-keep:].strip()
+        + "\n\nDo not reason further. Output exactly two lines and nothing else:\nACTION: <one of "
+        + ", ".join(menu)
+        + ">\nWHY: <one sentence>"
+    )
+
+
+def stream_deltas(lines) -> Any:
+    """Yield the text deltas of an OpenAI-shaped SSE stream — ``reasoning`` counts as text.
+
+    A thinking seat writes its answer *after* the thinking, so a stream reader that only watches
+    ``content`` sees nothing for four minutes and then a truncation.
+    """
+    for raw in lines:
+        line = raw.decode() if isinstance(raw, bytes) else raw
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            chunk = __import__("json").loads(payload)
+        except ValueError:
+            continue
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            for key in ("content", "reasoning"):
+                piece = delta.get(key)
+                if isinstance(piece, str) and piece:
+                    yield piece
+
+
+def decide_from_stream(lines, menu: list[str]) -> tuple[str | None, str, str]:
+    """Read the stream until the seat names a menu action. Returns ``(action, why, text)``.
+
+    The Extractor cannot answer this endpoint in one shot, and both halves of that are measured
+    (2026-09-01, on the Silph 7F wall): at 8,000 tokens it returns ~30 KB of reasoning, zero
+    bytes of content and ``finish_reason: length`` after ~240s — identically for plain,
+    ``think=false`` and ``json_object`` requests — and at 32,000 tokens the gateway answers 502
+    at a hard 300s ceiling. More budget cannot help when the wall is wall-clock.
+
+    Streaming removes both walls at once: bytes arrive as they are produced, so no single
+    response has to fit inside the ceiling, and the moment an ``ACTION:`` line parses the leg has
+    its decision and stops reading. The bare-word fallback stays end-of-stream only — mid-thought
+    a model names every option it is weighing.
+    """
+    text = ""
+    for piece in stream_deltas(lines):
+        text += piece
+        if "\n" not in piece and len(piece) < 40:
+            continue  # cheap guard: only re-parse on line boundaries, not every token
+        action, why = parse_decision(text, menu, bare_word=False)
+        if action is not None:
+            return action, why, text
+    action, why = parse_decision(text, menu)
+    return action, why, text
 
 
 def extract_text(payload: dict[str, Any]) -> str:
@@ -123,7 +205,7 @@ def extract_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-def parse_decision(text: str, menu: list[str]) -> tuple[str | None, str]:
+def parse_decision(text: str, menu: list[str], *, bare_word: bool = True) -> tuple[str | None, str]:
     """Read ``ACTION:``/``WHY:`` out of a reply.
 
     Returns ``(None, why)`` when no menu action was named — an unparsed answer is a
@@ -141,7 +223,7 @@ def parse_decision(text: str, menu: list[str]) -> tuple[str | None, str]:
                 action = upper_menu[candidate]
         elif stripped.upper().startswith("WHY:"):
             why = stripped.split(":", 1)[1].strip().lstrip("*`_ ").strip()
-    if action is None:  # some models answer with the bare action word — but only trust the tail
+    if action is None and bare_word:  # some answer with the bare word — but only trust the tail
         tail = "\n".join(text.strip().splitlines()[-CONCLUSION_LINES:]).upper()
         named = [name for name in menu if name.upper() in tail]
         if len(named) == 1:  # two options named in the conclusion is a deliberation, not a choice

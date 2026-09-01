@@ -47,12 +47,22 @@ def _default_battle(io) -> None:
     raise QuartermasterError("road: a battle started and no battle handler was injected")
 
 
-def live_bodies(io) -> set[tuple[int, int]]:
-    """Positions of every live sprite — a beaten trainer still stands, and paths route around."""
+def live_bodies(io, bounds: tuple[int, int] | None = None) -> set[tuple[int, int]]:
+    """Positions of every live sprite — a beaten trainer still stands, and paths route around.
+
+    ``bounds`` is the current map's ``(width, height)``, and passing it matters: the sprite table
+    has sixteen slots and the unused ones decode to coordinates that are not on any map. Silph 3F
+    is 30x18 and a leg was told the body severing its hop stood at **(18,22)** — four rows past
+    the south wall. It then walked over to "engage" that body, which opened the pause menu, and
+    wrote down what the menu said ("OPTION EXIT") as the sentence the blocker spoke.
+    """
     out = set()
     for i in range(1, 16):
         if io.read(SPRITE_STATE_BASE + i * 0x10):
             out.add((io.read(SPRITE_DATA_BASE + i * 0x10 + 5) - 4, io.read(SPRITE_DATA_BASE + i * 0x10 + 4) - 4))
+    if bounds is not None:
+        w, h = bounds
+        out = {(x, y) for x, y in out if 0 <= x < w and 0 <= y < h}
     return out
 
 
@@ -82,6 +92,282 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
             seen.add((nx, ny))
             queue.append((nx, ny))
     return seen
+
+
+def walkable(truth, pairs, map_id: int, start, bodies=(), keep=()) -> set[tuple[int, int]]:
+    """The cells ``walk`` can actually deliver us to: bodies *and* every warp tile are walls.
+
+    ``reachable`` answers a terrain question and ``walk`` answers a movement one, and inside a
+    facility the two disagree wildly — because ``walk`` refuses to thread a door tile as floor
+    (a pad fires the moment you step on it, so a route "through" one is a route off the floor).
+    Silph 5F is the measurement: the corridor holding the CARD KEY is *reachable* from anywhere
+    on the floor, and the only path to it crosses the teleport pad at (27,3). Every approach that
+    trusted ``reachable`` was refused live, on both of the two sessions that hunted that key,
+    with no sentence on screen to explain it. Ride the pad and the same corridor is nine steps.
+
+    ``keep`` are warp tiles that stay open — the targets of the walk itself, which ``walk``
+    excludes from its own warp block for the same reason.
+    """
+    warps = {(w[0], w[1]) for w in truth["maps"][str(map_id)]["warps"]} - set(keep)
+    return reachable(truth, pairs, map_id, start, set(bodies) | warps)
+
+
+def pads_reaching(truth, pairs, map_id: int, targets, bodies=()) -> list[tuple[tuple[int, int], int]]:
+    """``(pad, the map it pairs with)`` for every warp tile on this map that *stands* inside a
+    region holding ``targets`` — the ride hidden behind a bare "could not reach".
+
+    A leg that cannot walk to a cell is not stuck if a pad lands beside it: Silph 5F's card-key
+    corridor is nine steps from the pad at (27,3), which pairs with 7F, and zero routes from
+    anywhere else on the floor. Naming the pad is the difference between a wall and a detour.
+    """
+    targets = set(targets)
+    out = []
+    for wx, wy, dest, _wid in truth["maps"][str(map_id)]["warps"]:
+        pad = (wx, wy)
+        if pad in targets:
+            continue
+        if walkable(truth, pairs, map_id, pad, bodies, keep={pad} | targets) & targets:
+            out.append((pad, dest))
+    return out
+
+
+def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
+    """Every door **on any map** whose landing can walk to ``targets``, nearest-first by hops.
+
+    ``pads_reaching`` answers "which pad on this floor", which is not the question a gated
+    building poses. Silph asks the cross-floor one: the CARD KEY's corridor on 5F is entered only
+    from the pad at (27,3), which is entered only by riding 7F's (21,15), which sits in a 7F
+    pocket that is itself behind card-key doors — so the useful question is never "which pad is
+    beside the target" but "which door, anywhere in the building, lands somewhere that can reach
+    it". Three legs died re-deriving that by hand, one floor at a time.
+
+    Each entry is ``{"from_map", "door", "lands", "hops"}``: ride ``door`` on ``from_map`` and you
+    arrive at ``lands``, from which the target is walkable. ``hops`` is 0 when the landing walks
+    straight to the target and 1 when it reaches a pad that does. Landings are read from the
+    destination's own warp list, the same way the router resolves a hop, and reachability is the
+    movement question (``walkable``), not the terrain one.
+    """
+    targets = set(targets)
+    here = truth["maps"].get(str(map_id))
+    if here is None:
+        return []
+    direct = {(w[0], w[1]) for w in here["warps"]}
+    # Landings on this map that walk to the target, plus landings that reach a pad that does.
+    relay = {pad for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)}
+    found: list[dict] = []
+    for src, m in truth["maps"].items():
+        for wx, wy, dest, wid in m["warps"]:
+            if dest != map_id or wid >= len(here["warps"]):
+                continue
+            lands = (here["warps"][wid][0], here["warps"][wid][1])
+            open_here = walkable(truth, pairs, map_id, lands, bodies, keep={lands} | targets | relay)
+            if open_here & targets:
+                hops = 0
+            elif open_here & relay:
+                hops = 1  # pragma: no cover - a two-step ride; exercised live on Silph 5F
+            else:
+                continue
+            found.append({"from_map": int(src), "door": (wx, wy), "lands": lands, "hops": hops})
+    found.sort(key=lambda r: (r["hops"], r["from_map"], r["door"]))
+    return [r for r in found if r["door"] not in direct or r["from_map"] != map_id]
+
+
+def pad_land(truth, map_id: int, warp) -> tuple[int, int] | None:
+    """The cell a same-map warp lands on — its destination index reads the same map's own list.
+
+    ``255`` (0xFF) is the ROM's "same map" destination and resolves here too: Sabrina's gym's two
+    arrival mats (8,17)/(9,17) carry it. A door to another map is ``None`` — the pad graph is the
+    within-floor structure, and cross-floor round trips are ``_return_through``'s job.
+    """
+    m = truth["maps"].get(str(map_id))
+    if m is None:
+        return None
+    _wx, _wy, dst, idx = warp
+    if dst not in (0xFF, map_id):
+        return None
+    if not isinstance(idx, int) or not (0 <= idx < len(m["warps"])):
+        return None
+    return (m["warps"][idx][0], m["warps"][idx][1])
+
+
+def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tuple[int, int]] | None:
+    """The shortest ride SEQUENCE that brings ``targets`` into walkable reach, or None.
+
+    BFS over the pad graph, which the cartridge already gave us complete: every warp's landing is
+    an index into its own warp list, and every pad's pocket is a ``walkable`` region. Riding
+    pads in table order *explores* that graph; riding a route through it is a measurement plus a
+    walk, and exploration is what a leg's budget is not for. Sabrina's gym is thirty pads in
+    2-cycles (every landing is another pad tile), one pocket has exactly one exit (its own pad,
+    re-fired by stepping off it and back on), and the leader's pocket sits two rides from the
+    door while the table-order hunt burns its budget standing elsewhere.
+
+    ``[]`` means the walk already covers ``targets`` and ``ride_pad``'s own walk collects it.
+    Entries are the warp tiles to ride, in order. Landings are re-measured live by the caller,
+    and the next hop re-plans from wherever the cartridge actually left us, so table and live may
+    disagree in either direction and the loop still converges.
+    """
+    from collections import deque
+
+    targets = set(targets)
+    if not targets or truth["maps"].get(str(map_id)) is None:
+        return None  # checked BEFORE `walkable`, which raises on a map we do not model
+    bodies = set(bodies)
+    # The targets stay open. `walkable` treats every warp tile as a wall, which is right for
+    # routing *through* one and wrong when the target IS one — and a gym's exit mat is exactly
+    # that. Without this the goal is unreachable by construction: badge 6 was won at (9,9) behind
+    # thirty pads and the leg then re-tried the mat at (8,17) until its budget ran out, because
+    # the BFS could never report the mat as reached. `walk` excludes its own targets from the
+    # warp block for the same reason.
+    if walkable(truth, pairs, map_id, start, bodies, keep=targets) & targets:
+        return []
+    m = truth["maps"][str(map_id)]
+    pads = [w for w in m.get("warps", []) if pad_land(truth, map_id, w) is not None]
+    routes = {tuple(start): []}
+    queue = deque([tuple(start)])
+    while queue:
+        anchor = queue.popleft()
+        for warp in pads:
+            pad = (warp[0], warp[1])
+            if not (walkable(truth, pairs, map_id, anchor, bodies, keep={pad}) & {pad}):
+                continue  # this pad does not stand in the pocket we are standing in
+            land = pad_land(truth, map_id, warp)
+            if land in routes:
+                continue
+            routes[land] = routes[anchor] + [pad]
+            queue.append(land)
+            if walkable(truth, pairs, map_id, land, bodies, keep=targets) & targets:
+                return routes[land]  # pragma: no cover - reached only when a ride opens the target
+    return None
+
+
+def ride_pad(  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    io, truth, pairs, map_id: int, targets, *, battle=_default_battle, rides: int = 6
+):
+    """Reach ``targets`` by riding pads, when no walk can get there.
+
+    The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
+    stepping on one fires it — so a region whose only entrance *is* a pad is unreachable to it, and
+    the leg reports "could not reach" with nothing on screen to explain why.
+
+    Two shapes, both measured. A pad that pairs with **another map** is ridden as a round trip:
+    Silph 5F's (26,3) step east fires (27,3), lands on 7F (21,15), and stepping off it and back on
+    returns us *standing on (27,3)* — inside the region the walk could never enter, with (28,3) one
+    step away. Arriving on a pad does not re-fire it, which is why the far side must be left and
+    re-entered. A pad that points at **its own map** simply moves us: Sabrina's gym is thirty of
+    those (30 of its 32 warps), and there is no far side to come back from.
+
+    The order of the rides comes from ``pad_route`` — a BFS over the pad graph — because
+    table-order hunting is how a leg rides one wrong pocket per hop and spends its budget.
+    Each hop still tries a sequence of pads (routed first, the old nearest-use hunt behind),
+    and after every ride the landing is re-measured and the next hop re-plans from wherever the
+    cartridge actually left us, so table and live may disagree in either direction and the call
+    still converges.
+    """
+    targets = set(targets)
+    tried: set[tuple[int, int]] = set()  # pads already ridden this call, so a maze cannot cycle
+    rides = max(int(rides), 1)
+    for _ in range(rides):
+        if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+            return True
+        pos = read_pos(io)
+        if pos[0] != map_id:
+            return False  # a ride took us off this floor and could not come back
+        if _ride_hop(io, truth, pairs, map_id, targets, tried, battle=battle):
+            if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+                return True  # the landing put the targets within feet
+            continue  # we moved; the next hop re-plans from where the cartridge left us
+        return False  # no pad here took us anywhere; more hops would ride the same dead ends
+    return False
+
+
+def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]], *, battle=_default_battle) -> bool:
+    """One hop: ride the routed sequence first, the old nearest-use hunt behind — walk after each.
+
+    True if any pad actually moved us, False if none did. Pads that never took us stay untried
+    (a walk not reaching a tile is not a ride); ones that did are consumed, because a maze of
+    pads is a graph with cycles and riding the same one each hop is how a leg spends its budget
+    standing in two rooms.
+    """
+    bodies = live_bodies(io)
+    here = read_pos(io)[1:]
+    routed = [p for p in (pad_route(truth, pairs, map_id, here, targets, bodies) or []) if p not in tried]
+    best = [
+        pad
+        for pad, _dest in pads_reaching(truth, pairs, map_id, targets, bodies)
+        if pad not in tried and pad not in routed
+    ]
+    others = [
+        (w[0], w[1])
+        for w in truth["maps"][str(map_id)]["warps"]
+        if (w[0], w[1]) not in best
+        and (w[0], w[1]) not in routed
+        and (w[0], w[1]) not in tried
+        and walkable(truth, pairs, map_id, here, bodies, keep={(w[0], w[1])}) & {(w[0], w[1])}
+    ]
+    moved = False
+    for pad in routed + best + others:
+        before = read_pos(io)
+        now = _ride_live(io, truth, pairs, map_id, pad, battle=battle)
+        if now == before:
+            continue  # never got moving toward this pad — not a ride, so it stays untried
+        tried.add(pad)  # only pads that actually moved us count as spent
+        moved = True
+        if now[0] != map_id and not _return_through(io, truth, pairs, map_id, now[0], now[1], now[2]):
+            return True  # pragma: no cover - drives the emulator; verified live on Silph 5F
+        if walk(io, truth, pairs, map_id, targets, battle=battle) is True:
+            return True
+    return moved
+
+
+def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) -> tuple[int, int, int]:
+    """End up where ``pad`` lands — by walking onto it, or re-firing it from our own feet.
+
+    A pad does not fire the moment we are standing on it; it fires on (re)entry. A dead-end
+    pocket's only exit IS its own pad — Sabrina's gym parks the gym-side trainer in one — and
+    the step-off-and-back is the whole ride. Each side is tried once; a blocked side costs
+    nothing but the step, and a side that takes us anywhere counts as the measurement.
+    """
+    was = read_pos(io)
+    if was[0] == map_id and was[1:] == pad:
+        for direction, back in (("right", "left"), ("left", "right"), ("down", "up"), ("up", "down")):
+            _step(io, direction)
+            io.wait(60)
+            if read_pos(io) == was:
+                continue  # pragma: no cover - drives the emulator; a held or closed side
+            _step(io, back)
+            io.wait(60)
+            now = read_pos(io)
+            if now != was:
+                return now  # the pad re-fired (or something else moved us — position is the fact)
+        return was  # pragma: no cover - drives the emulator; a pad that fires for nobody
+    walk(io, truth, pairs, map_id, {pad}, battle=battle)
+    # The walk's own verdict is not the signal: a pad that fires mid-walk leaves it still trying
+    # to reach a tile we have already been teleported off, and it reports "no-path". Position is
+    # the measurement.
+    return read_pos(io)
+
+
+def _return_through(  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    io, truth, pairs, map_id: int, mp: int, x: int, y: int
+) -> bool:
+    """Standing on the far side's warp tile, step off and back on to come home. True if we did."""
+    import rom_truth as rt
+
+    far = truth["maps"].get(str(mp))
+    if not far:
+        return False
+    for direction, (dx, dy) in (("down", (0, 1)), ("up", (0, -1)), ("left", (-1, 0)), ("right", (1, 0))):
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < far["width"] and 0 <= ny < far["height"]):
+            continue
+        if far["grid"][ny][nx] != "1" or not rt.passable(far, pairs, x, y, nx, ny):
+            continue
+        _step(io, direction)
+        if read_pos(io)[1:] != (nx, ny):
+            continue  # a body or a script ate the step; try another side
+        _step(io, _OPPOSITE[direction])
+        return read_pos(io)[0] == map_id
+    return False
 
 
 def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
@@ -157,9 +443,14 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
             return "map-change"
         if (x, y) in targets:
             return True
-        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=live_bodies(io) | warp_block)
+        # Never block the tile we are standing on. Arriving through a door leaves us ON it, and
+        # a warp block that includes our own cell makes every plan from there impossible — which
+        # is why "could not step off the warp mat" fired on Silph 3F, the Center's exit and the
+        # Safari Zone's arrival pad, and why a leg that had just walked in could not walk on.
+        here_block = warp_block - {(x, y)}
+        path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=live_bodies(io) | here_block)
         if not path or len(path) < 2:
-            path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=warp_block)
+            path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=here_block)
             if not path or len(path) < 2:
                 return "no-path"
             if tuple(path[1]) in live_bodies(io):

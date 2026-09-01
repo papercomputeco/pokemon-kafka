@@ -411,8 +411,17 @@ def test_the_road_delegations_pass_the_battle_handler_through(monkeypatch):
 def test_bodies_delegates_to_the_live_sprite_table(monkeypatch):
     import road as road_mod
 
-    monkeypatch.setattr(road_mod, "live_bodies", lambda io: {(1, 2)})
-    assert _reader_rig().bodies() == {(1, 2)}
+    # The rig passes the current map's bounds so off-map sprite slots cannot become blockers.
+    seen = {}
+
+    def fake(io, bounds=None):
+        seen["bounds"] = bounds
+        return {(1, 2)}
+
+    monkeypatch.setattr(road_mod, "live_bodies", fake)
+    r = _reader_rig({0xD35E: 208, 0xD362: 26, 0xD361: 1}, {"maps": {"208": {"width": 30, "height": 18}}})
+    assert r.bodies() == {(1, 2)}
+    assert seen["bounds"] == (30, 18)  # the floor we are standing on, so off-map slots are dropped
 
 
 def test_window_row_decodes_the_layer_menus_render_to():
@@ -441,3 +450,399 @@ def test_settle_returns_immediately_when_the_world_already_moves():
     r = _stub_rig(parked=0)
     assert r.settle() is True
     assert "b" not in r.io.presses  # nothing was blocking, so nothing was pressed at it
+
+
+def test_step_off_targets_prefers_floor_and_never_another_door():
+    """A Pokemon Center has two exit mats side by side. Banking on one and "stepping off" onto
+    the other leaves the baton in the doorway, and booting it settles straight out of the
+    building — which is exactly what Saffron's (182,3,7) baton did, costing a leg its ladder
+    trying to get back in."""
+    r = _reader_rig(
+        {0xD35E: 182, 0xD362: 3, 0xD361: 7},
+        {"maps": {"182": {"width": 6, "height": 8, "grid": ["111111"] * 8, "warps": [[3, 7, 10, 0], [4, 7, 10, 0]]}}},
+    )
+    moves = r.step_off_targets(182, 3, 7)
+    assert ("up", (3, 6)) in moves  # into the building
+    assert all(cell != (4, 7) for _d, cell in moves)  # never the mat next door
+    assert moves[0][0] == "up"  # and the interior is tried first
+
+
+class _MenuRig:
+    """Enough Rig to exercise menu selection: a window layer and a cursor register."""
+
+    def __init__(self, rows, cursor=0):
+        self._rows = rows
+        self.mem = {rig.qm.ADDR_MENU_CUR: cursor, rig.ADDR_LIST_SCROLL: 0}
+        self.presses = []
+
+        class Ctl:
+            def __init__(self, outer):
+                self.outer = outer
+
+            def press(self, button, *a, **kw):
+                self.outer.presses.append(button)
+                cur = self.outer.mem[rig.qm.ADDR_MENU_CUR]
+                if button == "down":
+                    self.outer.mem[rig.qm.ADDR_MENU_CUR] = cur + 1
+                elif button == "up":
+                    self.outer.mem[rig.qm.ADDR_MENU_CUR] = max(0, cur - 1)
+
+            def wait(self, frames=30):
+                pass
+
+        self.ctl = Ctl(self)
+
+    def window_row(self, row):
+        return self._rows.get(row, "")
+
+    def menu_rows(self, first=0, last=14):
+        return rig.Rig.menu_rows(self, first, last)
+
+    def dialogue(self):
+        return ""
+
+    def list_index(self):
+        return rig.Rig.list_index(self)
+
+
+def test_menu_choose_selects_by_text_not_by_position():
+    """The PC menu lists WITHDRAW, DEPOSIT, RELEASE and CHANGE BOX. Choosing by index would one
+    day release a party member because a menu shifted, so entries are matched by decoded text and
+    the cursor register is the ground truth for where the cursor sits."""
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT", 6: "RELEASE", 8: "CHANGE BOX", 10: "SEE YA!"})
+    assert rig.Rig.menu_choose(menu, "DEPOSIT") is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 1  # entries render every other row
+    assert menu.presses[-1] == "a"
+    assert "RELEASE" not in menu.presses
+
+
+def test_menu_choose_reports_a_miss_rather_than_pressing_a():
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT"})
+    assert rig.Rig.menu_choose(menu, "SURF") is False
+    assert "a" not in menu.presses
+
+
+def test_menu_choose_walks_the_cursor_back_up():
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT", 6: "RELEASE"}, cursor=2)
+    assert rig.Rig.menu_choose(menu, "WITHDRAW") is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 0
+    assert menu.presses.count("up") == 2
+
+
+def test_the_pc_is_a_template_cell_like_the_nurses_counter():
+    center = _reader_rig(
+        {0xD35E: 64, 0xD362: 3, 0xD361: 7},
+        {"maps": {"64": {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 3, "y": 1}]}}},
+    )
+    assert center.center_pc(64) == ((13, 4), "up")
+    plain = _reader_rig({}, {"maps": {"9": {"width": 10, "height": 9, "tileset": 0, "sprites": []}}})
+    assert plain.center_pc(9) is None
+
+
+def test_menu_shows_never_presses_anything_while_it_looks():
+    """A advances a text box, but inside a list it CONFIRMS the highlighted entry — that is how
+    Charizard and then Dugtrio ended up in a box. Looking must never press."""
+    menu = _MenuRig({2: "CHARIZARD", 4: "DUGTRIO", 6: "HYPNO"})
+    assert rig.Rig.menu_shows(menu, "DEPOSIT", tries=2) is False
+    assert menu.presses == []
+    assert rig.Rig.menu_shows(menu, "DUGTRIO", tries=2) is True
+    assert menu.presses == []
+
+
+def test_menu_cursor_to_counts_the_scroll_not_just_the_cursor():
+    """The deposit roster shows three rows: 0xCC26 caps at 2 while 0xCC36 counts how far the list
+    has scrolled, so the highlight is cursor + scroll. Reading only the cursor deposits the wrong
+    member for anything past the third slot — measured on Cerulean's PC."""
+    menu = _MenuRig({2: "AAAAAAAAAA", 4: "DUGTRIO", 6: "GLOOM"}, cursor=0)
+    menu.mem[rig.ADDR_LIST_SCROLL] = 0
+
+    def press(button, *a, **kw):  # the window caps at 2 and then the list scrolls under it
+        menu.presses.append(button)
+        if button == "down":
+            if menu.mem[rig.qm.ADDR_MENU_CUR] < 2:
+                menu.mem[rig.qm.ADDR_MENU_CUR] += 1
+            else:
+                menu.mem[rig.ADDR_LIST_SCROLL] += 1
+
+    menu.ctl.press = press
+    assert rig.Rig.menu_cursor_to(menu, 4) is True
+    assert rig.Rig.list_index(menu) == 4
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 2 and menu.mem[rig.ADDR_LIST_SCROLL] == 2
+    assert "a" not in menu.presses  # walked, never confirmed
+
+
+def test_menu_choose_indexes_within_the_block_when_menus_overlay():
+    """Choosing DEPOSIT renders the party list on top of the box menu, and the follow-up
+    DEPOSIT/STATS/CANCEL renders on top of that. Measured rows from Cerulean's PC — the cursor
+    index must be counted from the block the match is in, not from the first row on screen."""
+    overlaid = _MenuRig(
+        {2: "WI", 4: "DEDUGTRIO", 5: "99", 6: "RE GLOOM", 7: "99", 8: "CH PRIMEAPE", 12: "DEPOSIT", 14: "CANCEL"}
+    )
+    assert rig.Rig.menu_choose(overlaid, "DEPOSIT") is True
+    assert overlaid.mem[rig.qm.ADDR_MENU_CUR] == 0  # first entry of ITS OWN block, not the fifth
+
+
+def test_grass_lanes_are_the_rom_s_own_extremes():
+    """Where to roam comes from the extracted grass tiles, not from lore — and pacing the
+    extremes keeps crossing fresh tiles instead of rolling the same one. (Reachability is
+    filtered only when the rig is standing on that map; see the next test.)"""
+    # Standing on a different map, so the reachability filter does not apply.
+    r = _reader_rig(
+        {0xD35E: 99, 0xD362: 0, 0xD361: 0},
+        {"maps": {"33": {"grass": [[5, 9], [2, 3], [7, 3], [2, 9]]}, "1": {"grass": []}}},
+    )
+    assert r.grass_lanes(33) == [(2, 3), (5, 9)]
+    assert r.grass_lanes(1) == []  # a map with no grass has no lane to pace
+    assert r.grass_lanes(999) == []  # and neither has one we do not model
+
+
+def test_grass_lanes_only_offers_grass_we_can_stand_on(monkeypatch):
+    """Route 2's 84 grass cells all sit outside the 144-cell region a leg arriving from Diglett's
+    Cave can reach. Aimed at them, the roam walked nowhere and rolled no encounters at all —
+    twelve thousand laps with a level-5 Magikarp still level 5."""
+    import road as road_mod
+
+    truth = {"maps": {"13": {"grass": [[0, 2], [9, 51]], "width": 20, "height": 72}}}
+    r = _reader_rig({0xD35E: 13, 0xD362: 12, 0xD361: 10}, truth)
+    r.bodies = lambda: set()
+    monkeypatch.setattr(road_mod, "walkable", lambda *a, **k: {(12, 10), (12, 11)})
+    assert r.grass_lanes(13) == []  # none of the map's grass is in our region
+    monkeypatch.setattr(road_mod, "walkable", lambda *a, **k: {(12, 10), (0, 2), (9, 51)})
+    assert r.grass_lanes(13) == [(0, 2), (9, 51)]
+
+
+# --------------------------------------------------------------------------- healing at a Center
+
+_CENTER_MAP = {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 3, "y": 1}]}
+
+
+def test_heal_at_center_refuses_a_map_that_is_not_a_center(capsys):
+    """The grind leg that crashed here (run 20260901-164132-3962) had driven to map 89 and then
+    called a method that did not exist; the honest failure on a wrong map is False, said aloud."""
+    r = _reader_rig({0xD35E: 157, 0xD362: 3, 0xD361: 3}, {"maps": {"157": {"width": 10, "height": 9, "tileset": 0}}})
+    assert r.heal_at_center() is False
+    assert "not a Center" in capsys.readouterr().out
+
+
+def test_heal_at_center_is_a_no_op_when_the_party_already_reads_full(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 63, "max_hp": 63}])
+    r.approach = lambda cells: (_ for _ in ()).throw(AssertionError("walked for nothing"))
+    assert r.heal_at_center() is True
+
+
+def test_heal_at_center_talks_the_template_cell_until_the_party_reads_full(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    world = {"healed": False, "stood": None}
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 63 if world["healed"] else 12, "max_hp": 63}])
+
+    def approach(cells):
+        world["stood"] = cells
+        return True
+
+    def nurse(io, face):
+        assert face == "up"  # the counter template: player at (3,3) facing the nurse at (3,1)
+        world["healed"] = True
+
+    r.approach = approach
+    monkeypatch.setattr(rig.qm, "heal", nurse)
+    assert r.heal_at_center() is True
+    assert world["stood"] == {(3, 3)}
+
+
+def test_heal_at_center_reports_an_unreachable_counter(monkeypatch, capsys):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 12, "max_hp": 63}])
+    r.approach = lambda cells: False
+    assert r.heal_at_center() is False
+    assert "could not reach" in capsys.readouterr().out
+
+
+def test_heal_at_center_gives_up_honestly_when_the_nurse_never_heals(monkeypatch):
+    r = _reader_rig({0xD35E: 182, 0xD362: 5, 0xD361: 5}, {"maps": {"182": _CENTER_MAP}})
+    monkeypatch.setattr(rig.qm, "read_party", lambda io: [{"hp": 12, "max_hp": 63}])
+    r.approach = lambda cells: True
+    calls = {"n": 0}
+
+    def refuses(io, face):
+        calls["n"] += 1
+        raise rig.qm.QuartermasterError("nurse heal")
+
+    monkeypatch.setattr(rig.qm, "heal", refuses)
+    assert r.heal_at_center() is False
+    assert calls["n"] == 3  # it retried, then told the truth instead of spinning
+
+
+class _Recorder:
+    """A controller that only remembers what was pressed — menus are stubbed per test."""
+
+    def __init__(self):
+        self.presses: list[str] = []
+
+    def press(self, button, *a, **kw):
+        self.presses.append(button)
+
+    def wait(self, frames=30):
+        pass
+
+
+def test_a_failed_lead_swap_closes_the_menus_it_opened():
+    """Measured on the karp grind: a silent failure here left the START menu up, every step after
+    was swallowed, and the heal trip's first hop reported "refused" against a clear road."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.party = lambda: [("MAGIKARP", 16, 5), ("HYPNO", 99, 341)]
+    r.ctl = _Recorder()
+    r.menu_choose = lambda wanted: False  # the start menu never showed POKeMON
+    assert r.lead_swap(1) is False
+    opened = r.ctl.presses.index("start")
+    assert r.ctl.presses[opened + 1 :].count("b") >= 8  # what it opened, it closed
+
+
+def test_say_puts_what_the_game_said_into_the_sink(tmp_path):
+    """The Rig read a guru naming his rod, a boss conceding Silph and every card-key door, and
+    only ever printed them — a search across every captured event for SURF, HM or SOULBADGE
+    returned nothing while all of it had been on screen."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.mem = {0xD35E: 163, 0xD362: 2, 0xD361: 5}
+    r.run_id = "t"
+    r.telemetry_root = tmp_path
+    r.say("I'm the FISHING GURU! I simply love fishing!")
+    r.say("   ")  # nothing said is nothing to record
+    lines = [json.loads(x) for x in rig.telemetry_path(root=tmp_path).read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["event"] == "discovery"
+    assert lines[0]["map"] == 163 and (lines[0]["x"], lines[0]["y"]) == (2, 5)
+    assert "FISHING GURU" in lines[0]["text"] and lines[0]["kind"] == "dialogue"
+
+
+def test_ball_contents_names_what_each_ball_holds():
+    """The lookup that ended the CARD KEY hunt: a ball's contents are in the cartridge."""
+    r = _reader_rig(
+        {},
+        {
+            "items": {"48": "CARD KEY", "20": "SUPER POTION"},
+            "maps": {
+                "210": {
+                    "sprites": [
+                        {"kind": "item", "x": 21, "y": 16, "item": 48},
+                        {"kind": "item", "x": 2, "y": 13, "item": 20},
+                        {"kind": "trainer", "x": 8, "y": 3},
+                    ]
+                }
+            },
+        },
+    )
+    assert r.ball_contents(210) == {(21, 16): "CARD KEY", (2, 13): "SUPER POTION"}
+    assert r.ball_contents(999) == {}
+
+
+def test_unlock_gates_drops_the_doors_the_bag_can_open():
+    """A locked door is only a wall while the key is missing — and the leg that took the CARD KEY
+    then planned its next hop as though it had not."""
+    truth = {
+        "items": {"48": "CARD KEY"},
+        "maps": {
+            "208": {"gates": {"11,11,left": "Darn! It needs a CARD KEY!", "3,3,up": "The door is locked..."}},
+            "210": {"gates": {}},
+            "1": {},
+        },
+    }
+    r = _reader_rig({}, truth)
+    r.bag_named = lambda: [("CARD KEY", 1), ("POTION", 3)]
+    assert r.unlock_gates() == 1
+    assert truth["maps"]["208"]["gates"] == {"3,3,up": "The door is locked..."}
+    r.bag_named = lambda: []
+    assert r.unlock_gates() == 0  # an empty bag opens nothing
+
+
+def test_advance_text_stops_at_the_roster_rather_than_pressing_into_it():
+    """A stops a text box and CONFIRMS inside a list. Recognise the roster by its own contents."""
+
+    class Roster(_MenuRig):
+        def party(self):
+            return [("GLOOM", 99, 313), ("DUGTRIO", 100, 259)]
+
+    menu = Roster({2: "DE GLOOM", 4: "RE DUGTRIO"})
+    assert rig.Rig.advance_text(menu, "DEPOSIT") is False
+    assert menu.presses == []
+
+
+def test_advance_text_presses_through_a_box_until_the_menu_it_wants():
+    class Box(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "BILL's PC"})
+            self.seen = 0
+
+        def party(self):
+            return [("GLOOM", 99, 313)]
+
+        def menu_rows(self, first=0, last=18):
+            self.seen += 1
+            return [(2, "DEPOSIT")] if self.seen > 1 else [(2, "BILL's PC")]
+
+    box = Box()
+    assert rig.Rig.advance_text(box, "DEPOSIT") is True
+    assert box.presses.count("a") >= 1
+
+
+def test_advance_text_gives_up_after_its_budget():
+    """A box that never changes is not a menu we can reach; say so rather than press forever."""
+
+    class Stuck(_MenuRig):
+        def party(self):
+            return [("GLOOM", 99, 313)]
+
+    stuck = Stuck({2: "BILL's PC"})
+    assert rig.Rig.advance_text(stuck, "DEPOSIT", tries=3) is False
+    assert stuck.presses.count("a") == 3
+
+
+def test_menu_cursor_to_reports_failure_when_the_cursor_will_not_move():
+    class Frozen(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "A", 4: "B"})
+            self.ctl.press = lambda *a, **k: self.presses.append(a[0] if a else "?")
+
+    frozen = Frozen()
+    assert rig.Rig.menu_cursor_to(frozen, 3, presses=4) is False
+
+
+def test_menu_choose_and_center_lookups_refuse_what_they_cannot_find():
+    menu = _MenuRig({})
+    assert rig.Rig.menu_choose(menu, "DEPOSIT") is False  # nothing on screen
+    plain = _reader_rig({}, {"maps": {"9": {"width": 10, "height": 9, "tileset": 0, "sprites": []}}})
+    assert plain.center_counter(9) is None
+    assert plain.step_off_targets(404, 0, 0) == []  # a map we do not model
+    assert plain.grass_lanes(9) == []  # no grass listed
+
+
+def test_menu_choose_refuses_when_the_cursor_will_not_reach_the_entry():
+    """Reporting a miss beats pressing A somewhere we did not aim — the PC menu holds RELEASE."""
+
+    class Stuck(_MenuRig):
+        def __init__(self):
+            super().__init__({2: "WITHDRAW", 4: "DEPOSIT"})
+            self.ctl.press = lambda *a, **k: self.presses.append(a[0] if a else "?")  # cursor frozen
+
+    stuck = Stuck()
+    assert rig.Rig.menu_choose(stuck, "DEPOSIT") is False
+    assert "a" not in stuck.presses
+
+
+def test_center_counter_needs_the_nurse_tile_not_just_the_shell():
+    """A room the same size and tileset as a Center is not a Center without the nurse at (3,1)."""
+    shell = _reader_rig(
+        {}, {"maps": {"64": {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 7, "y": 4}]}}}
+    )
+    assert shell.center_counter(64) is None
+
+
+def test_step_off_targets_skips_cells_a_tile_pair_refuses(monkeypatch):
+    """Both cells walkable is not enough — the engine refuses some moves between them."""
+    import rom_truth as rt_mod
+
+    truth = {"maps": {"1": {"width": 3, "height": 3, "grid": ["111"] * 3, "warps": [[1, 1, 9, 0]]}}}
+    r = _reader_rig({0xD35E: 1, 0xD362: 1, 0xD361: 1}, truth)
+    r.pairs = set()
+    monkeypatch.setattr(rt_mod, "passable", lambda *a, **k: False)
+    assert r.step_off_targets(1, 1, 1) == []

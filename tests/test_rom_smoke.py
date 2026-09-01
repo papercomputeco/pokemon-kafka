@@ -89,3 +89,26 @@ def test_the_extracted_truth_carries_the_item_table():
     import rom_truth as rt
 
     assert rt.load_truth()["items"]["74"] == "LIFT KEY"
+
+
+def test_item_balls_name_what_they_hold():
+    """Rocket Hideout B4F (map 202) is the cross-check: both of its balls were opened live this
+    run, and the bag gained SILPH SCOPE and LIFT KEY. If the object-data item byte decoded
+    wrong, these would not line up — and the two sessions spent sweeping Silph for the CARD KEY
+    would have been one lookup: map 210, (21,16).
+    """
+    import rom_truth as rt
+
+    truth = rt.load_truth()
+    items = truth["items"]
+
+    def balls(map_id: int) -> dict[tuple[int, int], str]:
+        return {
+            (s["x"], s["y"]): items[str(s["item"])]
+            for s in truth["maps"][str(map_id)]["sprites"]
+            if s["kind"] == "item"
+        }
+
+    assert balls(202)[(25, 2)] == "SILPH SCOPE"
+    assert balls(202)[(10, 2)] == "LIFT KEY"
+    assert balls(210)[(21, 16)] == "CARD KEY"

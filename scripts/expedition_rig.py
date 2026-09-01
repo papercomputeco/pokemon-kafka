@@ -109,6 +109,7 @@ class Rig:
         self.recorder = None
         self.telemetry_root = telemetry_root
         self.run_id = run_id or uuid.uuid4().hex[:12]
+        self.unlock_gates()
         if live_label:
             self._go_live(live_label, frame_interval, viewer_ws)
         if settle_on_boot and not self.settle():
@@ -319,6 +320,22 @@ class Rig:
         sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
         return [(s["x"], s["y"]) for s in sprites if s.get("kind") == "item"]
 
+    def ball_contents(self, map_id: int) -> dict[tuple[int, int], str]:
+        """``(x, y) -> item name`` for this map's balls, from the object data's item byte.
+
+        A ball's contents are in the cartridge, so "where is the CARD KEY" is a lookup rather
+        than a building-wide sweep — the hunt that cost two sessions. Cross-checked against the
+        Rocket Hideout, whose two balls extract as SILPH SCOPE and LIFT KEY, both of which this
+        run picked up live.
+        """
+        sprites = self.truth["maps"].get(str(map_id), {}).get("sprites", [])
+        items = self.truth.get("items", {})
+        return {
+            (s["x"], s["y"]): items.get(str(s.get("item")), f"item {s.get('item')}")
+            for s in sprites
+            if s.get("kind") == "item"
+        }
+
     def collect_item(
         self, bx: int, by: int
     ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
@@ -335,8 +352,8 @@ class Rig:
             return False
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
-            near = road.reachable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
-            if not near or not self.approach(near):
+            near = road.walkable(self.truth, self.pairs, mp, (x, y), self.bodies() - {(bx, by)}) & adjacent
+            if not self.approach(near or adjacent):  # no walk reaches it: let a ride try
                 return False
             mp, x, y = self.pos()
             if (x, y) not in adjacent:
@@ -350,7 +367,10 @@ class Rig:
         for _ in range(3):
             self.ctl.press("b")
             self.ctl.wait(25)
-        return self.bag() != before
+        if self.bag() == before:
+            return False
+        self.unlock_gates()  # a key just picked up unlocks its doors for the rest of this leg
+        return True
 
     def party(self) -> list[tuple[str, int, int]]:
         from memory_reader import SPECIES_ID_MAP
@@ -520,7 +540,23 @@ class Rig:
         here = self.pos()
         if here[0] == mp and here[1:] in cells:
             return True
-        if self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET:
+        # A region whose only door is a pad is invisible to both the walk and the oracle, because
+        # both plan over tiles and a pad is a tile you cannot stand on by planning. Ride it.
+        # Measured on Silph 5F: the card-key corridor is unreachable on foot from every cell on
+        # the floor and one step from the pad at (27,3), and three legs died on that difference.
+        # Only on a facility floor. A "warp" on a city map is a building's front door, not a
+        # teleport pad: riding Saffron's Silph entrance walks into the lobby and back out, and a
+        # leg trying to reach the gym past its guard did that eighty times before the hop cap
+        # stopped it.
+        facility = self.truth["maps"].get(str(mp), {}).get("tileset") == road.FACILITY_TILESET
+        if facility and road.ride_pad(self.io, self.truth, self.pairs, mp, cells, battle=self.battle):
+            return True
+        here = self.settled_pos()
+        if here[0] == mp and here[1:] in cells:
+            return True
+        if here[0] != mp:  # a ride left us on another floor; the caller's map is no longer ours
+            return False
+        if facility:
             self.oracle_goto(lambda p: p[0] == mp and (p[1], p[2]) in cells)
         here = self.pos()
         return here[0] == mp and here[1:] in cells
@@ -536,7 +572,23 @@ class Rig:
         return road.pass_gate(self.io, self.truth, self.pairs, cur, goal_cells, **kw)
 
     def bodies(self) -> set[tuple[int, int]]:
-        return road.live_bodies(self.io)
+        """Live sprites, clipped to this map. Unused sprite slots decode to off-map coordinates,
+        and an off-map "blocker" is one a leg will walk across the floor to argue with."""
+        m = self.truth["maps"].get(str(self.pos()[0]))
+        return road.live_bodies(self.io, (m["width"], m["height"]) if m else None)
+
+    def say(self, text: str, kind: str = "dialogue") -> None:
+        """Record something the game said, where it said it, into the run's event stream.
+
+        The Rig reads dialogue constantly — a guru naming his rod, a boss conceding Silph, a door
+        asking for a CARD KEY — and until now it only *printed* it. So the sink could not answer
+        "when did the game tell us about X": a search across every captured event for SURF, HM or
+        SOULBADGE returned nothing, while all of it had been on screen and in a log file.
+        """
+        if not (text or "").strip():
+            return
+        mp, x, y = self.pos()
+        self.emit("discovery", map=mp, x=x, y=y, kind=kind, text=text[:300])
 
     def talk(self, face: str) -> str:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Face and read: the pages a body gives up. What the game says IS the instruction stream."""
@@ -695,6 +747,196 @@ class Rig:
             self.ctl.press("b")
             self.ctl.wait(30)
         return False
+
+    ADDR_BATTLE_COL = 0xCC25  # the battle menu's column: 9 = left (FIGHT/ITEM), 15 = right (PKMN/RUN)
+
+    def battle_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Switch the active battler to party slot ``index``, mid-fight.
+
+        This is what lets a level-5 recruit earn from a level-16 wild: it is sent out first, then
+        swapped before it can be hit, and a Pokemon that was out — and did not faint — takes a
+        share of the experience. Magikarp knows only SPLASH, so leaving it in is not an option:
+        the first grind lap on Route 6 ended with it fainted and earning nothing while Dugtrio
+        banked 125 EXP.
+
+        The battle menu is two-dimensional and neither axis is the list cursor used everywhere
+        else: 0xCC26 is the row (0 = FIGHT/PKMN, 1 = ITEM/RUN) and 0xCC25 the column (9 left,
+        15 right), so PKMN is row 0 in the right column.
+        """
+        if not self.ag._await_battle_menu():
+            return False
+        for _ in range(4):
+            if self.mem[qm.ADDR_MENU_CUR] == 0:
+                break
+            self.ctl.press("up")
+            self.ctl.wait(20)
+        for _ in range(4):
+            if self.mem[self.ADDR_BATTLE_COL] >= 15:
+                break
+            self.ctl.press("right")
+            self.ctl.wait(20)
+        if self.mem[qm.ADDR_MENU_CUR] != 0 or self.mem[self.ADDR_BATTLE_COL] < 15:
+            return False
+        self.ctl.press("a")  # PKMN -> the party list
+        self.ctl.wait(70)
+        if not self.menu_cursor_to(index):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        # SWITCH / STATS / CANCEL, drawn over the roster exactly as the field menu is.
+        for candidate in range(3):
+            if not self.menu_cursor_to(candidate, presses=5):
+                continue
+            self.ctl.press("a")
+            self.ctl.wait(70)
+            said = self.dialogue().upper()
+            if "GO!" in said or "COME BACK" in said or "ENOUGH" in said:
+                return True
+            for _ in range(2):
+                self.ctl.press("b")
+                self.ctl.wait(30)
+        return False
+
+    def battle_flee(self) -> bool:  # pragma: no cover - drives the emulator
+        """Run from the current battle. RUN is the bottom-right of the 2x2 battle menu.
+
+        The escape hatch a fragile lead needs: when the swap fails, fighting on with SPLASH is
+        how a level-5 Magikarp faints, and a fainted participant earns nothing. Fleeing costs the
+        experience of one encounter and keeps the recruit.
+        """
+        if not self.ag._await_battle_menu():
+            return False
+        for _ in range(4):
+            if self.mem[qm.ADDR_MENU_CUR] == 1:
+                break
+            self.ctl.press("down")
+            self.ctl.wait(20)
+        for _ in range(4):
+            if self.mem[self.ADDR_BATTLE_COL] >= 15:
+                break
+            self.ctl.press("right")
+            self.ctl.wait(20)
+        self.ctl.press("a")
+        self.ctl.wait(60)
+        for _ in range(6):
+            if not self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        return not self.mem[qm.ADDR_IN_BATTLE]
+
+    def lead_swap(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Move the party member at ``index`` into slot 0, so it is sent out first.
+
+        Only a Pokemon that is *sent out* earns a share of the fight, which is the whole mechanic
+        behind grinding a weak recruit with a strong bench. The flow is read, not counted: the
+        start menu's POKeMON entry must be matched on "MON" because "POK" also matches POKeDEX
+        (measured — that mis-match opened the Pokedex), the roster shows nicknames so the member
+        is chosen by index, and its submenu is STATS / SWITCH / CANCEL.
+        """
+        roster = [name for name, _lvl, _hp in self.party()]
+        if not 0 <= index < len(roster) or index == 0:
+            return index == 0
+
+        def bail() -> bool:
+            # A failed swap must not strand its own menus open. Measured on the karp grind:
+            # a silent failure here left the START menu up, every following step was swallowed,
+            # and the heal trip's first hop reported "refused" against a road that was clear.
+            for _ in range(8):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
+
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.press("start")
+        self.ctl.wait(70)
+        if not self.menu_choose("MON"):
+            return bail()
+        self.ctl.wait(60)
+        if not self.menu_cursor_to(index):
+            return bail()
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        if not any("SWITCH" in t.upper() for _i, t in self.menu_rows(0, 20)):
+            return bail()
+        # Measured on this screen: the submenu renders STATS(12) / SWITCH(14) / CANCEL(16) with
+        # the cursor capped at 2, so SWITCH is index 1 — and the highlighted row is the one whose
+        # space is eaten by the cursor glyph ('Choose a PSWITCH'). Index arithmetic over the rows
+        # cannot be used here because the roster underneath is also two rows apart.
+        if not self.menu_cursor_to(1, presses=6):
+            return bail()
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        if not self.menu_cursor_to(0, presses=8):
+            return bail()
+        self.ctl.press("a")
+        self.ctl.wait(70)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        now = [name for name, _lvl, _hp in self.party()]
+        swapped = now and now[0] == roster[index]
+        print(f"  lead is now {now[0] if now else '?'}" if swapped else f"  swap failed; lead is {now[0]}", flush=True)
+        return bool(swapped)
+
+    def use_item(self, name: str, face: str | None = None) -> bool:  # pragma: no cover - drives the emulator
+        """Use a bag item by *name* from the ITEM menu. Returns whether it was selected.
+
+        The engine could use field MOVES and had no way to use an ITEM, which is what a rod is —
+        so with the OLD ROD in the bag there was still no way to fish. The item list scrolls like
+        every other list here (cursor 0xCC26 inside its window, scroll 0xCC36), so the row is read
+        rather than counted, and the entry is matched by the name the game prints.
+
+        Whether it *worked* is the caller's predicate — a rod is proved by a bite, never by a menu
+        having been navigated.
+        """
+        if face:
+            self.ctl.press(face)
+            self.ctl.wait(25)
+        for _ in range(6):  # close anything already open before opening ours
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.press("start")
+        self.ctl.wait(60)
+        # By text, not by index: the start menu grows a PLAYER entry as the game goes on, so
+        # "ITEM is the third row" is the kind of assumption that has cost this project runs.
+        if not self.menu_choose("ITEM"):
+            print("  the START menu did not open", flush=True)
+            return False
+        self.ctl.wait(50)
+        target = name.strip().upper().replace(" ", "")
+        # The bag renders entries on rows 4/6/8/10 with their quantities interleaved, the cursor
+        # caps at 2, and the list scrolls under it — so the highlighted row is 4 + 2*cursor and
+        # the walk needs one step per item, not a fixed count.
+        for _ in range(len(self.bag()) + 4):
+            row = self.window_row(4 + 2 * self.mem[qm.ADDR_MENU_CUR]).upper().replace(" ", "")
+            if target and target in row:
+                self.ctl.press("a")
+                self.ctl.wait(55)
+                return self.menu_choose("USE") or True  # some items skip the USE/TOSS submenu
+            self.ctl.press("down")
+            self.ctl.wait(18)
+        print(f"  no bag item called {name!r}", flush=True)
+        for _ in range(6):
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        return False
+
+    def fish(self, rod: str, face: str) -> bool:  # pragma: no cover - drives the emulator
+        """Cast ``rod`` while facing ``face``. A bite is a battle; that is the only proof."""
+        if not self.use_item(rod, face=face):
+            return False
+        # "Oh! It's a bite!" comes several frames before the battle flag flips, and reading the
+        # flag too early reports a cast that hooked something as a miss — measured on Vermilion's
+        # dock, twelve casts that all bit and all read as failures.
+        for _ in range(12):
+            if self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            self.ctl.press("a")
+            self.ctl.wait(60)
+        return bool(self.mem[qm.ADDR_IN_BATTLE])
 
     def surf_onto(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Ride onto water. The predicate is the position, never the menu."""
@@ -945,6 +1187,395 @@ class Rig:
 
     # ---- banking --------------------------------------------------------------------------
 
+    def unlock_gates(self) -> int:
+        """Drop every measured door gate that names an item now in the bag. Returns how many.
+
+        Called on boot and after each pickup, because the bag is what turns a locked door into a
+        door. The CARD KEY was taken on 5F and the very next leg planned as though it had not
+        been: `no-path` on 3F -> 7F, our own model refusing a route the world would have allowed.
+        """
+        held = {name for name, _qty in self.bag_named()}
+        if not held:
+            return 0
+        opened = 0
+        for m in self.truth.get("maps", {}).values():
+            gates = m.get("gates")
+            if not gates:
+                continue
+            kept = rt.gates_the_bag_opens(gates, held)
+            opened += len(gates) - len(kept)
+            m["gates"] = kept
+        if opened:
+            print(f"  the bag opens {opened} measured door gate(s)", flush=True)
+        return opened
+
+    # A Center's PC is neither a sign nor a sprite — the extraction has nothing for it, because it
+    # is a tile you press A into. Measured by sweeping the interior's northern boundary on
+    # Cerulean's map 64: from (13,4) facing up the screen says "AAAAAAA turned on the PC." and the
+    # window renders BILL's PC / <player>'s PC / PROF.OAK's PC / LOG OFF. Every Center shares the
+    # 14x8 tileset-6 interior, so the cell is a template like the nurse's counter.
+    CENTER_PC = ((13, 4), "up")
+
+    def center_pc(self, map_id: int) -> tuple[tuple[int, int], str] | None:
+        """Where to stand and face to turn on the PC, if this map is a Pokemon Center."""
+        return self.CENTER_PC if self.center_counter(map_id) else None
+
+    def menu_rows(self, first: int = 0, last: int = 18) -> list[tuple[int, str]]:
+        """The window layer's non-empty rows — menus render there, never to the background."""
+        return [(i, t) for i in range(first, last) if (t := self.window_row(i)).strip()]
+
+    def menu_shows(self, wanted: str, tries: int = 6) -> bool:
+        """Wait — without pressing anything — until the window renders ``wanted``.
+
+        This used to press A while it looked, and that is how Charizard and then Dugtrio ended up
+        in a box: inside a list, A confirms the highlighted entry. Two traps make "is it safe to
+        press?" unanswerable from the screen: the window keeps showing the *previous* menu while a
+        box is up ("Accessed my PC."), and the text buffer stays stale after the box closes. So
+        this only ever looks, and every press lives at a call site that knows what it is pressing.
+        """
+        for _ in range(tries):
+            if any(wanted.upper() in text.upper() for _i, text in self.menu_rows()):
+                return True
+            self.ctl.wait(40)
+        return any(wanted.upper() in text.upper() for _i, text in self.menu_rows())
+
+    def advance_text(self, expect: str, tries: int = 8) -> bool:
+        """Press A through a text box until the window changes, then judge the new menu.
+
+        Safe *only* where the screen is known to be a box rather than a list: "Accessed BILL's
+        PC." takes several presses to clear, and one press is not enough. It stops the moment the
+        rows change, so it can never walk on into a list and confirm an entry there — which is
+        exactly what an unbounded version did when it deposited Charizard and then Dugtrio.
+        """
+        avoid = [name.upper() for name, _lvl, _hp in self.party()]
+        for _ in range(tries):
+            rows = self.menu_rows()
+            if any(expect.upper() in text.upper() for _i, text in rows):
+                return True
+            # The party list is the one screen where A commits something. Recognise it by its own
+            # contents — the roster is right there in RAM — and stop before pressing into it.
+            if any(any(who in text.upper() for who in avoid) for _i, text in rows):
+                return False
+            self.ctl.press("a")
+            self.ctl.wait(50)
+        return any(expect.upper() in text.upper() for _i, text in self.menu_rows())
+
+    def list_index(self) -> int:
+        """Which entry a scrolling list has highlighted: cursor within the window PLUS scroll.
+
+        Measured on the deposit roster: ``0xCC26`` caps at 2 (a three-row window) while ``0xCC36``
+        counts how far the list has scrolled, so reading only the cursor picks the wrong member
+        for anything past the third slot.
+        """
+        return self.mem[qm.ADDR_MENU_CUR] + self.mem[ADDR_LIST_SCROLL]
+
+    def menu_cursor_to(self, index: int, presses: int = 16) -> bool:
+        """Walk a scrolling list's highlight to ``index``, judged by cursor + scroll."""
+        for _ in range(presses):
+            at = self.list_index()
+            if at == index:
+                return True
+            self.ctl.press("down" if at < index else "up")
+            self.ctl.wait(20)
+        return self.list_index() == index
+
+    def menu_choose(self, wanted: str, *, presses: int = 12) -> bool:
+        """Move the menu cursor onto the entry whose text contains ``wanted`` and press A.
+
+        Selection is by *decoded text*, never by a remembered position. The PC's own menu is why:
+        it lists WITHDRAW, DEPOSIT, RELEASE and CHANGE BOX, and choosing by index would one day
+        release a party member because a menu shifted. Entries render every other row, so the
+        cursor index is ``(row - first_row) // 2``, and the cursor register is the ground truth
+        for where it currently sits.
+        """
+        rows = self.menu_rows()
+        if not rows:
+            return False
+        hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
+        if hit is None:
+            return False
+        # Menus OVERLAY: choosing DEPOSIT renders the party list on top of the box menu, and the
+        # follow-up DEPOSIT/STATS/CANCEL renders on top of *that* — measured rows read
+        # ('WI', 'DE'+nickname, 'RE GLOOM', ..., (12, 'DEPOSIT')). So the cursor index is measured
+        # from the first row of the block the match sits in, not from the first row on screen; the
+        # old arithmetic put the cursor five entries down a five-entry list.
+        present = {i for i, _t in rows}
+        block_start = hit
+        # A block is entries two rows apart with nothing between them. The roster interleaves its
+        # levels on the odd rows ((8,'CHGLOOM'),(9,'99')), and the DEPOSIT/STATS/CANCEL confirm
+        # renders *below* all of that at row 12 — so walking back without checking the odd row
+        # crossed into the roster and put the cursor five entries down a three-entry menu.
+        while block_start - 2 in present and block_start - 1 not in present:
+            block_start -= 2
+        want = (hit - block_start) // 2
+        for _ in range(presses):
+            cur = self.mem[qm.ADDR_MENU_CUR]
+            if cur == want:
+                break
+            self.ctl.press("down" if cur < want else "up")
+            self.ctl.wait(20)
+        if self.mem[qm.ADDR_MENU_CUR] != want:
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(45)
+        return True
+
+    def pc_store_item(self, name: str) -> bool:  # pragma: no cover - drives the emulator
+        """Put one bag item into the PC's item storage. The bag shrinking is the proof.
+
+        The bag caps at twenty slots and a full bag refuses purchases outright — Vermilion's mart
+        failed at "confirm purchase" with no explanation, and the leg needed Poke Balls for a
+        catch. `make_room` only helps when something is stacked; everything here is a single key
+        item or TM. Storage is the player's OWN PC — the one whose menu is WITHDRAW ITEM /
+        DEPOSIT ITEM / TOSS ITEM — which is the same screen that was mistaken for the Pokemon box.
+        """
+        spot = self.center_pc(self.pos()[0])
+        if spot is None or not self.approach({spot[0]}):
+            return False
+        before = self.bag_named()
+        if not any(item == name for item, _qty in before):
+            return False
+        self.ctl.press(spot[1])
+        self.ctl.wait(25)
+        for _ in range(4):
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            if self.menu_rows():
+                break
+        own = next(
+            (
+                t
+                for _i, t in self.menu_rows()
+                if "PC" in t.upper() and "BILL" not in t.upper() and "OAK" not in t.upper()
+            ),
+            None,
+        )
+        if own is None or not self.menu_choose(own):
+            return False
+        if not self.advance_text("DEPOSIT") or not self.menu_choose("DEPOSIT ITEM"):
+            return False
+        if not self.menu_shows(name) or not self.menu_choose(name):
+            return False
+        for _ in range(4):  # quantity prompt defaults to one, then the confirm
+            if len(self.bag_named()) < len(before):
+                break
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        self.ctl.wait(40)  # the bag count settles a few frames after the box closes
+        stored = len(self.bag_named()) < len(before)
+        print(f"  {'stored' if stored else 'could not store'} {name}; bag now {len(self.bag_named())}/20", flush=True)
+        return stored
+
+    def pc_deposit(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Deposit the party member at ``index`` into Bill's PC. The party shrinking is the proof.
+
+        By index, not by name: the list renders *nicknames* — this run's lead shows as
+        "AAAAAAAAAA", not CHARIZARD — so matching a species name there can never work. Every A
+        press below is at a step whose screen is known; nothing presses A while searching.
+
+        BILL's PC is the Pokemon box. The player's own PC is the item storage system (WITHDRAW
+        ITEM / DEPOSIT ITEM / TOSS ITEM), and picking it because it carries the player's name is
+        exactly the recalled assumption this repo forbids — measured wrong, one menu at a time.
+        """
+        spot = self.center_pc(self.pos()[0])
+        if spot is None or not self.approach({spot[0]}):
+            return False
+        before = len(self.party())
+        self.ctl.press(spot[1])
+        self.ctl.wait(25)
+        for _ in range(4):  # A through "turned on the PC." until the top menu renders
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            if self.menu_rows():
+                break
+        if not self.menu_choose("BILL"):
+            return False
+        if not self.advance_text("DEPOSIT"):  # "Accessed BILL's PC." -> the box submenu
+            return False
+        if not self.menu_choose("DEPOSIT"):
+            return False
+        roster = [name for name, _lvl, _hp in self.party()]
+        if not 0 <= index < len(roster) or not self.menu_cursor_to(index):
+            return False
+        self.ctl.press("a")  # pick that party member -> the confirm menu
+        self.ctl.wait(50)
+        if not self.menu_shows("DEPOSIT"):
+            return False
+        # The confirm menu names its own order on screen: "DEPOSIT What? STATS CANCEL". Its rows
+        # cannot be told apart from the roster's by shape — the roster's sixth level row is cut
+        # off, so DEPOSIT at row 12 looks like a continuation of the entry at row 10, and the
+        # block arithmetic picked STATS. So drive it by position and *verify*: STATS is harmless
+        # and backs out with B, which makes a wrong pick recoverable rather than a guess.
+        for candidate in range(3):
+            if not self.menu_cursor_to(candidate, presses=6):
+                continue
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            for _ in range(3):
+                if len(self.party()) < before:
+                    break
+                self.ctl.press("a")
+                self.ctl.wait(45)
+            if len(self.party()) < before:
+                break
+            rows = self.menu_rows()
+            if any("ATTACK" in t.upper() or "EXP POINTS" in t.upper() for _i, t in rows):
+                for _ in range(3):  # a stats page: back out and try the next entry
+                    self.ctl.press("b")
+                    self.ctl.wait(30)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        # The species that left must be the one we chose. A deposit is irreversible from the
+        # leg's point of view, and this run has already watched a menu bug take Charizard off
+        # the bench twice; "the party got smaller" is not proof that the right one went.
+        left = [n for n in roster if roster.count(n) > [x for x, _l, _h in self.party()].count(n)]
+        if left != [roster[index]]:
+            self.emit("pc.deposit_mismatch", wanted=roster[index], left=left)
+            print(f"  WARNING: meant to deposit {roster[index]}, the party lost {left}", flush=True)
+            return False
+        print(f"  deposited {roster[index]}; party is now {[n for n, _l, _h in self.party()]}", flush=True)
+        return True
+
+    def grass_lanes(self, map_id: int) -> list[tuple[int, int]]:
+        """The two extreme grass cells on a map — a lane to pace for encounters.
+
+        Where to roam comes from the ROM's own grass tiles, never from lore. Pacing between the
+        extremes keeps crossing fresh tiles instead of rolling the same one, which is what the
+        recruit grinds measured as the difference between fights and a step counter going up.
+        """
+        cells = [tuple(c) for c in self.truth["maps"].get(str(map_id), {}).get("grass", [])]
+        if not cells:
+            return []
+        # Only grass we can actually stand on. The extremes of the whole map are not a lane:
+        # Route 2's 84 grass cells are all outside the 144-cell region a leg arriving from
+        # Diglett's Cave can reach, so a roam aimed at them walked nowhere and rolled no
+        # encounters at all — twelve thousand laps of a level-5 Magikarp staying level 5.
+        mp, x, y = self.pos()
+        if mp == map_id:
+            here = road.walkable(self.truth, self.pairs, map_id, (x, y), self.bodies())
+            reachable_cells = [c for c in cells if c in here]
+            if not reachable_cells:
+                print(f"  no grass reachable on map {map_id} from {(x, y)}", flush=True)
+                return []
+            cells = reachable_cells
+        return [min(cells, key=lambda c: (c[1], c[0])), max(cells, key=lambda c: (c[1], c[0]))]
+
+    def roam_grass(self, map_id: int, until, laps: int = 40) -> bool:  # pragma: no cover - drives the emulator
+        """Pace this map's grass until ``until()`` says stop. Battles are the point, not a failure."""
+        lanes = self.grass_lanes(map_id)
+        if not lanes:
+            return False
+        for lap in range(laps):
+            for target in (lanes[lap % 2], lanes[(lap + 1) % 2]):
+                if until():
+                    return True
+                self.walk(map_id, {target}, cap=200)
+                if self.pos()[0] != map_id:  # a battle or a door moved us off the lane
+                    return until()
+        return until()
+
+    def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
+        """Where to stand and which way to face to be healed, if this map is a Pokemon Center.
+
+        A nurse is not an ordinary body: she stands *behind a counter*, so no cell is adjacent to
+        her and `engage_bodies` — which only ever walks to a neighbouring tile — cannot meet her.
+        Measured cost: a leg reached Saffron's Center, talked to all three idle NPCs (growth
+        rates, Silph gossip, the Cable Club), and reported the heal refused with three fainted
+        party members.
+
+        The geometry is one template, verified live at Cerulean, Pewter and Vermilion
+        (`quartermaster.CENTERS`): nurse sprite at (3,1), player at (3,3), facing up. Saffron's
+        map 182 is the same 14x8 tileset-6 interior with the same nurse tile, which is how it was
+        identified — by signature, not by recall.
+        """
+        m = self.truth["maps"].get(str(map_id))
+        if not m or (m["width"], m["height"], m["tileset"]) != (14, 8, 6):
+            return None
+        if not any(s["kind"] == "npc" and (s["x"], s["y"]) == (3, 1) for s in m.get("sprites", [])):
+            return None
+        return (3, 3), "up"
+
+    def heal_at_center(self) -> bool:
+        """Stand at this map's nurse counter and A through the heal until the party reads full.
+
+        ``center_counter`` knows where to stand — the nurse is *behind* the counter, adjacent to
+        no cell, so talking to bodies can never meet her. The judge is quartermaster's party
+        read, every member back at its own max: ``party()`` carries no max HP, and "nobody
+        fainted" is already true before the top-off heal a grind leg comes in for.
+        """
+        counter = self.center_counter(self.pos()[0])
+        if counter is None:
+            print(f"  map {self.pos()[0]} is not a Center — nowhere to heal", flush=True)
+            return False
+        cell, face = counter
+
+        def full() -> bool:
+            party = qm.read_party(self.io)
+            return bool(party) and all(p["hp"] == p["max_hp"] for p in party)
+
+        if full():
+            return True
+        if not self.approach({cell}):
+            print(f"  could not reach the nurse's counter at {cell}", flush=True)
+            return False
+        for _ in range(3):
+            try:
+                qm.heal(self.io, face)
+            except qm.QuartermasterError:
+                continue
+            if full():
+                return True
+        return full()
+
+    def step_off_targets(self, map_id: int, x: int, y: int) -> list[tuple[str, tuple[int, int]]]:
+        """Directions off a warp tile that land on ordinary floor — doors excluded, in order."""
+        m = self.truth["maps"].get(str(map_id))
+        if not m:
+            return []
+        warps = self.warp_tiles(map_id)
+        out = []
+        for direction, (dx, dy) in (("up", (0, -1)), ("down", (0, 1)), ("left", (-1, 0)), ("right", (1, 0))):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < m["width"] and 0 <= ny < m["height"]):
+                continue
+            if m["grid"][ny][nx] != "1" or (nx, ny) in warps:
+                continue
+            if not rt.passable(m, self.pairs, x, y, nx, ny):
+                continue
+            out.append((direction, (nx, ny)))
+        return out
+
+    def _step_off_mat(self, mp: int, x: int, y: int) -> bool:  # pragma: no cover - drives the emulator
+        """Try each floor-ward neighbour, undoing any step that leaves the map.
+
+        A mat's neighbours can fire too — Silph 3F's (11,11) sits beside another door, and the
+        step-off went straight back to 7F, so the *next* leg booted on the wrong side of the
+        building and spent its budget trying to get back. A step that changes the map is not a
+        step off the mat, so it is rolled back and the next direction tried.
+        """
+        import io as _io
+
+        def snap():
+            buf = _io.BytesIO()
+            self.pb.save_state(buf)
+            return buf
+
+        before = snap()
+        for direction, cell in self.step_off_targets(mp, x, y):
+            self.ctl.press(direction)
+            self.ctl.wait(30)
+            if self.pos() == (mp, *cell):
+                print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
+                return True
+            before.seek(0)
+            self.pb.load_state(before)  # that neighbour was a door too; undo and try another
+        print(f"  WARNING: could not step off the warp mat at ({x}, {y}) on {mp}", flush=True)
+        return False
+
     def bank(
         self, name: str, *, directory: Path | None = None
     ) -> Path:  # pragma: no cover - writes and reloads a real save state
@@ -954,12 +1585,32 @@ class Rig:
         step swallowed) and one banked standing ON a warp mat, which boots back through the door
         it just came out of. Settle first, step off the door if we are on it, then save.
         """
-        self.settle()
+        import io as _io
+
+        arrival = self.pos()[0]
+        entry = _io.BytesIO()
+        self.pb.save_state(entry)  # the map we were asked to bank; anything else is not it
         mp, x, y = self.pos()
         if (x, y) in self.warp_tiles(mp):
-            self.probe_step()  # step off the mat; the undo is skipped when the step warps
-            if self.pos()[:1] == (mp,) and self.pos()[1:] != (x, y):
-                print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
+            # Step off BEFORE settling. `settle`'s probe will use a door when every neighbour is
+            # one, and Silph 3F's (11,11) mat is surrounded by them — so settling first fired the
+            # warp and the baton recorded (212,5,3), a floor away from the leg that had just
+            # arrived. Two chained legs booted on the wrong side of the building that way.
+            self._step_off_mat(mp, x, y)
+        self.settle()
+        if self.pos()[0] != arrival:
+            print(f"  banking on {arrival} but settling left us on {self.pos()[0]} — rolling back", flush=True)
+            entry.seek(0)
+            self.pb.load_state(entry)
+        mp, x, y = self.pos()
+        if (x, y) in self.warp_tiles(mp):
+            # A real step, not a probe. `probe_step` presses and *undoes*, which leaves us on the
+            # mat, and the reload check cannot see the problem because an in-process reload does
+            # not settle. Booting that baton in a fresh process does, and the settle walks out
+            # through the door: Saffron's Center banked at (182,3,7) came back up in the city,
+            # and the leg spent its ladder trying to get back in. A Center has two mats side by
+            # side, so the escape has to prefer a neighbour that is not itself a door.
+            self._step_off_mat(mp, x, y)
         path = (directory or BATON_DIR) / f"{name}.state"
         path.parent.mkdir(parents=True, exist_ok=True)
         expected = self.settled_pos()

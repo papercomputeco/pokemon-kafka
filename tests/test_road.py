@@ -496,22 +496,317 @@ def test_cut_until_open_proves_the_cut_by_stepping(monkeypatch):
     assert "up" in io.presses
 
 
-def test_cut_until_open_gives_up_after_its_tries():
+@pytest.fixture
+def cut_read_pos(monkeypatch):
+    """`cut_until_open`'s fake reads position off `io.pos`. Patch it through monkeypatch so the
+    replacement is undone: assigning `road.read_pos` directly leaked into every later test in
+    this file, and the first one to use another fake io died on `'RoadIO' has no attribute pos`."""
+    monkeypatch.setattr(road, "read_pos", lambda i: i.pos)
+
+
+def test_cut_until_open_gives_up_after_its_tries(cut_read_pos):
     io = CutIO(cuts=99)
     import rom_truth  # noqa: F401  (road.read_pos is imported at module scope)
 
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up", tries=2) is False
 
 
-def test_cut_until_open_succeeds_on_the_step_after_the_cut():
+def test_cut_until_open_succeeds_on_the_step_after_the_cut(cut_read_pos):
     io = CutIO(cuts=1)
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up") is True
 
 
-def test_cut_until_open_returns_at_once_when_the_way_is_already_clear():
+def test_cut_until_open_returns_at_once_when_the_way_is_already_clear(cut_read_pos):
     io = CutIO(cuts=0)
-    road.read_pos = lambda i: i.pos
     assert road.cut_until_open(io, {}, set(), "up") is True
     assert "a" not in io.presses  # no menu was opened; the step just worked
+
+
+def test_walkable_treats_pads_as_walls_and_reachable_does_not():
+    """Silph 5F in miniature: the only path to the right-hand corridor crosses a warp pad.
+
+    `reachable` (terrain) says the corridor is open; `walk` refuses to thread a door tile as
+    floor, so the corridor is unreachable on foot and nine steps from the pad. Two sessions of
+    "the model says reachable and the engine refuses" were this disagreement.
+    """
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 22,
+                "grid": ["11111"],
+                "warps": [[2, 0, 7, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    pairs = set()
+    assert (4, 0) in road.reachable(truth, pairs, 1, (0, 0))
+    assert (4, 0) not in road.walkable(truth, pairs, 1, (0, 0))
+    assert (4, 0) in road.walkable(truth, pairs, 1, (3, 0))  # already past the pad
+    # The pad itself stays open when it is the target of the walk, matching `walk`'s own rule.
+    assert (2, 0) in road.walkable(truth, pairs, 1, (0, 0), keep={(2, 0)})
+
+
+def test_pads_reaching_names_the_ride_into_a_cut_off_corridor():
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 22,
+                "grid": ["11111"],
+                "warps": [[2, 0, 7, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    assert road.pads_reaching(truth, set(), 1, {(4, 0)}) == [((2, 0), 7)]
+    assert road.pads_reaching(truth, set(), 1, {(0, 0)}) == [((2, 0), 7)]
+
+
+def test_ride_pad_enters_a_region_whose_only_door_is_a_pad():
+    """Silph 5F in miniature. Row 3 is `..P#` — the pad at x=2 is the only way to x=3, so `walk`
+    (which treats pads as walls) can never deliver us there. Riding it lands on the far map,
+    stepping off and back on returns us STANDING on the pad, and from there x=3 is one step."""
+    truth = {
+        "maps": {
+            "1": _map(["1111"], warps=[[2, 0, 2, 0]]),
+            "2": _map(["111"], warps=[[1, 0, 1, 0]]),
+        }
+    }
+    # Each pad fires on arrival, sending us to the other map's warp tile.
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (2, 1, 0), (2, 1, 0): (1, 2, 0)})
+    assert road.walkable(truth, set(), 1, (0, 0)) == {(0, 0), (1, 0)}  # the walk cannot get there
+    assert road.ride_pad(io, truth, set(), 1, {(3, 0)}) is True
+    assert (io.mem[qm.ADDR_MAP], io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y]) == (1, 3, 0)
+
+
+def test_ride_pad_reports_failure_when_no_pad_stands_in_the_region():
+    truth = {"maps": {"1": _map(["1101"], warps=[])}}
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.ride_pad(io, truth, set(), 1, {(3, 0)}) is False
+
+
+def test_live_bodies_clips_to_the_map_it_is_standing_on():
+    """The sprite table has sixteen slots and the unused ones decode to coordinates that are not
+    on any map. Silph 3F is 30x18 and a leg was told the body severing its hop stood at (18,22),
+    four rows past the south wall — then walked over to engage it, opened the pause menu, and
+    recorded "OPTION EXIT" as what the blocker said."""
+
+    class SpriteIO:
+        def __init__(self, cells):
+            self.cells = cells
+
+        def read(self, addr):
+            for i, (x, y) in enumerate(self.cells, start=1):
+                if addr == road.SPRITE_STATE_BASE + i * 0x10:
+                    return 1
+                if addr == road.SPRITE_DATA_BASE + i * 0x10 + 5:
+                    return x + 4
+                if addr == road.SPRITE_DATA_BASE + i * 0x10 + 4:
+                    return y + 4
+            return 0
+
+    io = SpriteIO([(7, 9), (18, 22)])
+    assert road.live_bodies(io) == {(7, 9), (18, 22)}  # unclipped: the junk slot is a "body"
+    assert road.live_bodies(io, (30, 18)) == {(7, 9)}  # clipped to the floor we are standing on
+
+
+def test_a_warp_tile_is_never_an_approach_cell():
+    """`keep` exists for the target of a walk, not for the cell you stand on to reach one. Passing
+    the whole adjacency as `keep` let a leg "walk next to the blocker" by stepping onto Saffron's
+    Silph entrance — it warped indoors, walked back out, and did that until the hop cap fired."""
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 0,
+                "grid": ["11111"],
+                "warps": [[3, 0, 9, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    adjacent = {(3, 0), (1, 0)}  # (3,0) is the door beside the body at (4,0); (1,0) is floor
+    assert road.walkable(truth, set(), 1, (0, 0)) & adjacent == {(1, 0)}
+
+
+def test_ride_pad_handles_an_intra_map_pad_that_teleports_within_the_floor():
+    """Sabrina's gym is a pad maze: 30 of its 32 warps point at itself, so riding one lands you
+    elsewhere on the SAME map and there is no far side to come back from. A leg that only knew
+    how to ride between maps met the guide at the door and called the floor engaged."""
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[2, 0, 1, 0], [5, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 5, 0)})
+    assert (6, 0) not in road.walkable(truth, set(), 1, (0, 0))  # unreachable on foot
+    assert road.ride_pad(io, truth, set(), 1, {(6, 0)}) is True
+    assert (io.mem[qm.ADDR_MAP], io.mem[qm.ADDR_X]) == (1, 6)
+
+
+def test_ride_pad_chains_hops_through_a_maze():
+    """One ride is enough for Silph's floors; Sabrina's gym is thirty pads deep, and the pocket
+    holding a trainer sits several rides from the door."""
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 0], [4, 0, 1, 0], [6, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 4, 0), (1, 4, 0): (1, 6, 0)})
+    assert (8, 0) not in road.walkable(truth, set(), 1, (0, 0))
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}) is True
+    assert io.mem[qm.ADDR_X] == 8
+
+
+def test_ride_pad_stops_after_its_hop_budget():
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 0, 0)})  # a pad that loops us home
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}, rides=2) is False
+
+
+def test_pad_land_resolves_the_same_map_destination_not_the_others():
+    # 255 (0xFF) is the ROM's "this map" destination and its index reads the map's own warp list.
+    m = _map(["1" * 7], warps=[[2, 0, 255, 1], [3, 0, 1, 0], [5, 0, 2, 0]])
+    road.truth = {"maps": {"1": m, "2": m}}
+    assert road.pad_land(road.truth, 1, [2, 0, 255, 1]) == (3, 0)
+    assert road.pad_land(road.truth, 1, [3, 0, 1, 0]) == (2, 0)
+    assert road.pad_land(road.truth, 1, [5, 0, 2, 0]) is None  # a door to another map is not the graph
+    assert road.pad_land(road.truth, 1, [2, 0, 255, 9]) is None  # an index past the list is a decode lie
+
+
+def test_pad_route_orders_the_rides_the_table_order_hunt_gives_up_on():
+    # (2,0) and (5,0) ride at each other; (7,0) rides home and opens the last pocket. The table
+    # lists (7,0) LAST, so the nearest-use hunt stands on (5,0)'s pocket and never rides it — the
+    # BFS says ride (2,0), then (7,0), and the walk takes the last two steps.
+    road.truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [7, 0, 1, 2]])}}
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}) == [(2, 0), (7, 0)]
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(1, 0)}) == []  # a plain walk covers it
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {}) is None
+
+
+def test_pad_route_says_ride_your_own_pad_when_it_is_the_only_exit():
+    # Standing ON a pad does not fire it. When that pad's landing pocket holds the target, the
+    # route is the pad itself — the caller re-fires it by stepping off and back on.
+    road.truth = {"maps": {"1": _map(["1" * 7], warps=[[1, 0, 1, 1], [4, 0, 1, 0]])}}
+    assert road.pad_route(road.truth, set(), 1, (1, 0), {(5, 0)}) == [(1, 0)]
+
+
+def test_pad_route_sees_the_bodies_severing_the_pocket():
+    road.truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0]])}}
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}) == [(2, 0)]
+    assert road.pad_route(road.truth, set(), 1, (0, 0), {(8, 0)}, bodies={(6, 0), (7, 0)}) is None
+
+
+def test_ride_pad_rides_the_routed_sequence_and_walks_the_rest():
+    truth = {"maps": {"1": _map(["1" * 9], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [7, 0, 1, 2]])}}
+    io = RoadIO(truth, (1, 0, 0), arrive={(1, 2, 0): (1, 5, 0), (1, 7, 0): (1, 7, 0)})
+    assert road.ride_pad(io, truth, set(), 1, {(8, 0)}, rides=3) is True
+    assert qm.read_pos(io) == (1, 8, 0)
+    assert io.pressed.count("right") == 5  # the route: (1,0), (2,0), (6,0), (7,0), (8,0)
+
+
+def test_ride_pad_refires_the_pad_its_feet_are_on():
+    # The (9,8) pocket's only exit is its own pad, and we arrive standing on such a pad: the ride
+    # is stepping off it and back on, which is what re-fires it.
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[1, 0, 1, 1], [4, 0, 1, 0]])}}
+    io = RoadIO(truth, (1, 1, 0), arrive={(1, 1, 0): (1, 4, 0)})
+    assert road.ride_pad(io, truth, set(), 1, {(5, 0)}, rides=2) is True
+    assert qm.read_pos(io) == (1, 5, 0)
+
+
+def test_ride_pad_reaches_every_standing_body_in_sabrinas_gym():
+    # The measured shape: 32 warps, every same-map pad riding in 2-cycles (each landing is
+    # another pad tile), five unengaged bodies, and a baton bench at (17,14). The old engine
+    # rode its budget standing in two pockets on all five; the routed engine must reach each,
+    # and stand on the facing cell, within six rides.
+    import rom_truth as rt
+
+    truth = rt.load_truth()
+    pairs = rt.loaded_pairs(truth)
+    m = truth["maps"]["178"]
+    arrive = {
+        (178, w[0], w[1]): (178, land[0], land[1])
+        for w in m["warps"]
+        if (land := road.pad_land(truth, 178, w)) is not None
+    }
+    bodies = {(3, 1), (3, 7), (3, 13), (9, 8), (10, 1), (10, 15)}
+    for body in ((9, 8), (10, 1), (3, 7), (3, 13), (3, 1)):
+        x, y = body
+        ring = {(x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y), (x, y - 2)}
+        ring = {c for c in ring if 0 <= c[0] < m["width"] and 0 <= c[1] < m["height"]}
+        io = RoadIO({"maps": {"178": m}}, (178, 17, 14), arrive=arrive)
+        assert road.ride_pad(io, {"maps": {"178": m}}, pairs, 178, ring, rides=6) is True, f"no ride reaches {body}"
+        assert qm.read_pos(io)[1:] in ring, f"did not stand on the {body} facing cell"
+    # And leaving a dead pocket: standing on (11,11), the (9,8) pocket's only pad, the (10,1)
+    # facing cells are two rides away — the first ride is re-firing the pad under us.
+    ring = {(9, 1), (11, 1), (10, 0), (10, 2)}
+    io = RoadIO({"maps": {"178": m}}, (178, 11, 11), arrive=arrive)
+    assert road.pad_route({"maps": {"178": m}}, pairs, 178, (11, 11), ring, bodies) == [(11, 11), (5, 3)]
+    assert road.ride_pad(io, {"maps": {"178": m}}, pairs, 178, ring, rides=4) is True
+    assert qm.read_pos(io)[1:] in ring
+
+
+def test_pad_route_can_target_a_warp_tile_itself():
+    """A gym's exit mat is a warp tile, and `walkable` calls every warp a wall — so a route TO one
+    is unreachable by construction unless the target stays open. Badge 6 was won at (9,9) behind
+    Sabrina's pads and the next leg burned its whole budget re-trying the mat at (8,17)."""
+    # Pad (2,0) lands on pad (5,0); (6,0) is the exit door to map 9. Walking east from (0,0)
+    # is stopped by the pad at (2,0), exactly as `walk` blocks door tiles.
+    truth = {"maps": {"1": _map(["1" * 7], warps=[[2, 0, 1, 1], [5, 0, 1, 0], [6, 0, 9, 0]])}}
+    assert road.pad_route(truth, set(), 1, (0, 0), {(6, 0)}) == [(2, 0)]  # ride, then step to it
+    assert road.pad_route(truth, set(), 1, (5, 0), {(6, 0)}) == []  # already beside the door
+    assert road.pad_route(truth, set(), 1, (0, 0), {(1, 0)}) == []  # a plain walk reaches it
+
+
+def test_a_walk_that_starts_on_a_door_can_still_plan():
+    """Arriving through a door leaves us standing ON it. Blocking every warp tile then makes the
+    start cell a wall and no plan exists — the bug behind 'could not step off the warp mat' on
+    Silph 3F, the Center exit, and the Safari Zone's arrival pad."""
+    truth = {"maps": {"1": _map(["1111"], warps=[[0, 0, 9, 0]])}}
+    io = RoadIO(truth, (1, 0, 0))  # standing on the door at (0,0)
+    assert road.walk(io, truth, set(), 1, {(3, 0)}) is True
+    assert (io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y]) == (3, 0)
+
+
+def _silph_like():
+    """A floor with two pockets: the left half walks, the right half is entered only by its pad."""
+    return {
+        "maps": {
+            "5": _map(["1111011"], warps=[[2, 0, 7, 0], [6, 0, 7, 1]]),
+            "7": _map(["111"], warps=[[0, 0, 5, 0], [2, 0, 5, 1]]),
+        }
+    }
+
+
+def test_rides_to_names_every_door_that_lands_where_a_target_is_walkable():
+    """The cross-floor question a gated building actually poses: not 'which pad is beside the
+    target' but 'which door, anywhere, lands somewhere that can reach it'."""
+    truth = _silph_like()
+    rides = road.rides_to(truth, set(), 5, {(6, 0)})
+    assert rides, "no door found for a cell only its own pad reaches"
+    assert all(set(r) == {"from_map", "door", "lands", "hops"} for r in rides)
+    assert any(r["from_map"] == 7 and r["lands"] == (6, 0) for r in rides)
+    assert rides == sorted(rides, key=lambda r: (r["hops"], r["from_map"], r["door"]))
+
+
+def test_rides_to_is_empty_for_a_map_we_do_not_model():
+    assert road.rides_to({"maps": {}}, set(), 404, {(0, 0)}) == []
+
+
+def test_pads_reaching_skips_a_pad_that_is_itself_the_target():
+    truth = {"maps": {"1": _map(["111"], warps=[[1, 0, 9, 0]])}}
+    assert road.pads_reaching(truth, set(), 1, {(1, 0)}) == []
+
+
+def test_pad_land_reads_the_landing_out_of_the_maps_own_warp_list():
+    truth = {"maps": {"1": _map(["1111"], warps=[[0, 0, 1, 1], [3, 0, 1, 0]])}}
+    m = truth["maps"]["1"]
+    assert road.pad_land(truth, 1, m["warps"][0]) == (3, 0)  # same-map pad: index into its own list
+    assert road.pad_land(truth, 1, [0, 0, 9, 0]) is None  # a door to another map is not a pad
+    assert road.pad_land(truth, 404, m["warps"][0]) is None  # a map we do not model
+    assert road.pad_land(truth, 1, [0, 0, 1, 99]) is None  # an index its warp list does not have
+
+
+def test_pad_route_returns_none_for_a_map_we_do_not_model():
+    assert road.pad_route({"maps": {}}, set(), 404, (0, 0), {(1, 1)}) is None
+    assert road.pad_route({"maps": {}}, set(), 404, (0, 0), set()) is None

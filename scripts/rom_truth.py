@@ -43,6 +43,7 @@ MAP_HEADER_POINTERS = 0x01AE  # bank 0: 2-byte pointer per map id
 MAP_HEADER_BANKS = 0xC23D  # bank 3 (3:423D): 1 byte per map id
 TILESETS = 0xC7BE  # bank 3 (3:47BE): 12-byte entries
 NUM_MAPS = 248
+MAX_TILESET = 23  # measured: 226 of this cartridge's maps use 0-23; the lone outlier claims 103
 LAST_MAP = 0xFF  # warp destination "back where we came from" (door mats)
 _CONN_BITS = (("north", 0x08), ("south", 0x04), ("west", 0x02), ("east", 0x01))
 # pokered's TilePairCollisionsLand: triples of (tileset, tile a, tile b) ending in 0xFF. Moving
@@ -85,6 +86,51 @@ def tile_pairs(rom: bytes) -> set[tuple[int, int, int]]:
 MEASURED_GATES = Path(__file__).resolve().parent.parent / "references" / "measured_gates.json"
 
 _DIR_OF = {(0, -1): "up", (0, 1): "down", (-1, 0): "left", (1, 0): "right"}
+
+
+# A refused step whose sentence is a *door* talking, versus one where a body simply spoke. The
+# distinction cost this project a session: Silph 5F's (9,16) was recorded as a gate carrying
+# "I heard a kid was wandering around." — a wandering NPC's small talk, written down as a
+# permanent wall and applied symmetrically ever after. It sat on the single tile between the 9F
+# landing and the CARD KEY, so every route to the key was pruned before it was planned, on every
+# run, invisibly. Four of 5F's fifteen "gates" were bodies talking.
+#
+# The bias is deliberate and it is the opposite of what this file used to say. Over-blocking was
+# called the safe direction because under-blocking "costs a run"; measured, over-blocking costs
+# *every* run and says nothing, while under-blocking costs one hop that the leg then measures and
+# records. So a gate is honoured only when the sentence sounds like a lock. Anything else is a
+# body, and bodies move.
+DOOR_PHRASES = ("needs a", "locked", "won't open", "wont open", "no key", "can't open", "cant open")
+
+
+def is_door_text(said: str | None) -> bool:
+    """Does this refusal sentence sound like a door, rather than a body that happened to talk?"""
+    return bool(said) and any(phrase in said.lower() for phrase in DOOR_PHRASES)
+
+
+def door_gates(entries: dict) -> dict:
+    """One map's measured gates minus the ones that are a body talking.
+
+    A *silent* refusal is kept: nothing spoke, so nothing was standing there, and the step is a
+    wall the collision grid failed to express. What is dropped is a refusal that came with small
+    talk — "AAAAAAA got 1400 for winning!", "I am one of the 4 ROCKET BROTHERS!" — which is a
+    sprite in the way, not a locked door. Across the measured file that is 106 of 130 entries;
+    the pocket model every Silph route was planned on stood on 82% sprite chatter.
+    """
+    return {step: said for step, said in entries.items() if is_door_text(said) or not (said or "").strip()}
+
+
+def gates_the_bag_opens(entries: dict, held: set[str]) -> dict:
+    """One map's door gates minus the ones naming an item we are carrying.
+
+    A locked door is only a wall while the key is missing. The door says what it wants — "Darn!
+    It needs a CARD KEY!" — so the bag answers it directly, and the moment CARD KEY is picked up
+    every door that names it stops being terrain. Without this the engine plans as if the key had
+    never been found: the leg that took the key from 5F then reported `no-path` on 3F -> 7F, a
+    refusal from our own model rather than from the world.
+    """
+    upper = {name.upper() for name in held}
+    return {step: said for step, said in entries.items() if not any(name in (said or "").upper() for name in upper)}
 
 
 def load_measured_gates(path: Path | None = None) -> dict:
@@ -181,6 +227,14 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     tileset, h_blocks, w_blocks = rom[off], rom[off + 1], rom[off + 2]
     if not (0 < w_blocks <= 0x80 and 0 < h_blocks <= 0x80):
         return None
+    if tileset > MAX_TILESET:
+        # An unused header slot, and it is not harmless. Map 231 parses with tileset 103 — every
+        # one of this cartridge's 226 real maps uses 0-23 — 28x64 dimensions, and 113 "warps" of
+        # which 110 sit outside its own edges pointing at arbitrary maps. `route` links a
+        # LAST_MAP interior to every map that warps *into* it, so those phantoms made 231 a
+        # wormhole joined to most of the world: the Safari-side maps read as five hops from
+        # Saffron, through a map nothing in the game can enter.
+        return None
     data = _faddr(bank, _u16(rom, off + 3))
     conns: dict[str, int] = {}
     p = off + 10
@@ -192,7 +246,16 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     warps = []
     q = obj + 2
     for _ in range(rom[obj + 1]):
-        warps.append((rom[q + 1], rom[q], rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
+        wx, wy = rom[q + 1], rom[q]
+        # A warp outside its own map is not a warp. Unused header slots parse into garbage that
+        # is otherwise indistinguishable from data: map 231 claims tileset 103 (every real map
+        # uses 0-23) and 110 of its 113 warps sit past its own edges, pointing at arbitrary map
+        # ids. Because `route`'s LAST_MAP rule links an interior to every map that warps *into*
+        # it, those 110 phantoms turned 231 into a wormhole hub joined to almost the whole world
+        # — and the router planned straight through it, reporting the Safari-side maps as five
+        # hops from Saffron. The bounds check is the whole fix.
+        if 0 <= wx < 2 * w_blocks and 0 <= wy < 2 * h_blocks:
+            warps.append((wx, wy, rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
         q += 4
     # Signs: count byte then (y, x, text id) each. Coordinates only — sign TEXT is read live
     # (walk up, face it, press A): what the game says on screen is the instruction stream.
@@ -209,13 +272,18 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         pic, y, x, _mv, _rng, text = rom[q], rom[q + 1] - 4, rom[q + 2] - 4, rom[q + 3], rom[q + 4], rom[q + 5]
         kind = "npc"
         q += 6
+        sprite = {"kind": kind, "x": x, "y": y, "pic": pic}
         if text & 0x40:  # trainer: +2 bytes (class/pokemon set, level/roster id)
-            kind = "trainer"
+            sprite["kind"] = "trainer"
             q += 2
-        elif text & 0x80:  # item ball: +1 byte
-            kind = "item"
+        elif text & 0x80:  # item ball: +1 byte, the item id it holds
+            # That byte is what turns an item hunt into a lookup: a floor's balls carry their
+            # contents in the cartridge, so "which ball holds the CARD KEY" is extraction, not
+            # a sweep. Cross-checked against the ids the bag reported after live pickups.
+            sprite["kind"] = "item"
+            sprite["item"] = rom[q]
             q += 1
-        sprites.append({"kind": kind, "x": x, "y": y, "pic": pic})
+        sprites.append(sprite)
     te = TILESETS + 12 * tileset
     tbank = rom[te]
     blocks = _faddr(tbank, _u16(rom, te + 1))
@@ -585,10 +653,16 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
 
 
 def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
-    """Hang each map's measured gates on its own dict, where ``passable`` will find them."""
+    """Hang each map's measured gates on its own dict, where ``passable`` will find them.
+
+    Only the *doors* are hung. The survey records every refusal it meets, which is right — the
+    sentence is evidence and the file keeps it — but a refusal from a body that was standing
+    there is not a fact about the map, and honouring it walls off ground that is open the moment
+    the sprite wanders on. See ``is_door_text``.
+    """
     for map_id, entries in load_measured_gates(path).items():
         if map_id in truth.get("maps", {}):
-            truth["maps"][map_id]["gates"] = entries
+            truth["maps"][map_id]["gates"] = door_gates(entries)
     for map_id, tiles in load_dead_warps().items():
         if map_id in truth.get("maps", {}):
             truth["maps"][map_id]["dead_warps"] = tiles
