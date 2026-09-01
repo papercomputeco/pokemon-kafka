@@ -822,10 +822,7 @@ class LegRunner:
         mp, x, y = self.rig.pos()
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
-            near = (
-                road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}, keep=adjacent)
-                & adjacent
-            )
+            near = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
             if not near or not self.rig.approach(near):
                 return False
             mp, x, y = self.rig.pos()

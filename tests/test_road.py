@@ -614,3 +614,24 @@ def test_live_bodies_clips_to_the_map_it_is_standing_on():
     io = SpriteIO([(7, 9), (18, 22)])
     assert road.live_bodies(io) == {(7, 9), (18, 22)}  # unclipped: the junk slot is a "body"
     assert road.live_bodies(io, (30, 18)) == {(7, 9)}  # clipped to the floor we are standing on
+
+
+def test_a_warp_tile_is_never_an_approach_cell():
+    """`keep` exists for the target of a walk, not for the cell you stand on to reach one. Passing
+    the whole adjacency as `keep` let a leg "walk next to the blocker" by stepping onto Saffron's
+    Silph entrance — it warped indoors, walked back out, and did that until the hop cap fired."""
+    truth = {
+        "maps": {
+            "1": {
+                "width": 5,
+                "height": 1,
+                "tileset": 0,
+                "grid": ["11111"],
+                "warps": [[3, 0, 9, 0]],
+                "connections": {},
+                "sprites": [],
+            }
+        }
+    }
+    adjacent = {(3, 0), (1, 0)}  # (3,0) is the door beside the body at (4,0); (1,0) is floor
+    assert road.walkable(truth, set(), 1, (0, 0)) & adjacent == {(1, 0)}
