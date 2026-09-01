@@ -354,18 +354,35 @@ class TapesConsult:
 
         seat = crew.seat_for(tier)
         prompt = crew.build_prompt(facts, menu)
-        body = json.dumps(crew.chat_body(seat["model"], prompt, crew.answer_tokens(tier))).encode()
-        req = urllib.request.Request(
-            crew.TAPES_CHAT_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
-        )
+        # Streamed, because a seat that thinks for four minutes cannot be asked for one whole
+        # response: the gateway 502s at a hard 300s ceiling, and a truncated non-stream reply is
+        # 30 KB of chain-of-thought with no answer in it. Streaming reads the answer the moment
+        # it is written; `timeout` becomes a per-chunk wait rather than a whole-answer deadline.
+        body = json.dumps(crew.chat_body(seat["model"], prompt, crew.answer_tokens(tier), stream=True)).encode()
+        wait = self.timeout if self.timeout is not None else crew.answer_timeout(tier)
+
+        def ask(payload: bytes) -> tuple[str | None, str, str]:
+            request = urllib.request.Request(
+                crew.TAPES_CHAT_URL, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(request, timeout=wait) as resp:
+                return crew.decide_from_stream(resp, menu)
+
         try:
-            wait = self.timeout if self.timeout is not None else crew.answer_timeout(tier)
-            with urllib.request.urlopen(req, timeout=wait) as resp:
-                payload = json.loads(resp.read())
+            action, why, text = ask(body)
+            # A seat that ran out of clock mid-thought is not out of ideas — it is out of clock.
+            # One closing call hands its own reasoning back and asks only for the line.
+            if action is None and len(text) > 500:
+                self.log(f"  {seat['title']} ran out of clock mid-thought ({len(text)}B) — asking it to close")
+                closing = json.dumps(
+                    crew.chat_body(
+                        seat["model"], crew.closing_prompt(text, menu), crew.answer_tokens(tier), stream=True
+                    )
+                ).encode()
+                action, why, _ = ask(closing)
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             self.log(f"  consult FAILED ({seat['title']}, {seat['model']}): {exc}")
             return None, f"consult failed: {exc}", seat["model"]
-        action, why = crew.parse_decision(crew.extract_text(payload), menu)
         self.log(f"  {seat['title']} ({seat['model']}) -> {action or 'NO-ANSWER'}: {why[:120]}")
         return action, why, seat["model"]
 

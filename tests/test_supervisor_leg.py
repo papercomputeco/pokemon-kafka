@@ -369,10 +369,15 @@ def test_the_consult_posts_to_the_tapes_proxy_and_parses_the_reply(monkeypatch):
     posted = {}
 
     class _Resp:
-        def read(self):
-            return json.dumps(
-                {"choices": [{"message": {"content": "ACTION: USE_GATE_WARP\nWHY: the gate severs it"}}]}
-            ).encode()
+        """The seat's reply as the wire delivers it: an SSE stream, not one whole response."""
+
+        def __iter__(self):
+            for delta in (
+                {"reasoning": "weighing the menu\n"},
+                {"content": "ACTION: USE_GATE_WARP\nWHY: the gate severs it\n"},
+            ):
+                yield ("data: " + json.dumps({"choices": [{"delta": delta}]}) + "\n").encode()
+            yield b"data: [DONE]\n"
 
         def __enter__(self):
             return self
@@ -392,6 +397,7 @@ def test_the_consult_posts_to_the_tapes_proxy_and_parses_the_reply(monkeypatch):
     assert posted["url"] == crew.TAPES_CHAT_URL  # :42345 — an uncaptured call is a doctrine break
     assert posted["body"]["model"] == crew.CREW["puzzle"]["model"]
     assert "recalled details are frequently wrong" in posted["body"]["messages"][0]["content"]
+    assert posted["body"]["stream"] is True  # a 300s gateway ceiling cannot hold a whole answer
     assert (action, model) == ("USE_GATE_WARP", crew.CREW["puzzle"]["model"])
     assert why == "the gate severs it"
 
@@ -710,8 +716,10 @@ def test_the_consult_waits_as_long_as_the_seat_needs(monkeypatch):
     waits = {}
 
     class _Resp:
-        def read(self):
-            return json.dumps({"choices": [{"message": {"content": "ACTION: GIVE_UP\nWHY: x"}}]}).encode()
+        def __iter__(self):
+            chunk = json.dumps({"choices": [{"delta": {"content": "ACTION: GIVE_UP\nWHY: x\n"}}]})
+            yield ("data: " + chunk + "\n").encode()
+            yield b"data: [DONE]\n"
 
         def __enter__(self):
             return self
