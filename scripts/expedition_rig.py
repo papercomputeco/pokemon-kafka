@@ -1043,12 +1043,29 @@ class Rig:
         return out
 
     def _step_off_mat(self, mp: int, x: int, y: int) -> bool:  # pragma: no cover - drives the emulator
+        """Try each floor-ward neighbour, undoing any step that leaves the map.
+
+        A mat's neighbours can fire too — Silph 3F's (11,11) sits beside another door, and the
+        step-off went straight back to 7F, so the *next* leg booted on the wrong side of the
+        building and spent its budget trying to get back. A step that changes the map is not a
+        step off the mat, so it is rolled back and the next direction tried.
+        """
+        import io as _io
+
+        def snap():
+            buf = _io.BytesIO()
+            self.pb.save_state(buf)
+            return buf
+
+        before = snap()
         for direction, cell in self.step_off_targets(mp, x, y):
             self.ctl.press(direction)
             self.ctl.wait(30)
             if self.pos() == (mp, *cell):
                 print(f"  stepped off the {mp} warp mat at ({x}, {y}) before banking", flush=True)
                 return True
+            before.seek(0)
+            self.pb.load_state(before)  # that neighbour was a door too; undo and try another
         print(f"  WARNING: could not step off the warp mat at ({x}, {y}) on {mp}", flush=True)
         return False
 
