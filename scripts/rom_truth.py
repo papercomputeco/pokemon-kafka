@@ -43,6 +43,7 @@ MAP_HEADER_POINTERS = 0x01AE  # bank 0: 2-byte pointer per map id
 MAP_HEADER_BANKS = 0xC23D  # bank 3 (3:423D): 1 byte per map id
 TILESETS = 0xC7BE  # bank 3 (3:47BE): 12-byte entries
 NUM_MAPS = 248
+MAX_TILESET = 23  # measured: 226 of this cartridge's maps use 0-23; the lone outlier claims 103
 LAST_MAP = 0xFF  # warp destination "back where we came from" (door mats)
 _CONN_BITS = (("north", 0x08), ("south", 0x04), ("west", 0x02), ("east", 0x01))
 # pokered's TilePairCollisionsLand: triples of (tileset, tile a, tile b) ending in 0xFF. Moving
@@ -226,6 +227,14 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     tileset, h_blocks, w_blocks = rom[off], rom[off + 1], rom[off + 2]
     if not (0 < w_blocks <= 0x80 and 0 < h_blocks <= 0x80):
         return None
+    if tileset > MAX_TILESET:
+        # An unused header slot, and it is not harmless. Map 231 parses with tileset 103 — every
+        # one of this cartridge's 226 real maps uses 0-23 — 28x64 dimensions, and 113 "warps" of
+        # which 110 sit outside its own edges pointing at arbitrary maps. `route` links a
+        # LAST_MAP interior to every map that warps *into* it, so those phantoms made 231 a
+        # wormhole joined to most of the world: the Safari-side maps read as five hops from
+        # Saffron, through a map nothing in the game can enter.
+        return None
     data = _faddr(bank, _u16(rom, off + 3))
     conns: dict[str, int] = {}
     p = off + 10
@@ -237,7 +246,16 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
     warps = []
     q = obj + 2
     for _ in range(rom[obj + 1]):
-        warps.append((rom[q + 1], rom[q], rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
+        wx, wy = rom[q + 1], rom[q]
+        # A warp outside its own map is not a warp. Unused header slots parse into garbage that
+        # is otherwise indistinguishable from data: map 231 claims tileset 103 (every real map
+        # uses 0-23) and 110 of its 113 warps sit past its own edges, pointing at arbitrary map
+        # ids. Because `route`'s LAST_MAP rule links an interior to every map that warps *into*
+        # it, those 110 phantoms turned 231 into a wormhole hub joined to almost the whole world
+        # — and the router planned straight through it, reporting the Safari-side maps as five
+        # hops from Saffron. The bounds check is the whole fix.
+        if 0 <= wx < 2 * w_blocks and 0 <= wy < 2 * h_blocks:
+            warps.append((wx, wy, rom[q + 3], rom[q + 2]))  # stored y,x,dwarp,dmap
         q += 4
     # Signs: count byte then (y, x, text id) each. Coordinates only — sign TEXT is read live
     # (walk up, face it, press A): what the game says on screen is the instruction stream.

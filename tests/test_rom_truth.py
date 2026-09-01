@@ -693,3 +693,18 @@ def test_a_door_stops_being_a_wall_once_its_key_is_in_the_bag():
     assert rom_truth.gates_the_bag_opens(entries, set()) == entries
     assert rom_truth.gates_the_bag_opens(entries, {"CARD KEY"}) == {"3,3,up": "The door is locked..."}
     assert rom_truth.gates_the_bag_opens(entries, {"card key", "LIFT KEY"}) == {"3,3,up": "The door is locked..."}
+
+
+def test_a_warp_outside_its_own_map_is_not_a_warp(rom):
+    """Unused header slots parse into garbage that looks exactly like data. Map 231 claims tileset
+    103 (every real map uses 0-23) and 110 of its 113 warps sit past its own edges, pointing at
+    arbitrary map ids — and because `route` links a LAST_MAP interior to every map that warps
+    *into* it, those phantoms made 231 a wormhole joined to most of the world. Routes to the
+    Safari-side maps came back five hops from Saffron, through a map nothing can enter."""
+    _, data = rom
+    rom_bytes = bytearray(data)
+    # Point map 0's second warp off the map: (x=9, y=9) on a 4x4 map.
+    rom_bytes[OBJ0 + 6] = 9  # y
+    rom_bytes[OBJ0 + 7] = 9  # x
+    m0 = parse_map(bytes(rom_bytes), 0)
+    assert m0["warps"] == [[1, 3, LAST_MAP, 0]]  # the in-bounds one survives; the phantom is gone
