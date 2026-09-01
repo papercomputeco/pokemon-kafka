@@ -1006,6 +1006,118 @@ class Rig:
             print(f"  the bag opens {opened} measured door gate(s)", flush=True)
         return opened
 
+    # A Center's PC is neither a sign nor a sprite — the extraction has nothing for it, because it
+    # is a tile you press A into. Measured by sweeping the interior's northern boundary on
+    # Cerulean's map 64: from (13,4) facing up the screen says "AAAAAAA turned on the PC." and the
+    # window renders BILL's PC / <player>'s PC / PROF.OAK's PC / LOG OFF. Every Center shares the
+    # 14x8 tileset-6 interior, so the cell is a template like the nurse's counter.
+    CENTER_PC = ((13, 4), "up")
+
+    def center_pc(self, map_id: int) -> tuple[tuple[int, int], str] | None:
+        """Where to stand and face to turn on the PC, if this map is a Pokemon Center."""
+        return self.CENTER_PC if self.center_counter(map_id) else None
+
+    def menu_rows(self, first: int = 0, last: int = 14) -> list[tuple[int, str]]:
+        """The window layer's non-empty rows — menus render there, never to the background."""
+        return [(i, t) for i in range(first, last) if (t := self.window_row(i)).strip()]
+
+    def menu_shows(self, wanted: str, tries: int = 6) -> bool:
+        """Wait — without pressing anything — until the window renders ``wanted``.
+
+        This used to press A while it looked, and that is how Charizard and then Dugtrio ended up
+        in a box: inside a list, A confirms the highlighted entry. Two traps make "is it safe to
+        press?" unanswerable from the screen: the window keeps showing the *previous* menu while a
+        box is up ("Accessed my PC."), and the text buffer stays stale after the box closes. So
+        this only ever looks, and every press lives at a call site that knows what it is pressing.
+        """
+        for _ in range(tries):
+            if any(wanted.upper() in text.upper() for _i, text in self.menu_rows()):
+                return True
+            self.ctl.wait(40)
+        return any(wanted.upper() in text.upper() for _i, text in self.menu_rows())
+
+    def menu_cursor_to(self, index: int, presses: int = 12) -> bool:
+        """Walk the list cursor to ``index`` using the cursor register as ground truth."""
+        for _ in range(presses):
+            cur = self.mem[qm.ADDR_MENU_CUR]
+            if cur == index:
+                return True
+            self.ctl.press("down" if cur < index else "up")
+            self.ctl.wait(20)
+        return self.mem[qm.ADDR_MENU_CUR] == index
+
+    def menu_choose(self, wanted: str, *, presses: int = 12) -> bool:
+        """Move the menu cursor onto the entry whose text contains ``wanted`` and press A.
+
+        Selection is by *decoded text*, never by a remembered position. The PC's own menu is why:
+        it lists WITHDRAW, DEPOSIT, RELEASE and CHANGE BOX, and choosing by index would one day
+        release a party member because a menu shifted. Entries render every other row, so the
+        cursor index is ``(row - first_row) // 2``, and the cursor register is the ground truth
+        for where it currently sits.
+        """
+        rows = self.menu_rows()
+        if not rows:
+            return False
+        hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
+        if hit is None:
+            return False
+        want = (hit - rows[0][0]) // 2
+        for _ in range(presses):
+            cur = self.mem[qm.ADDR_MENU_CUR]
+            if cur == want:
+                break
+            self.ctl.press("down" if cur < want else "up")
+            self.ctl.wait(20)
+        if self.mem[qm.ADDR_MENU_CUR] != want:
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(45)
+        return True
+
+    def pc_deposit(self, index: int) -> bool:  # pragma: no cover - drives the emulator
+        """Deposit the party member at ``index`` into Bill's PC. The party shrinking is the proof.
+
+        By index, not by name: the list renders *nicknames* — this run's lead shows as
+        "AAAAAAAAAA", not CHARIZARD — so matching a species name there can never work. Every A
+        press below is at a step whose screen is known; nothing presses A while searching.
+
+        BILL's PC is the Pokemon box. The player's own PC is the item storage system (WITHDRAW
+        ITEM / DEPOSIT ITEM / TOSS ITEM), and picking it because it carries the player's name is
+        exactly the recalled assumption this repo forbids — measured wrong, one menu at a time.
+        """
+        spot = self.center_pc(self.pos()[0])
+        if spot is None or not self.approach({spot[0]}):
+            return False
+        before = len(self.party())
+        self.ctl.press(spot[1])
+        self.ctl.wait(25)
+        for _ in range(4):  # A through "turned on the PC." until the top menu renders
+            self.ctl.press("a")
+            self.ctl.wait(55)
+            if self.menu_rows():
+                break
+        if not self.menu_choose("BILL"):
+            return False
+        self.ctl.press("a")  # "Accessed BILL's PC." -> the box submenu
+        self.ctl.wait(55)
+        if not self.menu_shows("DEPOSIT") or not self.menu_choose("DEPOSIT"):
+            return False
+        if not self.menu_cursor_to(index):
+            return False
+        self.ctl.press("a")  # pick that party member -> DEPOSIT / STATS / CANCEL
+        self.ctl.wait(50)
+        if not self.menu_shows("DEPOSIT") or not self.menu_choose("DEPOSIT"):
+            return False
+        for _ in range(3):
+            if len(self.party()) < before:
+                break
+            self.ctl.press("a")
+            self.ctl.wait(45)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        return len(self.party()) < before
+
     def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
         """Where to stand and which way to face to be healed, if this map is a Pokemon Center.
 

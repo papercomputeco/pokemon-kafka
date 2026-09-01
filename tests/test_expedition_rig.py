@@ -465,3 +465,91 @@ def test_step_off_targets_prefers_floor_and_never_another_door():
     assert ("up", (3, 6)) in moves  # into the building
     assert all(cell != (4, 7) for _d, cell in moves)  # never the mat next door
     assert moves[0][0] == "up"  # and the interior is tried first
+
+
+class _MenuRig:
+    """Enough Rig to exercise menu selection: a window layer and a cursor register."""
+
+    def __init__(self, rows, cursor=0):
+        self._rows = rows
+        self.mem = {rig.qm.ADDR_MENU_CUR: cursor}
+        self.presses = []
+
+        class Ctl:
+            def __init__(self, outer):
+                self.outer = outer
+
+            def press(self, button, *a, **kw):
+                self.outer.presses.append(button)
+                cur = self.outer.mem[rig.qm.ADDR_MENU_CUR]
+                if button == "down":
+                    self.outer.mem[rig.qm.ADDR_MENU_CUR] = cur + 1
+                elif button == "up":
+                    self.outer.mem[rig.qm.ADDR_MENU_CUR] = max(0, cur - 1)
+
+            def wait(self, frames=30):
+                pass
+
+        self.ctl = Ctl(self)
+
+    def window_row(self, row):
+        return self._rows.get(row, "")
+
+    def menu_rows(self, first=0, last=14):
+        return rig.Rig.menu_rows(self, first, last)
+
+    def dialogue(self):
+        return ""
+
+
+def test_menu_choose_selects_by_text_not_by_position():
+    """The PC menu lists WITHDRAW, DEPOSIT, RELEASE and CHANGE BOX. Choosing by index would one
+    day release a party member because a menu shifted, so entries are matched by decoded text and
+    the cursor register is the ground truth for where the cursor sits."""
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT", 6: "RELEASE", 8: "CHANGE BOX", 10: "SEE YA!"})
+    assert rig.Rig.menu_choose(menu, "DEPOSIT") is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 1  # entries render every other row
+    assert menu.presses[-1] == "a"
+    assert "RELEASE" not in menu.presses
+
+
+def test_menu_choose_reports_a_miss_rather_than_pressing_a():
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT"})
+    assert rig.Rig.menu_choose(menu, "SURF") is False
+    assert "a" not in menu.presses
+
+
+def test_menu_choose_walks_the_cursor_back_up():
+    menu = _MenuRig({2: "WITHDRAW", 4: "DEPOSIT", 6: "RELEASE"}, cursor=2)
+    assert rig.Rig.menu_choose(menu, "WITHDRAW") is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 0
+    assert menu.presses.count("up") == 2
+
+
+def test_the_pc_is_a_template_cell_like_the_nurses_counter():
+    center = _reader_rig(
+        {0xD35E: 64, 0xD362: 3, 0xD361: 7},
+        {"maps": {"64": {"width": 14, "height": 8, "tileset": 6, "sprites": [{"kind": "npc", "x": 3, "y": 1}]}}},
+    )
+    assert center.center_pc(64) == ((13, 4), "up")
+    plain = _reader_rig({}, {"maps": {"9": {"width": 10, "height": 9, "tileset": 0, "sprites": []}}})
+    assert plain.center_pc(9) is None
+
+
+def test_menu_shows_never_presses_anything_while_it_looks():
+    """A advances a text box, but inside a list it CONFIRMS the highlighted entry — that is how
+    Charizard and then Dugtrio ended up in a box. Looking must never press."""
+    menu = _MenuRig({2: "CHARIZARD", 4: "DUGTRIO", 6: "HYPNO"})
+    assert rig.Rig.menu_shows(menu, "DEPOSIT", tries=2) is False
+    assert menu.presses == []
+    assert rig.Rig.menu_shows(menu, "DUGTRIO", tries=2) is True
+    assert menu.presses == []
+
+
+def test_menu_cursor_to_walks_by_the_register_not_by_counting():
+    """The party list renders nicknames, so an entry is chosen by index; the cursor register is
+    the only ground truth for where the highlight actually sits."""
+    menu = _MenuRig({2: "AAAAAAAAAA", 4: "DUGTRIO", 6: "GLOOM", 8: "PRIMEAPE"}, cursor=0)
+    assert rig.Rig.menu_cursor_to(menu, 2) is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 2
+    assert menu.presses == ["down", "down"]  # walked, and never pressed A
