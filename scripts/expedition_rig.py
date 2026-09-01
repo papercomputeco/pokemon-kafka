@@ -1188,6 +1188,32 @@ class Rig:
         print(f"  deposited {roster[index]}; party is now {[n for n, _l, _h in self.party()]}", flush=True)
         return True
 
+    def grass_lanes(self, map_id: int) -> list[tuple[int, int]]:
+        """The two extreme grass cells on a map — a lane to pace for encounters.
+
+        Where to roam comes from the ROM's own grass tiles, never from lore. Pacing between the
+        extremes keeps crossing fresh tiles instead of rolling the same one, which is what the
+        recruit grinds measured as the difference between fights and a step counter going up.
+        """
+        cells = [tuple(c) for c in self.truth["maps"].get(str(map_id), {}).get("grass", [])]
+        if not cells:
+            return []
+        return [min(cells, key=lambda c: (c[1], c[0])), max(cells, key=lambda c: (c[1], c[0]))]
+
+    def roam_grass(self, map_id: int, until, laps: int = 40) -> bool:  # pragma: no cover - drives the emulator
+        """Pace this map's grass until ``until()`` says stop. Battles are the point, not a failure."""
+        lanes = self.grass_lanes(map_id)
+        if not lanes:
+            return False
+        for lap in range(laps):
+            for target in (lanes[lap % 2], lanes[(lap + 1) % 2]):
+                if until():
+                    return True
+                self.walk(map_id, {target}, cap=200)
+                if self.pos()[0] != map_id:  # a battle or a door moved us off the lane
+                    return until()
+        return until()
+
     def center_counter(self, map_id: int) -> tuple[tuple[int, int], str] | None:
         """Where to stand and which way to face to be healed, if this map is a Pokemon Center.
 

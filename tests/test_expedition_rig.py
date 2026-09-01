@@ -580,3 +580,12 @@ def test_menu_choose_indexes_within_the_block_when_menus_overlay():
     )
     assert rig.Rig.menu_choose(overlaid, "DEPOSIT") is True
     assert overlaid.mem[rig.qm.ADDR_MENU_CUR] == 0  # first entry of ITS OWN block, not the fifth
+
+
+def test_grass_lanes_are_the_rom_s_own_extremes():
+    """Where to roam comes from the extracted grass tiles, not from lore — and pacing the
+    extremes keeps crossing fresh tiles instead of rolling the same one."""
+    r = _reader_rig({}, {"maps": {"33": {"grass": [[5, 9], [2, 3], [7, 3], [2, 9]]}, "1": {"grass": []}}})
+    assert r.grass_lanes(33) == [(2, 3), (5, 9)]
+    assert r.grass_lanes(1) == []  # a map with no grass has no lane to pace
+    assert r.grass_lanes(999) == []  # and neither has one we do not model

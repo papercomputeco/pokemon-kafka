@@ -805,6 +805,8 @@ class LegRunner:
         import road
 
         mp, _, _ = self.rig.pos()
+        if self.rig.truth["maps"].get(str(mp)) is None:
+            return  # a floor the truth table does not know; naming a pad there is recall, not measurement
         adjacent = {(spot[0] + 1, spot[1]), (spot[0] - 1, spot[1]), (spot[0], spot[1] + 1), (spot[0], spot[1] - 1)}
         pads = road.pads_reaching(self.rig.truth, self.rig.pairs, mp, adjacent, self.rig.bodies() - {spot})
         if not pads:
@@ -820,6 +822,10 @@ class LegRunner:
 
         bx, by = spot
         mp, x, y = self.rig.pos()
+        if str(mp) not in self.rig.truth.get("maps", {}):
+            # A ride carried us onto a floor the extraction does not model. There is nothing to
+            # plan here and nothing to engage; the caller re-reads position and moves on.
+            return False
         adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
         if (x, y) not in adjacent:
             # An empty `near` is not a verdict: it means no *walk* reaches this body, which is
@@ -834,6 +840,14 @@ class LegRunner:
                 return False
         before = self.rig.bag()
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        # settle() closes the win / award box that a battle leaves open. It is the step that
+        # *commits* the result: it marks a fallen fighter as defeated (measured on map 178, that
+        # defeat is what releases the next body to battle) and it banks the badge on a leader.
+        # A win box poked with A stays pinned and the result never lands — the measured "got 1140
+        # for winning!" loop — while settle's B-then-A-then-probe-move is the closer that lets the
+        # cartridge finish what the fight started.
+        if hasattr(self.rig, "settle"):
+            self.rig.settle()
         gained = [item for item in self.rig.bag() if item not in before]
         self.log(f"  engaged {spot}: {said[:140]}")
         if gained:
@@ -849,30 +863,47 @@ class LegRunner:
         The badge byte is watched for *change*, not for a remembered bit: which bit belongs to
         which leader is exactly the kind of recalled fact this project has been burned by. A
         changed byte is measurement; a named bit would be recall.
+
+        Getting to a body goes through ``approach`` — the walk-or-ride path — not a raw walk.
+        Sabrina's gym is the standing measurement: nine standing bodies, and every one past the
+        nearest sits on a pocket that thirty intra-map pads hold from the baton's bench. The
+        walk-only version of this loop marked each of them tried and skipped them, and four legs
+        in a row spent their reports on "engaged every body, badge byte unchanged" — a verdict the
+        walk can never see past a pad.
         """
         before = self.rig.badges()
         spoken: set[tuple[int, int]] = set()
+        order: list[tuple[int, int]] = []  # stable roster, for the retry phase
+        cursor = 0
         for _ in range(self.engage_rounds):
             if self.rig.badges() != before:
                 return True
-            mp, x, y = self.rig.pos()
-            fresh = [b for b in self.rig.bodies() if b not in spoken]
-            if not fresh:
+            mp, _x, _y = self.rig.pos()
+            all_bodies = list(self.rig.bodies())
+            if not all_bodies:
                 return self.rig.badges() != before
-            bx, by = min(fresh, key=lambda b: abs(b[0] - x) + abs(b[1] - y))
+            # Keep a stable order for the retry phase: which bodies reappear is decided by the
+            # roster, not by whatever happens to be standing nearest.
+            order = [b for b in order if b in all_bodies] + [b for b in sorted(all_bodies) if b not in order]
+            unspoken = [b for b in all_bodies if b not in spoken]
+            if unspoken:
+                # First pass over new bodies, nearest-first: cheap, and it meets the whole roster.
+                bx, by = min(unspoken, key=lambda b: abs(b[0] - _x) + abs(b[1] - _y))
+            else:
+                # Every body is met once and the badge still has not moved. That is the gated-
+                # leader shape, measured on map 178: the leader reads a coach line until the gym's
+                # member falls, then — and only then — battles. Nearest-first would just keep
+                # re-picking the member that is still standing beside us, so the loop walks the
+                # roster in a fixed order (round-robin) instead, and the leader gets the turn the
+                # member's defeat opens within one full cycle.
+                cursor = (cursor + 1) % len(order)
+                bx, by = order[cursor]
             spoken.add((bx, by))
-            adjacent = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
-            if (x, y) not in adjacent:
-                self.rig.walk(mp, adjacent, cap=160)
-                _, x, y = self.rig.pos()
-                if self.rig.pos()[0] != mp:  # a fight or a warp moved us; re-read next round
-                    continue
-            if (x, y) not in adjacent:
-                continue
-            face = "right" if bx > x else "left" if bx < x else "down" if by > y else "up"
-            said = self.rig.talk(face)
-            self.log(f"  engaged ({bx}, {by}): {said[:140]}")
-            self.rig.emit("supervisor.engaged", pos=[bx, by], said=said[:300], badges=self.rig.badges())
+            if not self._go_and_talk((bx, by)):
+                # approach says no even after riding. Name the pads that could open it, so the
+                # record reads as a route the next leg can take instead of a wall.
+                self.name_the_ride((bx, by))
+                self.log(f"  could not reach the body at {(bx, by)} on map {mp}")
         return self.rig.badges() != before
 
     # ---- the exhaustion record ---------------------------------------------------------------
@@ -1201,6 +1232,54 @@ def cmd_lift_tour(args) -> int:  # pragma: no cover - drives the emulator; verif
     return 0
 
 
+def cmd_hunt(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    """Travel to a map and come back with a species in the party.
+
+    Badges 7 and 8 need Surf, and this cartridge's cheapest surfer is a chain, not a find:
+    Nidoran-M (map 33, levels 2-4) evolves at 16 into Nidorino and with the MOON STONE already in
+    the bag into Nidoking, which learns HM03. A hunt is therefore a leg like any other — route
+    there, then pace the ROM's own grass with the catch armed — except that its success condition
+    is the party growing rather than a position.
+    """
+    import quartermaster as qm
+    from expedition_rig import BattleWedge, Rig
+    from memory_reader import SPECIES_ID_MAP
+
+    wanted = qm.parse_catch(args.species)
+    rig = Rig(args.state, live_label=args.live_label)
+    names = {SPECIES_ID_MAP.get(i, str(i)) for i in wanted}
+    print(f"start {rig.pos()} party {[n for n, _l, _h in rig.party()]} hunting {sorted(names)}", flush=True)
+    if len(rig.party()) >= 6:
+        print("  the party is full — a catch would go to a box; deposit someone first", flush=True)
+        return 2
+    started = time.monotonic()
+    if rig.pos()[0] != args.map:
+        leg = LegRunner(rig, goal=args.map, budget_s=args.budget / 2, consult=None)
+        result = leg.run()
+        if not result.get("ok"):
+            print(json.dumps(result), flush=True)
+            return 1
+    rig.ag.catch_wanted = set(wanted)  # the agent's battle turn throws instead of attacking
+    before = len(rig.party())
+    rig.emit("supervisor.hunt_start", map=args.map, species=sorted(names), party=before)
+    try:
+        got = rig.roam_grass(
+            args.map,
+            lambda: len(rig.party()) > before or time.monotonic() - started > args.budget,
+        )
+    except BattleWedge as exc:
+        print(f"  battle wedged: {exc}", flush=True)
+        got = False
+    caught = len(rig.party()) > before
+    print(f"party now {[n for n, _l, _h in rig.party()]}", flush=True)
+    rig.emit("supervisor.hunt_end", caught=caught, party=[n for n, _l, _h in rig.party()])
+    if caught and args.bank:
+        rig.bank(args.bank)
+    rig.finish(outcome="caught" if caught else "no-catch")
+    print(json.dumps({"caught": caught, "roamed": got, "run_id": rig.run_id}), flush=True)
+    return 0 if caught else 1
+
+
 def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified live, not in unit tests
     """Boot a baton and drive the supervised leg chain. This is the loop body the skill promises.
 
@@ -1282,6 +1361,13 @@ def main(argv: list[str] | None = None) -> int:
         "--clear-floor", action="store_true", help="on the last goal, fight every trainer the cartridge lists there"
     )
     rn.add_argument("--want", help="item name this leg came for; its ball is opened first")
+    ht = sub.add_parser("hunt", help="travel to a map and come back with a species in the party")
+    ht.add_argument("--state", required=True)
+    ht.add_argument("--species", required=True, help="e.g. Nidoran-M, or a raw internal id")
+    ht.add_argument("--map", type=int, required=True)
+    ht.add_argument("--budget", type=float, default=1800)
+    ht.add_argument("--bank")
+    ht.add_argument("--live-label")
     rn.add_argument("--no-consult", action="store_true", help="deterministic only — never call a model")
     ce = sub.add_parser("classify-exit", help="decide resume/continue/next/retry/escalate after an operator exit")
     ce.add_argument("--state", type=Path, required=True)
@@ -1313,6 +1399,8 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="what the supervisor would have said, from a run's lane logs")
     rp.add_argument("logs", type=Path, nargs="+")
     args = ap.parse_args(argv)
+    if args.cmd == "hunt":
+        return cmd_hunt(args)
     if args.cmd == "run":
         return cmd_run(args)
     if args.cmd == "lift-tour":
