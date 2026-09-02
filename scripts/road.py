@@ -637,6 +637,15 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
             return True
         before = (x, y)
         _step(io, d)
+        if io.read(ADDR_IN_BATTLE) and battle:
+            # A wild encounter CANCELS the step, so the position is unchanged - which is
+            # byte-for-byte indistinguishable from walking into a wall unless the battle is
+            # checked for first. Reading it as a refusal is what ended the badge-7 crossing: the
+            # leg armed SURF into a battle (where the START menu does not open), re-stepped,
+            # measured no movement again and reported "stuck-on-edge" in the middle of open
+            # water. Fight it and let the loop re-step from the same cell.
+            battle(io)
+            continue
         if read_pos(io)[0] != cur:
             io.wait(60)
             return True
@@ -651,6 +660,9 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
                 io.wait(40)
             _step(io, d)
             io.wait(45)
+            if io.read(ADDR_IN_BATTLE) and battle:
+                battle(io)  # the armed step drew an encounter; that is not a solid tile
+                continue
             if read_pos(io)[1:] == before:
                 return "stuck-on-edge"
     raise RuntimeError(f"surf_cross({cur}->{nxt}) spun {SURF_MAX_STEPS} steps without crossing")

@@ -910,3 +910,85 @@ def test_surf_cross_raises_when_neither_crossed_nor_stuck():
             road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm)
     finally:
         road.SURF_MAX_STEPS = 200
+
+
+class EncounterSurfIO(SurfIO):
+    """Water that draws a wild encounter on the step, the way a real crossing does.
+
+    The encounter CANCELS the step, so the position does not change — the exact reading that
+    made surf_cross call open water "stuck-on-edge". The battle clears when it is fought, and
+    the next step then lands on the far map.
+    """
+
+    def __init__(self, cur, dest, encounters=1):
+        super().__init__(cur, dest)
+        self.left = encounters
+        self.arms = 1  # already surfing: this leg is mid-water, not at the shore
+
+    def press(self, btn, hold=8, release=8):
+        if btn != self.face:
+            return
+        if self.left:  # the step is eaten by the encounter, position unchanged
+            self.left -= 1
+            self.battle = True
+            return
+        self.mem[qm.ADDR_MAP], self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y] = self.dest
+
+
+def test_a_wild_encounter_on_the_water_is_fought_not_read_as_a_wall():
+    """A cancelled step and a refused step are the same bytes; only ADDR_IN_BATTLE tells them
+    apart, and reading the wrong one reported open water as a dead end."""
+    io = EncounterSurfIO(1, (2, 0, 0))
+
+    def fight(_io):
+        _io.battle = False
+        _io.battled += 1
+
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.battled == 1
+    assert io.mem[qm.ADDR_MAP] == 2
+
+
+def test_repeated_encounters_do_not_exhaust_the_crossing():
+    io = EncounterSurfIO(1, (2, 0, 0), encounters=3)
+
+    def fight(_io):
+        _io.battle = False
+        _io.battled += 1
+
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.battled == 3
+
+
+class ArmedEncounterSurfIO(SurfIO):
+    """Refuses on land until SURF is armed, then draws the encounter on the ARMED step.
+
+    That step is the one surf_cross judged with "if it still will not move, the tile is solid" —
+    so an encounter there condemned a perfectly good route as a dead end.
+    """
+
+    def __init__(self, cur, dest):
+        super().__init__(cur, dest)
+        self.drew = False
+
+    def press(self, btn, hold=8, release=8):
+        if btn != self.face:
+            return
+        if self.arms == 0:
+            return  # walking into water, refused until armed
+        if not self.drew:
+            self.drew = True
+            self.battle = True  # the armed step is eaten by the encounter
+            return
+        self.mem[qm.ADDR_MAP], self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y] = self.dest
+
+
+def test_an_encounter_on_the_armed_step_is_not_mistaken_for_a_solid_tile():
+    io = ArmedEncounterSurfIO(1, (2, 0, 0))
+
+    def fight(_io):
+        _io.battle = False
+        _io.battled += 1
+
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.battled == 1 and io.arms == 1  # armed once, fought once, crossed
