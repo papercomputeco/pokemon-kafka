@@ -496,9 +496,31 @@ class Rig:
             self.ctl.wait(30)
             if self.probe_step():
                 return True
+            # Turn away from any body before pressing A. Facing an npc, A does not advance the
+            # box — it *re-opens the conversation*, so the settle can never finish: measured on
+            # the SECRET HOUSE baton, banked at (3,4) looking straight at the man who had just
+            # handed over HM03, where sixteen rounds of A restarted his speech sixteen times.
+            self._face_away_from_bodies()
             self.ctl.press("a")
             self.ctl.wait(40)
         return self.probe_step()
+
+    def _face_away_from_bodies(self) -> None:  # pragma: no cover - drives the emulator
+        """Turn toward a neighbour with nobody on it, so A advances text instead of starting it."""
+        mp, x, y = self.pos()
+        m = self.truth["maps"].get(str(mp))
+        if not m:
+            return
+        bodies = self.bodies()
+        for direction, (dx, dy) in (("down", (0, 1)), ("left", (-1, 0)), ("right", (1, 0)), ("up", (0, -1))):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < m["width"] and 0 <= ny < m["height"]):
+                continue
+            if (nx, ny) in bodies or m["grid"][ny][nx] != "1":
+                continue
+            self.ctl.press(direction)
+            self.ctl.wait(20)
+            return
 
     def battle(self, io=None) -> None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """The agent's full battle turn until the fight ends; a stuck fight is a wedge."""
