@@ -6,30 +6,26 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won. **Get badge 8. Ignore badge 7 entirely** — Cinnabar is water-locked and has
 consumed five legs. This one needs no SURF.
 
-## The route is overland — and the first chain I gave was wrong
+## You route. I do not.
 
-**Measured by the last leg: `29 -> 28` is refused `no-path`. Do not use it, and do not retry it.**
-My first chain went 7,29,28,... and pinning 28 in the goal list dragged the leg back toward the
-blocked area repeatedly. Use the EAST route out of Fuchsia instead:
+**Goal: `BADGES` gains the eighth bit. Giovanni is in Viridian's gym — map 1, warp (32,7) -> 45.**
+That is the objective. The route is yours to find; `scripts/supervisor.py run --goal 45` plans it,
+and `_reroute_around` already bans a failed hop and re-plans, so a wall is a measurement, not a
+dead end.
 
-    7 -> 26 -> 25 -> 24 -> 23 -> 4 -> 21 -> 20 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
+I previously handed over a hand-computed chain. That was wrong: it removed the navigation problem
+from the navigation seat, and worse, pinning map 28 in the goal list dragged the leg back to a hop
+it had already correctly rerouted around.
 
-Every map on it is genuinely land — measured walkable fraction 30-79% (map 30, the sea, is 6%).
-Two more land chains exist if that one blocks; try them in order rather than looping on a wall:
+Measured constraints — facts to route *within*, not a path to walk:
 
-    7 -> 26 -> 25 -> 24 -> 23 -> 4 -> 19 -> 10 -> 16 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
-    7 -> 26 -> 25 -> 24 -> 23 -> 22 -> 5 -> 17 -> 10 -> 16 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
-
-Viridian's gym is a **warp at (32,7) on map 1 -> map 45**. `rom_truth.route` returns a SEA path
-for 7->1 because it is fewer hops; ignore it and pass the chain explicitly:
-
-    uv run python scripts/supervisor.py run \
-        --state data/local_runs/roster-bench/b8_BATON_island_gyarados_safe.state \
-        --goal 7,26,25,24,23,4,21,20,3,15,14,2,13,1 \
-        --budget 2400 --heal --engage --bank vir_approach \
-        --live-label "badge 8 - overland to Viridian"
-
-Then a second leg for the gym (`--goal 45 --engage`), which fights until `BADGES` changes.
+- **The sea crossing is UNSOLVED.** Maps 30 / 31 / 8 / 32 are water (6% walkable vs 30-79% for
+  land). `rom_truth.route` will offer a Fuchsia->Viridian path through them because it is fewer
+  hops. Five legs have died there. **Treat any hop into 30/31/8/32 as banned and route by land.**
+- **`29 -> 28` is refused `no-path`** (measured last leg). Ban it and re-plan; do not retry it.
+- Land routes to Viridian exist heading **east** out of Fuchsia. Find one.
+- The baton starts on the map-30 island, whose walkable region reaches **row 0**, and map 30
+  connects `north -> 7`. One hop north puts you on the mainland. You never need SURF again.
 
 ## NEVER pkill -f a pattern your own command line contains
 
