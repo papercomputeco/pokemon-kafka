@@ -6,25 +6,40 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won. **Get badge 8. Ignore badge 7 entirely** — Cinnabar is water-locked and has
 consumed five legs. This one needs no SURF.
 
-## The route is overland and it is a lookup
+## The route is overland — and the first chain I gave was wrong
 
-`rom_truth.route` returns a *sea* path Fuchsia→Viridian because it is fewer hops. **Do not use
-it.** A land path exists and avoids maps 30/31/8/32 completely:
+**Measured by the last leg: `29 -> 28` is refused `no-path`. Do not use it, and do not retry it.**
+My first chain went 7,29,28,... and pinning 28 in the goal list dragged the leg back toward the
+blocked area repeatedly. Use the EAST route out of Fuchsia instead:
 
-    7 -> 29 -> 28 -> 27 -> 6 -> 18 -> 10 -> 16 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
+    7 -> 26 -> 25 -> 24 -> 23 -> 4 -> 21 -> 20 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
 
-Then Viridian's gym is a **warp at (32,7) on map 1 -> map 45**. Verified from
-`references/rom_truth.json` this run.
+Every map on it is genuinely land — measured walkable fraction 30-79% (map 30, the sea, is 6%).
+Two more land chains exist if that one blocks; try them in order rather than looping on a wall:
 
-Pass the chain explicitly so the router cannot pick the sea:
+    7 -> 26 -> 25 -> 24 -> 23 -> 4 -> 19 -> 10 -> 16 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
+    7 -> 26 -> 25 -> 24 -> 23 -> 22 -> 5 -> 17 -> 10 -> 16 -> 3 -> 15 -> 14 -> 2 -> 13 -> 1
+
+Viridian's gym is a **warp at (32,7) on map 1 -> map 45**. `rom_truth.route` returns a SEA path
+for 7->1 because it is fewer hops; ignore it and pass the chain explicitly:
 
     uv run python scripts/supervisor.py run \
         --state data/local_runs/roster-bench/b8_BATON_island_gyarados_safe.state \
-        --goal 7,29,28,27,6,18,10,16,3,15,14,2,13,1 \
+        --goal 7,26,25,24,23,4,21,20,3,15,14,2,13,1 \
         --budget 2400 --heal --engage --bank vir_approach \
-        --live-label "badge 8 — overland to Viridian"
+        --live-label "badge 8 - overland to Viridian"
 
-Then a second leg for the gym itself (`--goal 45 --engage`), which fights until `BADGES` changes.
+Then a second leg for the gym (`--goal 45 --engage`), which fights until `BADGES` changes.
+
+## NEVER pkill -f a pattern your own command line contains
+
+The last leg ended itself by running `pkill -f "supervisor.py run"`. Its own shell command
+contained that string, so the pattern matched its own process and killed the whole run. This has
+now cost three separate sessions.
+
+- Kill by **PID**: `kill 12345`.
+- If you must match, bracket it so the pattern cannot match itself: `pkill -f "supervisor[.]py"`.
+- `pgrep -f pi-coding-agent` in the SAME command line will also make a later `pkill` match you.
 
 ## The baton
 
