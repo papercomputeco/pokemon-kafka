@@ -6,6 +6,33 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won and **SURF is taught**. What remains is Cinnabar (Blaine, badge 7) and
 Viridian (Giovanni, badge 8).
 
+## START HERE — the last three legs were misdiagnosed. Read this before anything.
+
+The "water/rock checkerboard" and the "unreliable surf position-tracking" in the earlier
+learnings docs are **NOT REAL**. They were an engine bug, now fixed (`51b8290`), and treating
+them as world facts is what cost three legs. Measured on map 30 (6,9):
+
+- `_arm_surf` sent its keystrokes and **returned True even when the game refused** with
+  *"No SURFing on GYARADOS here!"*.
+- The refusal text box then **swallowed every input** — `probe_step()` was False in all four
+  directions. The world was *frozen*, not blocked. Six B presses restored it instantly.
+- So "I surfed and then nothing moved anywhere" was never geography. It was this.
+
+`_arm_surf` now judges by the **position** (using SURF carries you onto the water), clears the
+text first, and emits a `surf.refused` event carrying the sentence. `Rig.textbox()` reads what
+the game is saying. **A False from `_arm_surf` now means the game genuinely refused that cell.**
+
+**Your job:** SURF is refused at (6,9). Find a cell where it is not. Walk the island's six-cell
+strip, try `_arm_surf()` from each cell and each facing, and read `Rig.textbox()` on refusal —
+the game distinguishes *"No SURFing here!"* from *"There's no place to get off!"*, and those are
+two different problems. Then chain hops to the map-31 boundary and on to Cinnabar (map 8), gym
+warp (18,3) -> map 166 for Blaine.
+
+**Do not** re-derive tile tables, diff RAM, or hunt ROM addresses — three legs have now been lost
+that way. If a probe says *nothing works in any direction*, suspect the harness, not the
+cartridge. Baton: `data/local_runs/roster-bench/b8_BATON_island_gyarados_safe.state`
+(map 30 (6,9), 6 badges, party whole: Gyarados L20 73/73 + five L99/100 heavies).
+
 ## START HERE — the two bugs that ended the last leg are FIXED. Go and cross.
 
 Baton: **`data/local_runs/roster-bench/b7_badge_clean.state`** (map 30 at (6,7), 6 badges, party
