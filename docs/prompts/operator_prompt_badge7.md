@@ -6,6 +6,32 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won and **SURF is taught**. What remains is Cinnabar (Blaine, badge 7) and
 Viridian (Giovanni, badge 8).
 
+## Where the last run got to (read this first)
+
+Your own record: `docs/learnings/badge7-8-surf-gap-and-heal-20260901.md`. It got out of the Safari
+Zone, healed at Fuchsia's Center (map **154**, found by interior template — it is not in the
+hardcoded CENTERS table), added `surf_cross`, and **crossed the first water segment into map 30**.
+Then it stopped on a wall it diagnosed exactly:
+
+- **A water route is a land plaza with water edges**, not a lake. Map 30 is 63/1080 walkable, map
+  31 is 100/1800, and neither plaza reaches the far edge — so the crossing is walk, then SURF,
+  then walk, within one map.
+- **Gyarados was the LEAD, so it auto-fought the crossing encounter, lost at L20, and fainted** —
+  and Gen 1 **omits fainted members from the POKeMON menu**, so SURF became unusable. The only
+  surfer in the party was the one that was down.
+
+Two engine bugs from that leg are now FIXED (`9b314dc`), so do not re-derive them:
+- `window_row` blanks the cursor glyph; `field_moves` no longer reads "AAAAAAAASURF" as SURF.
+- `use_field_move(species="Gyarados")` picks by the name the menu prints, via `Rig.menu_row_of`,
+  because a party index is not a menu index when anyone is fainted.
+
+**So separate the roles, which is what your own record recommends:** put a level-99/100 mon in the
+lead with `Rig.lead_swap` so it takes the crossing battles, keep **Gyarados awake and off the
+lead**, and arm SURF with `species="Gyarados"`. Heal at map 154 whenever anything is down —
+a fainted surfer is an unusable surfer.
+
+Batons: `b7_healed.state` (map 154, Fuchsia Center) and `b7_badge.state` (map 30, one segment in).
+
 ## The baton
 
 `data/local_runs/roster-bench/surf_taught.state` — map **222**, the Safari Zone's SECRET HOUSE,
