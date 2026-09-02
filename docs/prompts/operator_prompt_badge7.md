@@ -30,6 +30,28 @@ What is true now:
 - `road.surf_cross` treats a wild encounter as a fight, not a wall — an encounter *cancels* the
   step, which used to be indistinguishable from a refusal.
 
+## Recon is a step now, and the crossing geometry is measured
+
+**`LegRunner.recon` runs before the first consult on any wall** — it talks to the bodies the
+cartridge lists and the sentences reach the seats under `HEARD:`. Across four legs this arc spoke
+to nobody while treating ten `trainer` sprites as obstacles. Two of them, **(8,7) and (13,7)**,
+are adjacent to walkable cells on map 30. Talking to (13,7) opens a battle your L99/L100 party
+wins for free. **Engage them.**
+
+The crossing geometry, measured by leg 5 and now in `road._water_cross`:
+
+- **Map 30's west edge opens on rows 40..52 ONLY.** The island approach is on **row 10**, and the
+  column between carries a **solid notch at rows 38..39**. A straight run west from the island
+  can never cross — that is why four legs failed there, and why the west-edge cells (4,6)..(4,9)
+  all refuse. **Go south to the rows 40..52 band first.**
+- `road._water_cross` proposes a path on the water model and verifies it press-by-press, letting
+  each refusal re-plan. A step cancelled by a wild is fought and re-stepped, not read as solid.
+- The island is **43 cells** (x 4-13, y 0-9). An earlier doc says six; that is wrong.
+
+Two refusals, and they mean different things — the sink records both:
+`"No SURFing on GYARADOS here!"` (standing, that tile will not launch) and
+`"There's no place to get off!"` (already on the water, that way is closed).
+
 ## The baton and the job
 
 `data/local_runs/roster-bench/b8_BATON_island_gyarados_safe.state` — map 30 at **(6,9)**, badges
