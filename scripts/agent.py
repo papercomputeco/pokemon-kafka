@@ -405,7 +405,50 @@ class BattleStrategy:
 
         return power * (accuracy / 100.0) * effectiveness
 
-    def choose_action(self, battle: BattleState, bag_healing: tuple[int, int] | None = None) -> dict:
+    def _select_protect_switch(self, battle: BattleState, party: list[dict]) -> dict | None:
+        """Keep the util lead (sole Surf user) ALIVE in every battle — wild AND trainer.
+
+        Measured blocker (see docs/learnings/surfer-survival-*.md and the 2026-09-02 live probes):
+          - The water crossings to Cinnabar and to Viridian are SURF-only, and the sole Surf user
+            is a L20 Gyarados. If it faints, SURF is lost FOREVER (a fainted member is omitted from
+            the POKeMON menu) and the crossing is blocked.
+          - In Gen 1 the lead (member 0) ALWAYS opens: a mid-battle switch does NOT re-order the
+            lead (measured live — sent Dugtrio in on turn 1, won the Swimmer, and the lead was
+            STILL Gyarados afterwards). So the weak surfer takes the first hit of every battle.
+          - The water foes (L30-40 Tentacool/Shellder) beat a L20 (measured), AND the gyms come
+            AFTER each crossing (Blaine / Giovanni are far stronger). So the surfer must survive the
+            water, the gym, the next water, and the next gym. A lead that "fights and levels" will
+            be burned by any of those long before it is useful.
+
+        Rule: whenever a strictly stronger healthy mon (gap >= 10) exists, hand the fight to it —
+        switch to the strongest healthy backup before the lead takes a hit. This is proactive
+        (fires at full HP, not just in the red) and applies to wild and trainer (gym) battles alike,
+        because the surfer is the opening active in both. A lone strong lead (no gap >= 10 backup)
+        still fights and levels normally. gap >= 10 PROVES the target is a different, stronger mon
+        (if it were the active, gap would be 0), so this never "switches to self".
+        Never fires in data-collection (force_fight) mode, which needs the classic fight-to-resolve.
+        Returns a switch action (slot = strongest healthy backup's party index == PKMN-menu row),
+        or None when the lead should keep fighting.
+        """
+        if self.force_fight:
+            return None
+        active_level = battle.player_level
+        # Strongest healthy mon in the party (may be the active itself), and its party index
+        # (0-based row; the battle PKMN menu lists the party top-to-bottom from the lead).
+        best, best_level = None, -1
+        for i, mon in enumerate(party):
+            if mon["hp"] > 0 and mon["level"] > best_level:
+                best, best_level = i, mon["level"]
+        if best is None:
+            return None
+        gap = best_level - active_level
+        if gap < 10:
+            return None  # the active is the strongest (gap <= 0) or no clearly stronger backup
+        return {"action": "switch", "slot": best}
+
+    def choose_action(
+        self, battle: BattleState, bag_healing: tuple[int, int] | None = None, party: list[dict] | None = None
+    ) -> dict:
         """
         Decide what to do in battle.  Fight-first: leveling up beats running.
 
@@ -469,6 +512,14 @@ class BattleStrategy:
                 # alternate unstick/fight rather than unsticking forever.
                 self._wild_fight_turns = 0
                 return {"action": "unstick"}
+
+        # Protect the lead (wild only): with a much stronger healthy backup available and the
+        # current (weak) mon losing the fight, switch before the weak mon faints — the strong mon
+        # wins the battle and the weak surfer stays ALIVE so SURF survives the crossing. Ranked
+        # above run/heal so we win the fight instead of fleeing it or wasting a potion chip-awake.
+        protect = self._select_protect_switch(battle, party) if party else None
+        if protect is not None:
+            return protect
 
         # Only run when critically low (<10%) in wild battles AND run hasn't
         # failed 3 times already.  Leveling up is more valuable than preserving HP.
@@ -2655,7 +2706,8 @@ class PokemonAgent:
                 f"{battle.enemy_hp}/{battle.enemy_max_hp}"
             )
         else:
-            action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing)
+            party = self.memory.read_party() if self.memory else None
+            action = self.battle_strategy.choose_action(battle, bag_healing=bag_healing, party=party)
 
         act_desc = action["action"]
         if act_desc == "fight":

@@ -337,6 +337,119 @@ class TestBattleStrategy:
         action = self.strategy.choose_action(battle, bag_healing=None)
         assert action["action"] == "fight"
 
+    # -- choose_action: keep the util surfer lead alive (switch to a clearly stronger healthy backup) --
+    # The Cinnabar/Viridian water crossings are SURF-only; the sole Surf user is a L20 Gyarados and
+    # in Gen 1 the lead ALWAYS opens (a mid-battle switch does not re-order the lead — measured),
+    # so the weak surfer takes the first hit of EVERY battle, and the gyms (Blaine/Giovanni) come
+    # after each crossing. A strong healthy backup must take the fight so the surfer stays ALIVE.
+    # See docs/learnings/surfer-survival-is-the-whole-blocker-20260902.md.
+
+    def _surfer_party(self):
+        # read_party() returns {species:<name string>, level, hp, max_hp}; species is a NAME, not
+        # the int id. Gyarados (the surfer) is the lead at index 0; the strong mon is index 1.
+        return [
+            {"species": "Gyarados", "level": 20, "hp": 73, "max_hp": 73},
+            {"species": "Dugtrio", "level": 100, "hp": 259, "max_hp": 259},
+            {"species": "Primeape", "level": 99, "hp": 300, "max_hp": 300},
+            {"species": "Pidgeot", "level": 99, "hp": 347, "max_hp": 347},
+            {"species": "Hypno", "level": 99, "hp": 341, "max_hp": 341},
+            {"species": "Charizard", "level": 100, "hp": 341, "max_hp": 341},
+        ]
+
+    def test_protect_switch_lead_in_danger_wild_with_strong_backup(self):
+        # The measured case: L20 surfer outmatched, HP in the red, a far stronger healthy backup
+        # exists -> send the strong mon in. Slot = the strongest healthy backup's party index.
+        battle = self._make_battle(
+            battle_type=1,
+            player_hp=50,
+            player_max_hp=73,
+            player_level=20,
+            player_species=22,
+            enemy_level=30,
+            enemy_species=24,
+        )
+        action = self.strategy.choose_action(battle, party=self._surfer_party())
+        assert action == {"action": "switch", "slot": 1}  # Dugtrio (first L100)
+
+    def test_protect_switch_even_at_full_hp_when_weak_lead(self):
+        # Proactive: even a healthy lead (full HP) is the weak surfer — there is a L100 backup, so
+        # hand the fight to it BEFORE the surfer is hit (Gen 1: the lead always opens).
+        battle = self._make_battle(
+            battle_type=1,
+            player_hp=73,
+            player_max_hp=73,
+            player_level=20,
+            player_species=22,
+            enemy_level=10,
+            enemy_species=24,
+        )
+        action = self.strategy.choose_action(battle, party=self._surfer_party())
+        assert action == {"action": "switch", "slot": 1}
+
+    def test_protect_no_switch_when_lead_is_strongest(self):
+        # Lead is already the strongest healthy mon -> no strictly-stronger backup (gap <= 0),
+        # so never target self: it keeps fighting.
+        battle = self._make_battle(
+            battle_type=1,
+            player_hp=20,
+            player_max_hp=100,
+            player_level=100,
+            player_species=1,
+            enemy_level=30,
+            enemy_species=24,
+        )
+        party = [
+            {"species": "Dugtrio", "level": 100, "hp": 20, "max_hp": 259},  # the lead (strongest)
+            {"species": "Rattata", "level": 10, "hp": 40, "max_hp": 40},
+        ]
+        action = self.strategy.choose_action(battle, party=party)
+        assert action["action"] != "switch"
+
+    def test_protect_switch_in_trainer_battle_with_strong_backup(self):
+        # The gyms are trainer fights and come after each crossing: a weak surfer lead must NOT
+        # open on Blaine/Giovanni and burn — a strong healthy backup takes the fight so SURF
+        # survives for the next water leg.
+        battle = self._make_battle(
+            battle_type=2,
+            player_hp=73,
+            player_max_hp=73,
+            player_level=20,
+            player_species=22,
+        )
+        action = self.strategy.choose_action(battle, party=self._surfer_party())
+        assert action == {"action": "switch", "slot": 1}
+
+    def test_protect_no_switch_in_force_fight_mode(self):
+        # Data-collection mode preserves the classic fight-to-resolve behaviour for clean labels.
+        s = BattleStrategy(self.chart, force_fight=True)
+        battle = self._make_battle(
+            battle_type=1,
+            player_hp=30,
+            player_max_hp=73,
+            player_level=20,
+            player_species=22,
+        )
+        action = s.choose_action(battle, party=self._surfer_party())
+        assert action["action"] != "switch"
+
+    def test_protect_no_switch_below_level_gap(self):
+        # Backup is only marginally stronger (gap < 10) -> not "clearly stronger"; keep the lead.
+        battle = self._make_battle(
+            battle_type=1,
+            player_hp=30,
+            player_max_hp=73,
+            player_level=20,
+            player_species=22,
+            enemy_level=20,
+            enemy_species=24,
+        )
+        party = [
+            {"species": "Gyarados", "level": 20, "hp": 30, "max_hp": 73},  # the lead
+            {"species": "Staryu", "level": 25, "hp": 50, "max_hp": 50},  # gap = 5 < 10
+        ]
+        action = self.strategy.choose_action(battle, party=party)
+        assert action["action"] != "switch"
+
     def test_choose_action_fight_best_move(self):
         battle = self._make_battle(
             moves=[0x01, 0x2D, 0x00, 0x00],
@@ -1959,9 +2072,10 @@ class TestRunBattleTurn:
         )
         ag.memory.read_battle_state = MagicMock(return_value=battle)
         ag.memory.find_healing_item = MagicMock(return_value=(0, 0x14))
+        ag.memory.read_party = MagicMock(return_value=[])
         ag.battle_strategy.choose_action = MagicMock(return_value={"action": "fight", "move_index": 0})
         ag.run_battle_turn()
-        ag.battle_strategy.choose_action.assert_called_once_with(battle, bag_healing=(0, 0x14))
+        ag.battle_strategy.choose_action.assert_called_once_with(battle, bag_healing=(0, 0x14), party=[])
 
     def test_unstick_action_mashes_b(self, tmp_path):
         ag = self._setup_agent_for_battle(tmp_path, {"action": "unstick"})
