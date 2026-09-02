@@ -111,6 +111,7 @@ class Rig:
         self.pairs = rt.loaded_pairs(self.truth)
         self.ag.catch_wanted = set()  # a leg is travel, not a hunt; the quartermaster arms catching
         self.turn = 0
+        self._surfer: str | None = None  # the party member that answered to SURF, once one has
         self.recorder = None
         self.telemetry_root = telemetry_root
         self.run_id = run_id or uuid.uuid4().hex[:12]
@@ -630,10 +631,27 @@ class Rig:
             return res
         return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
 
-    def _arm_surf(self) -> bool:  # pragma: no cover - opens the field-move menu; verified live
-        """Arm SURF on the lead for the next step into water. Surf is the lead's job here (member
-        0, which is the route's surfer, and `use_field_move`'s own default member)."""
-        return self.use_field_move("SURF")
+    def _arm_surf(self) -> bool:
+        """Arm SURF on whoever actually knows it — asked by species, never assumed to be the lead.
+
+        This used to read "Surf is the lead's job (member 0)". That assumption ended a leg: to
+        make the surfer take the crossing encounters it was put in the lead, it lost at L20 and
+        fainted, and Gen 1 **omits fainted members from the POKeMON menu** — so the party's only
+        surfer became unselectable and SURF stopped existing. The surfer therefore has to sit off
+        the lead, which means the arming call cannot assume member 0 any more.
+
+        Asks the remembered surfer first (the common case is many crossings on one leg), then the
+        rest of the party in order, skipping anyone at 0 HP because the menu will not draw them.
+        """
+        if self._surfer and self.use_field_move("SURF", species=self._surfer):
+            return True
+        for name, _lvl, hp in self.party():
+            if hp <= 0 or name == self._surfer:
+                continue
+            if self.use_field_move("SURF", species=name):
+                self._surfer = name
+                return True
+        return False
 
     def approach(self, cells) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Get onto one of ``cells`` on this map. Walk first; on a facility floor, use the oracle.
@@ -814,13 +832,28 @@ class Rig:
 
     # ---- field moves ------------------------------------------------------------------------
 
-    def field_moves(self, rows: int = 8) -> list[str]:
+    def field_moves(self) -> list[str]:
         """The field submenu's entries, decoded from the window layer, top to bottom.
 
         Read without the cursor glyph: with it, the highlighted entry splices onto the row above
         and a move the menu never offered appears to be there.
         """
-        return [self.window_row(4 + 2 * i) for i in range(rows)]
+        rows_ = self.menu_rows(first=0, last=20)
+        canc = next((i for i, t in rows_ if t.strip().upper().startswith("CANCEL")), None)
+        if canc is None:
+            return []
+        base = canc - 2 * self.mem[qm.ADDR_MENU_MAX]
+        out = []
+        for i in range(base, canc + 1, 2):
+            t = self.window_row(i).strip().upper()
+            tail = next((c for c in ("STATS", "SWITCH", "CANCEL") if c in t), None)
+            if tail:
+                out.append(tail)
+                continue
+            while t.startswith("AAAA") and len(t) > 4:  # the cursor glyph run splices the row
+                t = t[4:]
+            out.append(t.strip())
+        return out
 
     def menu_row_of(self, wanted: str, first: int = 0, last: int = 18) -> int | None:
         """The cursor index of the entry whose text contains ``wanted``, or None.
@@ -885,21 +918,41 @@ class Rig:
         self.ctl.press("a")
         self.ctl.wait(60)
         target = name.strip().upper()
-        for _ in range(10):
-            cursor = self.mem[qm.ADDR_MENU_CUR]
-            if self.window_row(4 + 2 * cursor).upper().startswith(target):
-                self.ctl.press("a")
-                self.ctl.wait(60)
-                return True
-            if target not in " ".join(self.field_moves()).upper():
+        # The field submenu overlays the roster (entries sit below it), so the entry base is read
+        # from the screen rather than assumed: CANCEL is the last entry and renders clean, and an
+        # entry is (row - base) // 2 off it. Measured on the lead: SURF r10, STATS r12,
+        # SWITCH r14 (under the prompt), CANCEL r16, MAX 3 -> base 10.
+        # Containment, not startswith: the cursor row decodes 'AAAAAAAA SURF' and the prompt row
+        # decodes 'Choose a P SWITCH', so a startswith check misses both entries.
+        rows = self.menu_rows(first=0, last=20)
+        canc = next((i for i, t in rows if t.strip().upper().startswith("CANCEL")), None)
+        if canc is None:
+            print(f"  field submenu for member {member} drew no CANCEL row; not arming", flush=True)
+            return False
+        maxc = self.mem[qm.ADDR_MENU_MAX]
+        base = canc - 2 * maxc
+        want = None
+        for i, t in rows:
+            if (i - base) % 2 == 0 and 0 <= (i - base) // 2 <= maxc and target in t.strip().upper():
+                want = (i - base) // 2
                 break
-            self.ctl.press("down")
+        if want is None:
+            print(f"  no field move called {name!r} on party member {member}", flush=True)
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(30)
+            return False
+        for _ in range(10):
+            if self.mem[qm.ADDR_MENU_CUR] == want:
+                break
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < want else "up")
             self.ctl.wait(20)
-        print(f"  no field move called {name!r} on party member {member}", flush=True)
-        for _ in range(6):
-            self.ctl.press("b")
-            self.ctl.wait(30)
-        return False
+        if self.mem[qm.ADDR_MENU_CUR] != want:
+            print(f"  could not seat the cursor on {name!r} (row {base + 2 * want})", flush=True)
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(60)
+        return True
 
     ADDR_BATTLE_COL = 0xCC25  # the battle menu's column: 9 = left (FIGHT/ITEM), 15 = right (PKMN/RUN)
 
@@ -1103,9 +1156,18 @@ class Rig:
         return bool(self.mem[qm.ADDR_IN_BATTLE])
 
     def surf_onto(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
-        """Ride onto water. The predicate is the position, never the menu."""
+        """Ride onto water. The predicate is the position, never the menu.
+
+        Measured on map 30 (2026-09-02): from (6,4), facing up refuses with "No SURFing on
+        GYARADOS here!" while facing down surfs — and the two faced tiles carry the *same* id in
+        the extracted grid. There is no tile test that predicts this, so the direction is chosen
+        by asking the game and watching the position, which is what this returns.
+        """
         before = self.pos()
-        if not self.use_field_move("SURF", face=face):
+        if face:
+            self.ctl.press(face)
+            self.ctl.wait(25)
+        if not self._arm_surf():
             return False
         for _ in range(4):
             self.ctl.press("a")

@@ -970,3 +970,64 @@ def test_field_moves_reports_nothing_when_the_submenu_is_not_on_screen():
     r = _menu_rig(menu)
     r.window_row = menu.window_row
     assert r.field_moves() == []
+
+
+# ------------------------------------------------------------------- arming SURF off the lead
+
+
+class _SurfRig:
+    """A party plus the one member whose menu offers SURF, and a record of who was asked."""
+
+    def __init__(self, party, knows):
+        self._party = party
+        self.knows = knows
+        self.asked = []
+
+    def party(self):
+        return self._party
+
+    def use_field_move(self, name, face=None, member=0, species=None):
+        self.asked.append(species)
+        return name == "SURF" and species == self.knows
+
+
+def _surf_rig(party, knows):
+    r = rig.Rig.__new__(rig.Rig)
+    fake = _SurfRig(party, knows)
+    r.party = fake.party
+    r.use_field_move = fake.use_field_move
+    r._surfer = None
+    return r, fake
+
+
+def test_surf_is_armed_on_whoever_knows_it_not_on_the_lead():
+    """The lead is the battler; the surfer rides behind it. Assuming member 0 ended a leg."""
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 73)]
+    r, fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is True
+    assert fake.asked == ["Dugtrio", "Gyarados"]  # asked by species, in party order
+    assert r._surfer == "Gyarados"
+
+
+def test_the_surfer_is_remembered_so_later_crossings_ask_it_first():
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 73)]
+    r, fake = _surf_rig(party, "Gyarados")
+    r._arm_surf()
+    fake.asked.clear()
+    assert r._arm_surf() is True
+    assert fake.asked == ["Gyarados"]  # one call, not a re-scan of the whole party
+
+
+def test_a_fainted_member_is_never_asked_because_the_menu_does_not_draw_it():
+    """Gen 1 omits fainted members from the POKeMON menu, so asking for one selects a neighbour."""
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 0)]
+    r, fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is False
+    assert "Gyarados" not in fake.asked
+
+
+def test_a_party_with_no_surfer_reports_it_rather_than_arming_something_else():
+    party = [("Dugtrio", 100, 259), ("Hypno", 99, 341)]
+    r, _fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is False
+    assert r._surfer is None
