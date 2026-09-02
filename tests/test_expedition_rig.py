@@ -265,42 +265,98 @@ def test_text_from_returns_only_what_the_action_produced():
 
 
 class FieldMenuRig:
-    """A party field submenu whose rows are whatever the mon happens to know."""
+    """A field submenu in its measured screen layout: entry rows two apart (GYARADOS draws them
+    at 10-16, MAX 3), STATS/SWITCH/CANCEL the fixed tail, the cursor row prefixed with the 'AAAA'
+    glyph run, and a prompt that can splice onto an entry ('Choose a P SWITCH'). The base is a
+    parameter of the screen, not of the menu - the code under test anchors off CANCEL, so this
+    sits at row 4 to keep every row inside the 20-row window."""
 
-    def __init__(self, moves):
-        self.moves = moves
-        self.cursor = 0
+    BASE = 4
+    TAIL = ("STATS", "SWITCH", "CANCEL")
+
+    def __init__(self, moves, cursor=0, prompt_row=None, prompt_text="Choose a P SWITCH"):
+        self.entries = [m.strip().upper() for m in moves] + list(self.TAIL)
+        self.cursor = cursor
         self.chosen = None
-        self.presses = []
+        self.prompt_row = prompt_row
+        self.prompt_text = prompt_text
 
     def window_row(self, row):
-        i = (row - 4) // 2
-        return self.moves[i] if 0 <= i < len(self.moves) else ""
+        if self.prompt_row is not None and row == self.prompt_row:
+            return self.prompt_text
+        i = (row - self.BASE) // 2
+        if row % 2 or not (0 <= i < len(self.entries)):
+            return ""
+        text = self.entries[i]
+        return ("AAAA " + text) if i == self.cursor else text
 
 
-def test_a_field_move_is_found_by_name_not_by_a_remembered_row():
-    """`cut_facing` hardcodes CUT on row 0. Which move sits on which row depends on the mon."""
+class _Mem(dict):
+    """CUR/MAX read live off the menu, like the RAM the rig reads in production."""
+
+    def __init__(self, menu):
+        super().__init__()
+        self._menu = menu
+
+    def __getitem__(self, key):
+        if key == 0xCC26:
+            return self._menu.cursor
+        if key == 0xCC28:
+            return len(self._menu.entries) - 1
+        return super().__getitem__(key)
+
+
+class _Ctl:
+    def __init__(self, menu):
+        self._menu = menu
+        self.presses = []
+
+    def press(self, b):
+        self.presses.append(b)
+        m = self._menu
+        if b == "down":
+            m.cursor = min(m.cursor + 1, len(m.entries) - 1)
+        elif b == "up":
+            m.cursor = max(m.cursor - 1, 0)
+        elif b == "a":
+            m.chosen = m.entries[m.cursor]
+
+    def wait(self, n=0):
+        pass
+
+
+def _menu_rig(menu):
     r = rig.Rig.__new__(rig.Rig)
-    menu = FieldMenuRig(["FLY", "SURF", "STRENGTH", "CUT"])
     r.window_row = menu.window_row
-    assert r.field_moves(4) == ["FLY", "SURF", "STRENGTH", "CUT"]
+    r.mem = _Mem(menu)
+    r.ctl = _Ctl(menu)
+    return r
+
+
+def test_a_field_move_is_found_in_its_row_not_by_a_remembered_row_number():
+    """Which move sits on which row depends on the mon, so the row is read, not assumed."""
+    r = _menu_rig(FieldMenuRig(["FLY", "SURF", "STRENGTH", "CUT"]))
+    assert r.field_moves() == ["FLY", "SURF", "STRENGTH", "CUT", "STATS", "SWITCH", "CANCEL"]
+
+
+def test_the_surfer_surf_is_selected_even_on_the_garbled_cursor_row():
+    """Measured on GYAARADOS: the cursor row decodes 'AAAA SURF', so startswith would miss it."""
+    menu = FieldMenuRig(["SURF"], prompt_row=8)  # the prompt splicing onto SWITCH, as measured
+    r = _menu_rig(menu)
+    assert r.use_field_move("SURF") is True
+    assert menu.chosen == "SURF"
+
+
+def test_a_field_move_below_the_cursor_is_won_not_the_first_row():
+    menu = FieldMenuRig(["STRENGTH", "SURF"])
+    r = _menu_rig(menu)
+    assert r.use_field_move("SURF") is True
+    assert menu.chosen == "SURF"
+    assert "down" in r.ctl.presses  # the cursor was walked onto SURF, not guessed at
 
 
 def test_a_move_the_party_does_not_know_is_reported_not_guessed(capsys):
-    r = rig.Rig.__new__(rig.Rig)
-    menu = FieldMenuRig(["CUT", "FLASH"])
-    r.window_row = menu.window_row
-    r.field_moves = lambda rows=8: menu.moves
-    r.mem = {0xCC26: 0}
-
-    class Ctl:
-        def press(self, b):
-            pass
-
-        def wait(self, n=0):
-            pass
-
-    r.ctl = Ctl()
+    r = _menu_rig(FieldMenuRig(["CUT", "FLASH"]))
     assert r.use_field_move("SURF") is False
     assert "no field move called 'SURF'" in capsys.readouterr().out
 
@@ -899,3 +955,18 @@ def test_menu_row_of_finds_the_entry_the_menu_actually_draws():
     assert rig.Rig.menu_row_of(menu, "HYPNO") == 2
     assert rig.Rig.menu_row_of(menu, "PRIMEAPE") == 0
     assert rig.Rig.menu_row_of(menu, "GYARADOS") is None  # fainted: simply not drawn
+
+
+def test_field_moves_reports_nothing_when_the_submenu_is_not_on_screen():
+    """The entry base is anchored on CANCEL, so a screen without one is not a field submenu.
+
+    Measured on map 30: `use_field_move` is called blind after a `start` press, and if the menu
+    did not open (mid-animation, or a dialog still up) every row decodes to roster text. Reading
+    an entry list out of that invents moves the party does not have — the same class of error as
+    the 'AAAAAAAASURF' splice, so the honest answer is an empty list.
+    """
+    menu = FieldMenuRig(["SURF"])
+    menu.window_row = lambda row: ""  # nothing drawn: no CANCEL, so no base to count entries from
+    r = _menu_rig(menu)
+    r.window_row = menu.window_row
+    assert r.field_moves() == []
