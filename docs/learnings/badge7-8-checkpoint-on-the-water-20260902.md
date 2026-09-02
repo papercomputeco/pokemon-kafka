@@ -42,7 +42,48 @@ and remember the answerer; `surf_cross` and `cross()` route through it.
 2. The leg before that put Gyarados on the lead to win the crossing fights; it lost at L20,
    fainted, and became unselectable in the POKeMON menu — the only surfer gone.
 
-## Open questions the leg must answer by measurement, not by memory
+## Session update (later the same day, badge7 crew)
+
+**Banked baton now: `b7_badge_clean.state`** — map 30 (6,7), on the land island, 6 badges
+(0x3F), in_battle False. Party: Gyarados L20 73/73 (the ONLY SURF user, lead), Dugtrio L100
+259, Primeape L99 300, Pidgeot L99 347, Hypno L99 341, Charizard L100 341. **Bag: 0 balls**
+(measured, ids 1–4 all count 0). So any catch-gate must be fought; the Gyarados-surfer + the
+strong team can handle a fight-gate.
+
+**New measured facts (this session, not recalled):**
+
+- **The "island" (map 30, x4–13, y6–9) is walkable LAND, not water.** The player walks it
+  (grass-encounter steps). The SEA is the non-walkable ring *around* it: tile `1` = surf-able
+  water, tile `4` = solid rock/cliff, laid out as a **checkerboard** (water/rock/water/rock). So
+  surf navigation is a water/rock maze, not an open sea.
+- **The island's west shore (x4) is blocked by a cliff** (x3 = tile `4` at y6–9), so there is no
+  clean surf-out to the west on rows 6–9. Surrounding water tiles (`1`) are adjacent to the
+  island's south (x4/x6/x8.., y10) and north (y5) and east (x14) shores — those are the
+  surf-able edges.
+- **SURF arming was the first failure, now fixed.** `use_field_move`/`menu_row_of` read the field
+  submenu off the sticky window layer and returned `None` on a clean baton → stuck-on-edge. Replaced
+  with `Rig.surf_facing()`: a fixed keystroke (START → POKeMON [row 1, the one nav, read off the
+  trustworthy ADDR_MENU_CUR] → A/up → A/up → A), no window text. Measured fact it rests on: Gyarados
+  is party index 0 and its field submenu opens on SURF (top of both menus). `surf_cross`'s water
+  step is the real predicate. **Committed `0062e02`.** After the fix, surf arming works (water
+  movement is observed); the remaining difficulty is the water/rock checkerboard navigation with
+  encounter-canceled steps, not the arming.
+
+**Remaining blockers (in order):**
+1. **The Cinnabar crossing** — surf the water/rock checkerboard across map 30's sea → map 31 →
+   Cinnabar (8), handling water encounters. This is the unsolved navigation; the arming no longer
+   is.
+2. **Blaine's gym (166)** — the Gengar in front is a fight (not a catch) gate; the strong team
+   handles it. Blaine himself: strong team should win.
+3. **The Viridian chain** — a *second* sea crossing (8 → 32/0/12/1) then Giovanni's gym (45).
+
+**What the next attempt needs:** a robust surf driver that (a) picks a surf-able shore edge (tile
+`1` adjacent to the island), (b) steps with SURF armed, (c) on an encounter-canceled step fights
+and re-steps (not give-up — `surf_cross` still treats a cancelled step as "refused", which is the
+open `road.py` bug), (d) navigates the water/rock maze to map 31. Then badges 7 and 8 are both
+winnable by the existing strong team.
+
+## Original open questions the leg must answer by measurement, not by memory
 
 - How does `cross()`/`surf_cross` decide that an edge hop is surfable? (road.py + rig.cross)
 - Can map 31's land plaza be reached from the water (surf onto shore tiles, or the water is
