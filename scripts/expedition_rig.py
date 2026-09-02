@@ -631,18 +631,70 @@ class Rig:
             return res
         return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
 
-    def _arm_surf(self) -> bool:
-        """Arm SURF on whoever actually knows it — asked by species, never assumed to be the lead.
+    def surf_facing(self, face: str | None = None) -> None:
+        """Arm SURF on the lead (member 0) with a fixed key sequence — no window/row read.
 
-        This used to read "Surf is the lead's job (member 0)". That assumption ended a leg: to
-        make the surfer take the crossing encounters it was put in the lead, it lost at L20 and
-        fainted, and Gen 1 **omits fainted members from the POKeMON menu** — so the party's only
-        surfer became unselectable and SURF stopped existing. The surfer therefore has to sit off
-        the lead, which means the arming call cannot assume member 0 any more.
+        The flaky path this replaces, ``use_field_move`` -> ``menu_row_of``, seats the cursor off
+        the sticky window-layer text and returned ``None`` on a clean baton. But the two facts that
+        matter here are measured, not recalled: Gyarados (species 22) sits at party index 0, so it
+        is row 0 of the POKeMON roster; and the lead's field submenu is SURF -> STATS -> SWITCH ->
+        CANCEL, so surf is row 0 (``_select_move``'s "wrap with up" note). Surf is thus the TOP of
+        both menus, so the whole arm is a fixed keystroke — START, POKeMON (row 1, the only
+        navigation, read off the trustworthy ADDR_MENU_CUR), then three A's, with an up-wrap before
+        each to seat row 0 defensively regardless of where the cursor opened. The step onto water
+        immediately after (``surf_cross``) is the real predicate: a move to water means SURF armed;
+        a refused step means it did not.
 
-        Asks the remembered surfer first (the common case is many crossings on one leg), then the
-        rest of the party in order, skipping anyone at 0 HP because the menu will not draw them.
+        ``face`` is the water's bearing for a standalone arm; on the crossing path the player is
+        already facing water (the refused step set it), so pass nothing.
         """
+        c = self.ctl
+        for _ in range(5):  # close whatever is open before opening ours
+            c.press("b")
+            c.wait(25)
+        if face:
+            c.press(face)
+            c.wait(25)
+        c.press("start")
+        c.wait(50)
+        for _ in range(8):  # POKeDEX is row 0; POKeMON is row 1
+            if self.mem[qm.ADDR_MENU_CUR] == 1:
+                break
+            c.press("down" if self.mem[qm.ADDR_MENU_CUR] < 1 else "up")
+            c.wait(20)
+        c.press("a")  # the roster opens
+        c.wait(60)
+        c.press("up")  # top of the roster = the lead (already there; wrap is harmless)
+        c.wait(20)
+        c.press("a")  # the lead's field submenu opens
+        c.wait(60)
+        c.press("up")  # top of the field list = SURF (already there; wrap is harmless)
+        c.wait(20)
+        c.press("a")  # SURF
+        c.wait(60)
+
+    def _arm_surf(self) -> bool:
+        """Arm SURF on whoever actually knows it — the measured lead first, then by species.
+
+        The old path assumed "Surf is the lead's job (member 0)" and then read the species off the
+        sticky window (``menu_row_of``), which failed on a clean baton and left the crossing
+        stuck-on-edge. Two measured facts make the lead path safe: Gyarados (species 22) is at
+        party index 0, and its field submenu opens on SURF. So when the lead is that surfer we arm
+        it with a fixed key sequence (``surf_facing``) — no window read — and let the following
+        water step prove it. Otherwise we fall back to the species scan (a live member that knows
+        SURF, remembered first).
+
+        The faint-omission hazard that forced this design still stands: a fainted member is not
+        drawn on the POKeMON menu, so a 0 HP surfer cannot be armed at all — the protect rule in
+        ``BattleStrategy`` exists precisely to keep the lead's surfer alive across the crossings.
+        """
+        from memory_reader import SPECIES_ID_MAP
+
+        lead = SPECIES_ID_MAP.get(self.mem[ADDR_PARTY_STRUCTS], "?")
+        if lead in ("Gyarados", self._surfer) and lead != "?":
+            self.surf_facing()
+            self._surfer = lead
+            return True
         if self._surfer and self.use_field_move("SURF", species=self._surfer):
             return True
         for name, _lvl, hp in self.party():
