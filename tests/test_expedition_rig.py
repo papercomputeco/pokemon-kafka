@@ -1082,32 +1082,63 @@ class _KeyCtl:
 
 
 def test_surf_facing_drives_a_fixed_sequence_and_reads_no_window_text():
-    """The window read returned None on a clean baton, so the lead's arm is keystrokes only.
+    """The window read returned None on a clean baton, so the lead's arm is keystrokes + the
+    cursor register only (no window read): START, POKeMON (seated off ADDR_MENU_CUR), roster
+    seated to row 0 by cursor+scroll, field list the same, then A's."""
+    r = rig.Rig.__new__(rig.Rig)
+    r.ctl = _KeyCtl()
+    r.mem = {qm.ADDR_MENU_CUR: 1, rig.ADDR_LIST_SCROLL: 0}
 
-    START, then POKeMON (row 1, seated off ADDR_MENU_CUR, the one read that is trustworthy),
-    then A/up/A/up/A. The predicate is the water step afterwards, never this.
+    def press(button, hold=8, release=8):
+        r.ctl.presses.append(button)
+        if button == "up" and "start" in r.ctl.presses:
+            r.mem[qm.ADDR_MENU_CUR] = (r.mem[qm.ADDR_MENU_CUR] - 1) % 6
+
+    r.ctl.press = press
+    r.surf_facing()
+    assert r.ctl.presses == ["b"] * 5 + ["start", "a", "up", "a", "a"]
+
+
+def test_surf_facing_at_row_zero_never_wraps_onto_the_last_member():
+    """Gen 1 menus wrap: a blind up from row 0 stepped onto the LAST member (measured on the
+    badge-7 baton: the arm walked into Charizard, whose only field move is CUT, and left
+    "There isn't nothing to CUT!" on the edge). With both menus opening on row 0, not a
+    single up may appear between the roster A and the SELECT A - and SURF still lands.
     """
     r = rig.Rig.__new__(rig.Rig)
     r.ctl = _KeyCtl()
-    r.mem = {qm.ADDR_MENU_CUR: 1}
+    r.mem = {qm.ADDR_MENU_CUR: 0, rig.ADDR_LIST_SCROLL: 0}  # START opens on POKeDEX (row 0)
+
+    def press(button, hold=8, release=8):
+        r.ctl.presses.append(button)
+        if button in ("up", "down") and "start" in r.ctl.presses:
+            r.mem[qm.ADDR_MENU_CUR] = (r.mem[qm.ADDR_MENU_CUR] - (1 if button == "up" else -1)) % 6
+        if button == "a":
+            r.mem[qm.ADDR_MENU_CUR] = 0  # every menu opens on its first entry (measured)
+
+    r.ctl.press = press
     r.surf_facing()
-    assert r.ctl.presses == ["b"] * 5 + ["start", "a", "up", "a", "up", "a"]
+    p = r.ctl.presses
+    assert p == ["b"] * 5 + ["start", "down", "a", "a", "a"]  # seat row 1, roster 0, field 0, SURF
+    assert "up" not in p, "an up at row 0 would wrap onto Charizard and fire CUT"
 
 
 def test_surf_facing_seats_the_start_menu_on_pokemon_and_can_turn_first():
     r = rig.Rig.__new__(rig.Rig)
     r.ctl = _KeyCtl()
-    r.mem = {qm.ADDR_MENU_CUR: 3}  # opened lower down; it has to walk up to row 1
+    r.mem = {qm.ADDR_MENU_CUR: 3, rig.ADDR_LIST_SCROLL: 0}  # opened lower down; it has to walk up to row 1
 
     def press(button, hold=8, release=8):
         r.ctl.presses.append(button)
         if button in ("up", "down") and r.ctl.presses.count("start"):
-            r.mem[qm.ADDR_MENU_CUR] = 1
+            r.mem[qm.ADDR_MENU_CUR] = (r.mem[qm.ADDR_MENU_CUR] - (1 if button == "up" else -1)) % 6
 
     r.ctl.press = press
     r.surf_facing(face="down")
-    assert "down" in r.ctl.presses[:6]  # the turn happened before the menu opened
+    assert "down" in r.ctl.presses[:7]  # the turn happened before the menu opened
     assert r.ctl.presses.count("start") == 1
+    # and never the blind-wrap failure: seating cost at most one up per menu, not the whole budget
+    assert r.ctl.presses.count("up") <= r.ctl.presses.count("a") + 2
 
 
 def test_the_move_table_is_read_from_the_cartridge_once_and_then_cached(monkeypatch, tmp_path):

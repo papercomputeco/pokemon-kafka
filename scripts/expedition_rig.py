@@ -701,12 +701,13 @@ class Rig:
             c.wait(20)
         c.press("a")  # the roster opens
         c.wait(60)
-        c.press("up")  # top of the roster = the lead (already there; wrap is harmless)
-        c.wait(20)
+        # Seat row 0 by cursor+scroll, never by a blind up: Gen 1 wraps, so up from row 0 lands
+        # on the LAST member (measured on this baton it walked into Charizard and CUT, "There
+        # isn't anything to CUT!"). menu_cursor_to walks down-from-above only and never wraps.
+        self.menu_cursor_to(0)
         c.press("a")  # the lead's field submenu opens
         c.wait(60)
-        c.press("up")  # top of the field list = SURF (already there; wrap is harmless)
-        c.wait(20)
+        self.menu_cursor_to(0)  # top of the field list = SURF; the same wrap guard
         c.press("a")  # SURF
         c.wait(60)
 
