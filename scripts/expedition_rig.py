@@ -729,12 +729,23 @@ class Rig:
 
     # ---- the lift ---------------------------------------------------------------------------
 
-    def window_row(self, row: int) -> str:
-        """One decoded row of the window layer — where menus render (the background stays blank)."""
+    CURSOR_TILE = 0xED  # the ">" glyph the menu cursor draws in the column it sits on
+
+    def window_row(self, row: int, cursor: bool = False) -> str:
+        """One decoded row of the window layer — where menus render (the background stays blank).
+
+        The cursor glyph is blanked unless ``cursor=True``. It renders *into* the row it points
+        at, so a row read raw can splice the highlighted entry onto its neighbour: the badge-7 run
+        read "AAAAAAAASURF" and matched it as a field move called SURF that the menu did not
+        actually offer. Callers that need to know where the highlight sits ask for it explicitly.
+        """
         from text_decoder import decode_row
 
         tm = self.pb.tilemap_window
-        return decode_row([tm.tile_identifier(x, row) for x in range(20)]).strip()
+        tiles = [tm.tile_identifier(x, row) for x in range(20)]
+        if not cursor:
+            tiles = [0x7F if t == self.CURSOR_TILE else t for t in tiles]
+        return decode_row(tiles).strip()
 
     def elevator_floors(self) -> list[str]:
         """The floor labels the panel is currently showing, top to bottom."""
@@ -804,11 +815,33 @@ class Rig:
     # ---- field moves ------------------------------------------------------------------------
 
     def field_moves(self, rows: int = 8) -> list[str]:
-        """The field submenu's entries, decoded from the window layer, top to bottom."""
+        """The field submenu's entries, decoded from the window layer, top to bottom.
+
+        Read without the cursor glyph: with it, the highlighted entry splices onto the row above
+        and a move the menu never offered appears to be there.
+        """
         return [self.window_row(4 + 2 * i) for i in range(rows)]
 
+    def menu_row_of(self, wanted: str, first: int = 0, last: int = 18) -> int | None:
+        """The cursor index of the entry whose text contains ``wanted``, or None.
+
+        Gen 1 **omits fainted members from the POKeMON menu**, so a party index is not a menu
+        index: with two of six down, "member 0" selects whoever is drawn first, not the mon the
+        caller meant. Match the name the menu prints instead — measured on the badge-7 leg, where
+        the only surfer was the one that had fainted and the menu simply did not list it.
+        """
+        rows = self.menu_rows(first, last)
+        hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
+        if hit is None:
+            return None
+        present = {i for i, _t in rows}
+        start = hit
+        while start - 2 in present and start - 1 not in present:
+            start -= 2
+        return (hit - start) // 2
+
     def use_field_move(
-        self, name: str, face: str | None = None, member: int = 0
+        self, name: str, face: str | None = None, member: int = 0, species: str | None = None
     ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Use a field move by *name*, choosing it off the menu the game draws.
 
@@ -836,10 +869,18 @@ class Rig:
             self.ctl.wait(20)
         self.ctl.press("a")
         self.ctl.wait(60)
+        # By species when given: a fainted member is not drawn, so party index != menu index.
+        target = member if species is None else self.menu_row_of(species)
+        if target is None:
+            print(f"  {species} is not on the POKeMON menu (fainted members are not listed)", flush=True)
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
         for _ in range(8):  # the party list, then the member whose move we want
-            if self.mem[qm.ADDR_MENU_CUR] == member:
+            if self.mem[qm.ADDR_MENU_CUR] == target:
                 break
-            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < member else "up")
+            self.ctl.press("down" if self.mem[qm.ADDR_MENU_CUR] < target else "up")
             self.ctl.wait(20)
         self.ctl.press("a")
         self.ctl.wait(60)

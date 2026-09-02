@@ -889,3 +889,13 @@ def test_cross_routes_a_failed_cross_to_surf_only_when_the_edge_is_water(monkeyp
     monkeypatch.setattr(road_mod, "edge_cells", lambda *a: (set(), "left"))
     monkeypatch.setattr(road_mod, "surf_cross", lambda *a, **k: "surfed")
     assert make().cross(1, 2) == "surfed"
+
+
+def test_menu_row_of_finds_the_entry_the_menu_actually_draws():
+    """Gen 1 omits fainted members from the POKeMON menu, so a party index is not a menu index —
+    on the badge-7 leg the only surfer was the one that had fainted, and the menu did not list it
+    at all while `party()` still decoded six rows."""
+    menu = _MenuRig({2: "PRIMEAPE  99", 4: "PIDGEOT   99", 6: "HYPNO     99", 8: "CHARIZARD 100"})
+    assert rig.Rig.menu_row_of(menu, "HYPNO") == 2
+    assert rig.Rig.menu_row_of(menu, "PRIMEAPE") == 0
+    assert rig.Rig.menu_row_of(menu, "GYARADOS") is None  # fainted: simply not drawn
