@@ -7,7 +7,7 @@ was learned by playing:
   back on); gate doors fire on the step THROUGH them (Route 11's west door fires on the
   eastward step). ``through_warp`` tries every direction and undoes plain steps.
 - **Gates sever routes.** A route's edge cells can be unreachable because its gate building
-  cuts the map in half. ``pass_gate`` goes through the building — and a candidate door only
+  cuts the map in half. ``pass_gate`` goes through the building - and a candidate door only
   counts if the far side can actually path to the goal (Route 11's Diglett house taught that
   the nearest door is not always the gate).
 - **Edges are offset.** The neighbor's grid does not align with every edge cell (the
@@ -16,7 +16,7 @@ was learned by playing:
 - **Interiors are traversed by sides.** A gate entered on one side exits by the mats on
   another; non-edge warps (a 2F stairway) are never exits.
 - **Stalls are not refusals.** A stalled step with a textbox up is usually a trainer's
-  pre-battle speech — A leads into the fight and the injected battle handler owns it. The
+  pre-battle speech - A leads into the fight and the injected battle handler owns it. The
   text BUFFER stays stale after boxes close (measured), so text alone never means blocked:
   only failing to move after repeated A/B cycles does.
 - **Cut opens two tile classes.** 0x3D (the Vermilion yard and Celadon hedge bushes) and
@@ -35,7 +35,7 @@ SPRITE_STATE_BASE = 0xC100
 SPRITE_DATA_BASE = 0xC200
 
 # Tileset 22 is the facility floor set (Rocket Hideout, Silph Co). Its tiles decide where you end
-# up — spin arrows, teleport pads — so a planned path is a category error there and the engine's
+# up - spin arrows, teleport pads - so a planned path is a category error there and the engine's
 # own answer is the facing-keyed oracle. Read from the map, never assumed.
 FACILITY_TILESET = 22
 
@@ -48,11 +48,11 @@ def _default_battle(io) -> None:
 
 
 def live_bodies(io, bounds: tuple[int, int] | None = None) -> set[tuple[int, int]]:
-    """Positions of every live sprite — a beaten trainer still stands, and paths route around.
+    """Positions of every live sprite - a beaten trainer still stands, and paths route around.
 
     ``bounds`` is the current map's ``(width, height)``, and passing it matters: the sprite table
     has sixteen slots and the unused ones decode to coordinates that are not on any map. Silph 3F
-    is 30x18 and a leg was told the body severing its hop stood at **(18,22)** — four rows past
+    is 30x18 and a leg was told the body severing its hop stood at **(18,22)** - four rows past
     the south wall. It then walked over to "engage" that body, which opened the pause menu, and
     wrote down what the menu said ("OPTION EXIT") as the sentence the blocker spoke.
     """
@@ -98,14 +98,14 @@ def walkable(truth, pairs, map_id: int, start, bodies=(), keep=()) -> set[tuple[
     """The cells ``walk`` can actually deliver us to: bodies *and* every warp tile are walls.
 
     ``reachable`` answers a terrain question and ``walk`` answers a movement one, and inside a
-    facility the two disagree wildly — because ``walk`` refuses to thread a door tile as floor
+    facility the two disagree wildly - because ``walk`` refuses to thread a door tile as floor
     (a pad fires the moment you step on it, so a route "through" one is a route off the floor).
     Silph 5F is the measurement: the corridor holding the CARD KEY is *reachable* from anywhere
     on the floor, and the only path to it crosses the teleport pad at (27,3). Every approach that
     trusted ``reachable`` was refused live, on both of the two sessions that hunted that key,
     with no sentence on screen to explain it. Ride the pad and the same corridor is nine steps.
 
-    ``keep`` are warp tiles that stay open — the targets of the walk itself, which ``walk``
+    ``keep`` are warp tiles that stay open - the targets of the walk itself, which ``walk``
     excludes from its own warp block for the same reason.
     """
     warps = {(w[0], w[1]) for w in truth["maps"][str(map_id)]["warps"]} - set(keep)
@@ -114,7 +114,7 @@ def walkable(truth, pairs, map_id: int, start, bodies=(), keep=()) -> set[tuple[
 
 def pads_reaching(truth, pairs, map_id: int, targets, bodies=()) -> list[tuple[tuple[int, int], int]]:
     """``(pad, the map it pairs with)`` for every warp tile on this map that *stands* inside a
-    region holding ``targets`` — the ride hidden behind a bare "could not reach".
+    region holding ``targets`` - the ride hidden behind a bare "could not reach".
 
     A leg that cannot walk to a cell is not stuck if a pad lands beside it: Silph 5F's card-key
     corridor is nine steps from the pad at (27,3), which pairs with 7F, and zero routes from
@@ -137,7 +137,7 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
     ``pads_reaching`` answers "which pad on this floor", which is not the question a gated
     building poses. Silph asks the cross-floor one: the CARD KEY's corridor on 5F is entered only
     from the pad at (27,3), which is entered only by riding 7F's (21,15), which sits in a 7F
-    pocket that is itself behind card-key doors — so the useful question is never "which pad is
+    pocket that is itself behind card-key doors - so the useful question is never "which pad is
     beside the target" but "which door, anywhere in the building, lands somewhere that can reach
     it". Three legs died re-deriving that by hand, one floor at a time.
 
@@ -173,10 +173,10 @@ def rides_to(truth, pairs, map_id: int, targets, bodies=()) -> list[dict]:
 
 
 def pad_land(truth, map_id: int, warp) -> tuple[int, int] | None:
-    """The cell a same-map warp lands on — its destination index reads the same map's own list.
+    """The cell a same-map warp lands on - its destination index reads the same map's own list.
 
     ``255`` (0xFF) is the ROM's "same map" destination and resolves here too: Sabrina's gym's two
-    arrival mats (8,17)/(9,17) carry it. A door to another map is ``None`` — the pad graph is the
+    arrival mats (8,17)/(9,17) carry it. A door to another map is ``None`` - the pad graph is the
     within-floor structure, and cross-floor round trips are ``_return_through``'s job.
     """
     m = truth["maps"].get(str(map_id))
@@ -213,7 +213,7 @@ def pad_route(truth, pairs, map_id: int, start, targets, bodies=()) -> list[tupl
         return None  # checked BEFORE `walkable`, which raises on a map we do not model
     bodies = set(bodies)
     # The targets stay open. `walkable` treats every warp tile as a wall, which is right for
-    # routing *through* one and wrong when the target IS one — and a gym's exit mat is exactly
+    # routing *through* one and wrong when the target IS one - and a gym's exit mat is exactly
     # that. Without this the goal is unreachable by construction: badge 6 was won at (9,9) behind
     # thirty pads and the leg then re-tried the mat at (8,17) until its budget ran out, because
     # the BFS could never report the mat as reached. `walk` excludes its own targets from the
@@ -245,18 +245,18 @@ def ride_pad(  # pragma: no cover - drives the emulator; verified live, not in u
 ):
     """Reach ``targets`` by riding pads, when no walk can get there.
 
-    The capability every Silph leg was missing. ``walk`` treats a pad as a wall — correctly, since
-    stepping on one fires it — so a region whose only entrance *is* a pad is unreachable to it, and
+    The capability every Silph leg was missing. ``walk`` treats a pad as a wall - correctly, since
+    stepping on one fires it - so a region whose only entrance *is* a pad is unreachable to it, and
     the leg reports "could not reach" with nothing on screen to explain why.
 
     Two shapes, both measured. A pad that pairs with **another map** is ridden as a round trip:
     Silph 5F's (26,3) step east fires (27,3), lands on 7F (21,15), and stepping off it and back on
-    returns us *standing on (27,3)* — inside the region the walk could never enter, with (28,3) one
+    returns us *standing on (27,3)* - inside the region the walk could never enter, with (28,3) one
     step away. Arriving on a pad does not re-fire it, which is why the far side must be left and
     re-entered. A pad that points at **its own map** simply moves us: Sabrina's gym is thirty of
     those (30 of its 32 warps), and there is no far side to come back from.
 
-    The order of the rides comes from ``pad_route`` — a BFS over the pad graph — because
+    The order of the rides comes from ``pad_route`` - a BFS over the pad graph - because
     table-order hunting is how a leg rides one wrong pocket per hop and spends its budget.
     Each hop still tries a sequence of pads (routed first, the old nearest-use hunt behind),
     and after every ride the landing is re-measured and the next hop re-plans from wherever the
@@ -281,7 +281,7 @@ def ride_pad(  # pragma: no cover - drives the emulator; verified live, not in u
 
 
 def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]], *, battle=_default_battle) -> bool:
-    """One hop: ride the routed sequence first, the old nearest-use hunt behind — walk after each.
+    """One hop: ride the routed sequence first, the old nearest-use hunt behind - walk after each.
 
     True if any pad actually moved us, False if none did. Pads that never took us stay untried
     (a walk not reaching a tile is not a ride); ones that did are consumed, because a maze of
@@ -309,7 +309,7 @@ def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]
         before = read_pos(io)
         now = _ride_live(io, truth, pairs, map_id, pad, battle=battle)
         if now == before:
-            continue  # never got moving toward this pad — not a ride, so it stays untried
+            continue  # never got moving toward this pad - not a ride, so it stays untried
         tried.add(pad)  # only pads that actually moved us count as spent
         moved = True
         if now[0] != map_id and not _return_through(io, truth, pairs, map_id, now[0], now[1], now[2]):
@@ -320,10 +320,10 @@ def _ride_hop(io, truth, pairs, map_id: int, targets, tried: set[tuple[int, int]
 
 
 def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) -> tuple[int, int, int]:
-    """End up where ``pad`` lands — by walking onto it, or re-firing it from our own feet.
+    """End up where ``pad`` lands - by walking onto it, or re-firing it from our own feet.
 
     A pad does not fire the moment we are standing on it; it fires on (re)entry. A dead-end
-    pocket's only exit IS its own pad — Sabrina's gym parks the gym-side trainer in one — and
+    pocket's only exit IS its own pad - Sabrina's gym parks the gym-side trainer in one - and
     the step-off-and-back is the whole ride. Each side is tried once; a blocked side costs
     nothing but the step, and a side that takes us anywhere counts as the measurement.
     """
@@ -338,7 +338,7 @@ def _ride_live(io, truth, pairs, map_id: int, pad, *, battle=_default_battle) ->
             io.wait(60)
             now = read_pos(io)
             if now != was:
-                return now  # the pad re-fired (or something else moved us — position is the fact)
+                return now  # the pad re-fired (or something else moved us - position is the fact)
         return was  # pragma: no cover - drives the emulator; a pad that fires for nobody
     walk(io, truth, pairs, map_id, {pad}, battle=battle)
     # The walk's own verdict is not the signal: a pad that fires mid-walk leaves it still trying
@@ -375,7 +375,7 @@ def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
 
     Measurable signature, no recall needed: a building you can *pass through* is entered from
     this map by two or more doors (Route 12's gate is (10,15), (11,15) and (10,21), all into map
-    87 — two doors on the north side of the severance and one on the south). A house is entered
+    87 - two doors on the north side of the severance and one on the south). A house is entered
     by exactly one. ``pass_gate`` aims at the nearest door first and Route 11's Diglett house
     taught what that costs; this is the same lesson as a lookup.
     """
@@ -386,11 +386,11 @@ def gate_doors(truth, map_id: int) -> set[tuple[int, int]]:
 
 
 def blocking_body(truth, pairs, map_id: int, start, targets, bodies):
-    """The one body whose removal reconnects ``targets`` — the wall, not the bump.
+    """The one body whose removal reconnects ``targets`` - the wall, not the bump.
 
     ``walk`` reports the body it bumped into. That is often not the body that matters. Measured
     on Route 12: the step north was refused by a trainer at (14,76) that column 15 walks straight
-    around, while the actual severance was a single sprite at (10,62) fifteen tiles away — one
+    around, while the actual severance was a single sprite at (10,62) fifteen tiles away - one
     body holding 237 cells and the map's only gate door hostage. Naming the bystander sends a
     crew to argue with the wrong sprite, and "body-blocked" then reads as a wall when it is a
     story gate standing somewhere else entirely.
@@ -423,7 +423,7 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
     """BFS-walk toward the nearest target; battles are the handler's, stalls get A/B cycles.
 
     ``avoid_warps`` (the standing doctrine: never thread a door tile as floor) blocks every
-    non-target warp tile — measured here when a walk to a gate door was swallowed en route
+    non-target warp tile - measured here when a walk to a gate door was swallowed en route
     by the decoy door beside it. Returns True on arrival, "map-change" when a warp or edge
     fired en route, "no-path" when even the bodiless grid is severed, "body-blocked" when
     only a live sprite bars the next step, "refused" when repeated A/B cycles never move
@@ -444,7 +444,7 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
         if (x, y) in targets:
             return True
         # Never block the tile we are standing on. Arriving through a door leaves us ON it, and
-        # a warp block that includes our own cell makes every plan from there impossible — which
+        # a warp block that includes our own cell makes every plan from there impossible - which
         # is why "could not step off the warp mat" fired on Silph 3F, the Center's exit and the
         # Safari Zone's arrival pad, and why a leg that had just walked in could not walk on.
         here_block = warp_block - {(x, y)}
@@ -454,7 +454,7 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
             if not path or len(path) < 2:
                 return "no-path"
             if tuple(path[1]) in live_bodies(io):
-                # Bodies are not walls: wanderers move — wait them out before giving up
+                # Bodies are not walls: wanderers move - wait them out before giving up
                 # (a parked story-body earns the verdict only after real patience).
                 body_waits += 1
                 if body_waits > 20:
@@ -512,7 +512,7 @@ def through_warp(io, truth, pairs, map_id: int, wx: int, wy: int, *, battle=_def
 def traverse_interior(io, truth, pairs, interior: int, *, battle=_default_battle, exclude_entry: bool = True):
     """Exit a swallowed-hop interior by the mats on a side other than the one we entered.
 
-    With ``exclude_entry=False`` the entry side is allowed too — the retreat a gate-passer
+    With ``exclude_entry=False`` the entry side is allowed too - the retreat a gate-passer
     needs when an interior turns out to be a dead-end house rather than a gate."""
     m = truth["maps"].get(str(interior))
     if m is None:
@@ -566,7 +566,7 @@ def pass_gate(io, truth, pairs, cur: int, goal_cells, *, battle=_default_battle)
         r2 = traverse_interior(io, truth, pairs, interior, battle=battle)
         if r2 is not True and read_pos(io)[0] == interior:
             # A dead-end house, not a gate: retreat the way we came and try the next door.
-            # Only failure to leave AT ALL is a guard holding us — the finding is on screen.
+            # Only failure to leave AT ALL is a guard holding us - the finding is on screen.
             if traverse_interior(io, truth, pairs, interior, battle=battle, exclude_entry=False) is not True:
                 return False
             continue
@@ -605,16 +605,67 @@ def cross_edge(io, truth, pairs, cur: int, nxt: int, *, battle=_default_battle):
     return "stuck-on-edge"
 
 
+SURF_MAX_STEPS = 200  # a water route is open water plus a walkable plaza; a straight run in the
+# connection direction reaches the far edge well under this, and more than this is a wrong map.
+
+
+def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_default_battle):
+    """Cross a connection whose near edge has no walkable cell to stand on - i.e. water - and
+    the A* cannot plan. A route (measured on 30/31/32: 5-8% walkable, a central land plaza with
+    open water either side of it) traverses straight in its connection direction: SURF carries the
+    water, walking carries the plaza, and arming SURF glues them. A refused step is the one signal
+    I am walking (not yet surfing) and facing water, which is also the only moment the field-move
+    menu is openable (on land) - so SURF is armed exactly there, never in the middle of the water
+    where the START menu is locked out.
+
+    Returns True once the map changes to the far side, "stuck-on-edge" when a step is refused on
+    water *and* after arming SURF (a solid tile, not a route) - the ladder then bans and reroutes,
+    so a bad line costs one hop rather than hanging."""
+    _, d = edge_cells(truth, cur, nxt)
+    # A finite retry bound, not a fallthrough: the run either exits through the `return True`
+    # (the map flipped) or the inner `return "stuck-on-edge"` (refused after arming = a solid,
+    # not a route). The water is bounded, so a walk that never flips a map and never sticks on a
+    # solid cannot occur; the bound is the anti-hang guard the same way the cross_edge bound is.
+    left = SURF_MAX_STEPS
+    while left > 0:
+        left -= 1
+        if io.read(ADDR_IN_BATTLE) and battle:
+            battle(io)
+        mp, x, y = read_pos(io)
+        if mp != cur:
+            io.wait(60)
+            return True
+        before = (x, y)
+        _step(io, d)
+        if read_pos(io)[0] != cur:
+            io.wait(60)
+            return True
+        if read_pos(io)[1:] == before:
+            # refused: walking, facing water. Arm SURF (on land, the menu opens), dismiss the
+            # "ready" text, and run the same step into the water. A step this still refuses is
+            # solid, not water - a dead end on a route, and a wrong edge off one.
+            if not arm_surf():
+                return "surfmoved-failed"
+            for _ in range(3):
+                io.press("a")
+                io.wait(40)
+            _step(io, d)
+            io.wait(45)
+            if read_pos(io)[1:] == before:
+                return "stuck-on-edge"
+    raise RuntimeError(f"surf_cross({cur}->{nxt}) spun {SURF_MAX_STEPS} steps without crossing")
+
+
 def cut_facing(io, face: str) -> None:
     """The measured field-Cut flow: face the growth, START -> POKeMON -> lead -> CUT (row 0).
 
-    The lead must know Cut — its field submenu then opens with CUT on row 0 (measured on
+    The lead must know Cut - its field submenu then opens with CUT on row 0 (measured on
     Charmeleon and Charizard alike). Opens both cuttable tile classes: 0x3D bushes and
     0x50 trees.
 
     Cadence note: the menu phases here run at 60/25 frames, not the 15/45 that reads as "fast
     enough". `quartermaster` measured the shop dialog swallowing fixed-timing scripts, and
-    `Rig.toss_stack` lost an evening to exactly that — the same presses freed a bag slot at 60
+    `Rig.toss_stack` lost an evening to exactly that - the same presses freed a bag slot at 60
     and silently did nothing at 45, which the caller reported as the game refusing. Where a
     phase has a predicate, wait on the predicate; where it does not, be generous.
     """
@@ -636,7 +687,7 @@ def cut_facing(io, face: str) -> None:
 
 
 def cut_until_open(io, truth, pairs, face: str, tries: int = 3) -> bool:
-    """Cut, then *prove it* by stepping — the predicate the bare flow never had.
+    """Cut, then *prove it* by stepping - the predicate the bare flow never had.
 
     ``cut_facing`` fires the menu and returns whether or not anything was cut. Callers then
     stepped hopefully and read a refusal as terrain. The step is the predicate: if we moved, the

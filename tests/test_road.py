@@ -810,3 +810,103 @@ def test_pad_land_reads_the_landing_out_of_the_maps_own_warp_list():
 def test_pad_route_returns_none_for_a_map_we_do_not_model():
     assert road.pad_route({"maps": {}}, set(), 404, (0, 0), {(1, 1)}) is None
     assert road.pad_route({"maps": {}}, set(), 404, (0, 0), set()) is None
+
+
+# --------------------------------------------------------------------------- surf_cross
+
+
+class SurfIO:
+    """A water crossing reduced to its mechanism: the outward step is refused while SURF is not
+    armed, and lands on the far map once surf_cross arms it and re-steps. ``instant`` models the
+    beach-to-beach walk that needs no water at all; ``solid`` a tile refused even surﬁng;
+    ``battle`` a fight opening on the first step."""
+
+    def __init__(self, cur, dest, solid=False, instant=False, battle=False, wallow=False):
+        self.mem = {qm.ADDR_MAP: cur, qm.ADDR_X: 1, qm.ADDR_Y: 0}
+        self.face = "left"  # the west connection is the "left" outward key
+        self.dest = dest
+        self.solid = solid
+        self.instant = instant
+        self.battle = battle
+        self.wallow = wallow
+        self.arms = 0
+        self.battled = 0
+
+    def read(self, addr):
+        if addr == qm.ADDR_IN_BATTLE:
+            return 1 if self.battle else 0
+        return self.mem.get(addr, 0)
+
+    def wait(self, frames=30):
+        pass
+
+    def press(self, btn, hold=8, release=8):
+        if btn != self.face or self.solid:
+            return  # a solid refuses even with SURF; other keys do nothing
+        if self.wallow:
+            self.mem[qm.ADDR_X] = self.mem[qm.ADDR_X] + 1  # keeps drifting on our own water
+            return
+        if self.arms == 0 and not self.instant:
+            return  # walking into water is refused until SURF is armed
+        self.mem[qm.ADDR_MAP], self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y] = self.dest
+
+    def arm(self):
+        self.arms += 1
+        return True
+
+
+def _surf_truth(cur):
+    return {
+        "maps": {
+            str(cur): _map(["01"], connections={"west": cur + 1}),  # (0,0) water, (1,0) land
+            str(cur + 1): _map(["11"], connections={"east": cur}),
+        }
+    }
+
+
+def test_surf_cross_arms_on_refusal_then_crosses():
+    io = SurfIO(1, (2, 0, 0))
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm) is True
+    assert io.mem[qm.ADDR_MAP] == 2 and io.arms >= 1
+
+
+def test_surf_cross_crosses_immediately_when_no_water_is_in_the_way():
+    io = SurfIO(1, (2, 0, 0), instant=True)
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm) is True
+    assert io.arms == 0  # never needed SURF: the first step was already across
+    assert io.mem[qm.ADDR_MAP] == 2
+
+
+def test_surf_cross_reports_no_surf_when_the_lead_cannot_surf():
+    io = SurfIO(1, (2, 0, 0))
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=lambda: False) == "surfmoved-failed"
+    assert io.mem[qm.ADDR_MAP] == 1  # still on our side of the water
+
+
+def test_surf_cross_reports_stuck_when_a_solid_blocks_the_run():
+    io = SurfIO(1, (2, 0, 0), solid=True)
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm) == "stuck-on-edge"
+    assert io.mem[qm.ADDR_MAP] == 1
+
+
+def test_surf_cross_fights_a_battle_that_opens_on_the_first_step():
+    io = SurfIO(1, (2, 0, 0), battle=True)
+
+    def fight(fio):
+        fio.battle, fio.battled = False, 1
+
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.battled == 1
+    assert io.mem[qm.ADDR_MAP] == 2
+
+
+def test_surf_cross_raises_when_neither_crossed_nor_stuck():
+    # a surf that keeps drifting and never flips a map and never hits a solid: the finite bound
+    # trips before it can hang. Real bounded water cannot do this; the bound is the anti-hang guard.
+    io = SurfIO(1, (2, 0, 0), wallow=True)
+    road.SURF_MAX_STEPS = 3
+    try:
+        with pytest.raises(RuntimeError):
+            road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm)
+    finally:
+        road.SURF_MAX_STEPS = 200

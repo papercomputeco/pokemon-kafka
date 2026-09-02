@@ -608,8 +608,32 @@ class Rig:
         return road.through_warp(self.io, self.truth, self.pairs, map_id, wx, wy, **kw)
 
     def cross(self, cur: int, nxt: int, **kw):
+        """One map connection. A land edge takes the A* path; a water edge has no floor to plan
+        over, so that cross reports stuck-on-edge (or no-path) and is then run straight in its
+        connection direction, arming SURF on the refusal (the water route is open water plus a
+        walkable plaza; SURF carries the water, walking the plaza, and the arm glues the two)."""
         kw.setdefault("battle", self.battle)
-        return road.cross_edge(self.io, self.truth, self.pairs, cur, nxt, **kw)
+        res = road.cross_edge(self.io, self.truth, self.pairs, cur, nxt, **kw)
+        if res in ("stuck-on-edge", "no-path"):
+            return self._surf_or_fail(cur, nxt, res, kw.get("battle"))
+        return res
+
+    def _surf_or_fail(self, cur: int, nxt: int, res: str, battle):
+        """Surf the failed cross, but only if its near edge is genuinely water (modelled, that
+        connection, and no land cell to stand on). Surfing a real land block would misroute, so a
+        water verdict needs the map to say so; otherwise the land cross's failure stands."""
+        try:
+            cells, _d = road.edge_cells(self.truth, cur, nxt)
+        except (KeyError, StopIteration, IndexError):
+            return res  # the connection isn't modelled; "water" was a guess, keep the real failure
+        if cells:  # land on the near edge: a genuine block, not water
+            return res
+        return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
+
+    def _arm_surf(self) -> bool:  # pragma: no cover - opens the field-move menu; verified live
+        """Arm SURF on the lead for the next step into water. Surf is the lead's job here (member
+        0, which is the route's surfer, and `use_field_move`'s own default member)."""
+        return self.use_field_move("SURF")
 
     def approach(self, cells) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Get onto one of ``cells`` on this map. Walk first; on a facility floor, use the oracle.

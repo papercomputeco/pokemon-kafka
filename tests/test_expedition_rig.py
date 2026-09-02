@@ -857,3 +857,35 @@ def test_the_bag_spells_a_machine_out():
     assert r.bag_named(full=True) == [("HM03 SURF", 1), ("FRESH WATER", 2)]
     assert r.item_full_name("TM26") == "TM26 EARTHQUAKE"
     assert r.item_full_name("POKe FLUTE") == "POKe FLUTE"  # not a machine: unchanged
+
+
+def test_cross_routes_a_failed_cross_to_surf_only_when_the_edge_is_water(monkeypatch):
+    import road as road_mod
+
+    def make():
+        r = _reader_rig()
+        r.battle = lambda io=None: None
+        return r
+
+    # a water edge: the cross fails and the edge has no modelled floor -> surf across it
+    monkeypatch.setattr(road_mod, "cross_edge", lambda *a, **k: "stuck-on-edge")
+    monkeypatch.setattr(road_mod, "edge_cells", lambda *a: (set(), "left"))
+    monkeypatch.setattr(road_mod, "surf_cross", lambda *a, **k: "surfed")
+    assert make().cross(1, 2) == "surfed"
+
+    # a land edge that still fails is a real block, not water -> surf must not swallow it
+    monkeypatch.setattr(road_mod, "edge_cells", lambda *a: ({(0, 0)}, "left"))
+    assert make().cross(1, 2) == "stuck-on-edge"
+
+    # the connection isn't modelled -> the water verdict was a guess, keep the land failure
+    def no_map(*a):
+        raise KeyError("1")
+
+    monkeypatch.setattr(road_mod, "edge_cells", no_map)
+    assert make().cross(1, 2) == "stuck-on-edge"
+
+    # a no-path water edge also routes to surf
+    monkeypatch.setattr(road_mod, "cross_edge", lambda *a, **k: "no-path")
+    monkeypatch.setattr(road_mod, "edge_cells", lambda *a: (set(), "left"))
+    monkeypatch.setattr(road_mod, "surf_cross", lambda *a, **k: "surfed")
+    assert make().cross(1, 2) == "surfed"
