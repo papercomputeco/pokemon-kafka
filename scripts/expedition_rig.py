@@ -910,10 +910,21 @@ class Rig:
         self.ctl.press("start")
         self.ctl.wait(60)
         # By text, not by index: the start menu grows a PLAYER entry as the game goes on, so
-        # "ITEM is the third row" is the kind of assumption that has cost this project runs.
-        if not self.menu_choose("ITEM"):
+        # "ITEM is the third row" is the kind of assumption that has cost this project runs. And
+        # the block cannot be inferred from spacing alone — inside the Safari Zone the step
+        # counter ("153/500") renders two rows above POKeDEX and the arithmetic counts it as an
+        # entry, selecting the wrong line. POKeDEX is always the menu's first entry, so anchor on
+        # it and count from there.
+        rows = self.menu_rows()
+        anchor = next((i for i, t in rows if "DEX" in t.upper()), None)
+        item_row = next((i for i, t in rows if "ITEM" in t.upper()), None)
+        if anchor is None or item_row is None:
             print("  the START menu did not open", flush=True)
             return False
+        if not self.menu_cursor_to((item_row - anchor) // 2):
+            return False
+        self.ctl.press("a")
+        self.ctl.wait(60)
         self.ctl.wait(50)
         target = name.strip().upper().replace(" ", "")
         # The bag renders entries on rows 4/6/8/10 with their quantities interleaved, the cursor
