@@ -55,3 +55,29 @@ off the strip, not by finding a shore.
   a fainted surfer is an unusable surfer — that is what ended the previous leg.
 - `rom_truth` already locates the tileset table by signature (`TILESETS = 0xC7BE`). A leg that
   finds itself typing a hex offset into a probe has left the doctrine; the table is a lookup.
+
+## Dead end, recorded so it is not walked twice: there is no cheap "am I surfing" byte
+
+`road.surf_cross` needs to know whether it is already on the water, because the START menu is
+locked out mid-water and re-arming there is what leaves the menu hanging open — the previous
+leg's stuck doc caught exactly that, with `TEXT ON SCREEN: 'OPTION EXIT'` and a
+`surfmoved-failed` verdict. A RAM flag would settle it, so I went looking. It is not there to be
+found cheaply, and the search is the same rabbit hole this doc opens by warning about:
+
+- Diffing `b7_badge.state` (walking) against `b7_surfing.state` (surfing) gives 843 differing
+  bytes; the 11 boolean-shaped ones (`0xC010`, `0xC268`, `0xCC55`, `0xCD4F`, `0xCD60`, `0xCF0F`,
+  `0xCF13`, `0xD363`, `0xD61D`, `0xD730`, `0xDA39`) are the obvious candidates.
+- **Not one of them flips when you actually surf.** Verified live: snapshot, arm SURF facing
+  down, move, re-read — all eleven unchanged. A two-save diff is a hypothesis and this one was
+  false; the differences are what two saves happen to disagree about, not what surfing does.
+- The live before/after diff changes 1,269 bytes and its intersection with the two-save diff is
+  still **756** — most of `0xC000`-`0xC0FF` is sprite/OAM shadow that churns every frame.
+
+Isolating a flag out of that needs a controlled A/B the emulator does not cheaply give. **Use the
+behavioural probe instead**: arm SURF, then read `settled_pos()`. It costs four presses, it is
+already proven, and it answers the question the flag was only a proxy for.
+
+One more thing measured while doing it, which the next leg will hit: after the surf from (6,4)
+the player lands on (6,6) and **three further `down` presses do not move it**. Whatever the
+crossing is, it is not "hold a direction until the map flips" — `surf_cross`'s straight-line run
+assumes exactly that, and it is the next thing worth measuring.
