@@ -49,6 +49,10 @@ VIEWER_WS = "ws://127.0.0.1:8201"
 ADDR_BADGES = 0xD356  # game_profile.RED_BLUE.addr_badges
 ADDR_FACING = 0xC109  # the player's facing — part of the state key on any tile-driven floor
 ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
+# Measured, not recalled: with SURF=57 and CUT=15 looked up from this cartridge's move-name
+# table, SURF sits in Gyarados' party struct at offset 11 and CUT in Charizard's at 8, and in no
+# other struct of the six -- two independently known moves landing inside one four-byte window.
+MOVE_SLOTS = range(8, 12)
 ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E  # quartermaster's, verified live in the mart probe
 BAG_SLOTS = 20  # a full bag refuses pickups silently (measured in the Rocket Hideout)
 ADDR_LIST_SCROLL = 0xCC36  # item-list scroll offset; 0xCC26 is the cursor WITHIN the 3-row window
@@ -112,6 +116,7 @@ class Rig:
         self.ag.catch_wanted = set()  # a leg is travel, not a hunt; the quartermaster arms catching
         self.turn = 0
         self._surfer: str | None = None  # the party member that answered to SURF, once one has
+        self._moves: dict[str, int] | None = None  # this cartridge's move-name table, read on demand
         self.recorder = None
         self.telemetry_root = telemetry_root
         self.run_id = run_id or uuid.uuid4().hex[:12]
@@ -631,6 +636,38 @@ class Rig:
             return res
         return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
 
+    def knows_move(self, name: str) -> int | None:
+        """Party index of the first *standing* member that knows ``name`` — from RAM, by move id.
+
+        This replaces a species literal in the engine (``if lead in ("Gyarados", ...)``), which is
+        the same class of mistake as ``cut_facing``'s "CUT is row 0": true of one party on one
+        leg, silently wrong on the next. Nothing here is recalled. The move ids come from this
+        cartridge's own name list (`rom_truth.move_names`, the table that named HM03 SURF), and
+        the struct offsets were measured rather than remembered: with SURF=57 and CUT=15 looked
+        up first, SURF appears in Gyarados' struct at offset 11 and CUT in Charizard's at 8, and
+        nowhere else in any of the six — two independently known facts landing inside the same
+        four-byte window, which is what fixes the window at 8..11.
+
+        Fainted members are skipped: Gen 1 omits them from the POKeMON menu, so a move they know
+        cannot be selected and reporting them here would hand back an unusable index.
+        """
+        want = self._move_ids().get(name.strip().upper())
+        if want is None:
+            return None
+        for i, (_n, _lvl, hp) in enumerate(self.party()):
+            if hp <= 0:
+                continue
+            base = ADDR_PARTY_STRUCTS + PARTY_STRUCT_SIZE * i
+            if want in (self.mem[base + off] for off in MOVE_SLOTS):
+                return i
+        return None
+
+    def _move_ids(self) -> dict[str, int]:
+        """``{MOVE NAME: id}`` for this cartridge, read once per rig."""
+        if self._moves is None:
+            self._moves = {v.strip().upper(): int(k) for k, v in rt.move_names(rt.ROM_DEFAULT.read_bytes()).items()}
+        return self._moves
+
     def surf_facing(self, face: str | None = None) -> None:
         """Arm SURF on the lead (member 0) with a fixed key sequence — no window/row read.
 
@@ -688,12 +725,12 @@ class Rig:
         drawn on the POKeMON menu, so a 0 HP surfer cannot be armed at all — the protect rule in
         ``BattleStrategy`` exists precisely to keep the lead's surfer alive across the crossings.
         """
-        from memory_reader import SPECIES_ID_MAP
-
-        lead = SPECIES_ID_MAP.get(self.mem[ADDR_PARTY_STRUCTS], "?")
-        if lead in ("Gyarados", self._surfer) and lead != "?":
+        holder = self.knows_move("SURF")
+        if holder is None:
+            return False
+        if holder == 0:  # the lead: the fixed key sequence, which reads no window text
             self.surf_facing()
-            self._surfer = lead
+            self._surfer = self.party()[0][0]
             return True
         if self._surfer and self.use_field_move("SURF", species=self._surfer):
             return True

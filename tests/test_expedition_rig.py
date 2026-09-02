@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 
 import expedition_rig as rig
+import quartermaster as qm
 
 
 def test_the_sink_is_one_file_per_utc_date(tmp_path):
@@ -992,11 +993,21 @@ class _SurfRig:
 
 
 def _surf_rig(party, knows):
+    """A rig whose party RAM really carries the move ids, laid out at the measured offsets."""
     r = rig.Rig.__new__(rig.Rig)
     fake = _SurfRig(party, knows)
     r.party = fake.party
     r.use_field_move = fake.use_field_move
     r._surfer = None
+    r._moves = {"SURF": 57, "CUT": 15}
+    r.mem = {}
+    for i, (name, _lvl, _hp) in enumerate(party):
+        base = rig.ADDR_PARTY_STRUCTS + rig.PARTY_STRUCT_SIZE * i
+        for off in rig.MOVE_SLOTS:
+            r.mem[base + off] = 0
+        if name == knows:
+            r.mem[base + rig.MOVE_SLOTS[-1]] = 57  # SURF, in the last slot as Gyarados carries it
+    r.surf_facing = lambda face=None: fake.asked.append("<keystroke>")
     return r, fake
 
 
@@ -1029,5 +1040,107 @@ def test_a_fainted_member_is_never_asked_because_the_menu_does_not_draw_it():
 def test_a_party_with_no_surfer_reports_it_rather_than_arming_something_else():
     party = [("Dugtrio", 100, 259), ("Hypno", 99, 341)]
     r, _fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is False
+    assert r._surfer is None
+
+
+def test_the_surfer_is_found_by_move_id_not_by_a_species_name():
+    """The engine briefly carried `if lead in ("Gyarados", ...)` — true of one party, wrong on
+    the next. The move id comes from the cartridge and the offsets were measured."""
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 73)]
+    r, _fake = _surf_rig(party, "Gyarados")
+    assert r.knows_move("SURF") == 1
+    assert r.knows_move("CUT") is None  # nobody in this party has it
+    assert r.knows_move("NOT-A-MOVE") is None
+
+
+def test_a_fainted_surfer_is_not_reported_as_the_holder():
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 0)]
+    r, _fake = _surf_rig(party, "Gyarados")
+    assert r.knows_move("SURF") is None
+
+
+def test_a_lead_that_knows_surf_is_armed_by_keystroke_not_by_a_window_read():
+    """The window read returned None on a clean baton, so the lead path presses a fixed
+    sequence; the water step after it is the real predicate."""
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is True
+    assert fake.asked == ["<keystroke>"]
+    assert r._surfer == "Gyarados"
+
+
+class _KeyCtl:
+    def __init__(self):
+        self.presses = []
+
+    def press(self, button, hold=8, release=8):
+        self.presses.append(button)
+
+    def wait(self, frames=0):
+        pass
+
+
+def test_surf_facing_drives_a_fixed_sequence_and_reads_no_window_text():
+    """The window read returned None on a clean baton, so the lead's arm is keystrokes only.
+
+    START, then POKeMON (row 1, seated off ADDR_MENU_CUR, the one read that is trustworthy),
+    then A/up/A/up/A. The predicate is the water step afterwards, never this.
+    """
+    r = rig.Rig.__new__(rig.Rig)
+    r.ctl = _KeyCtl()
+    r.mem = {qm.ADDR_MENU_CUR: 1}
+    r.surf_facing()
+    assert r.ctl.presses == ["b"] * 5 + ["start", "a", "up", "a", "up", "a"]
+
+
+def test_surf_facing_seats_the_start_menu_on_pokemon_and_can_turn_first():
+    r = rig.Rig.__new__(rig.Rig)
+    r.ctl = _KeyCtl()
+    r.mem = {qm.ADDR_MENU_CUR: 3}  # opened lower down; it has to walk up to row 1
+
+    def press(button, hold=8, release=8):
+        r.ctl.presses.append(button)
+        if button in ("up", "down") and r.ctl.presses.count("start"):
+            r.mem[qm.ADDR_MENU_CUR] = 1
+
+    r.ctl.press = press
+    r.surf_facing(face="down")
+    assert "down" in r.ctl.presses[:6]  # the turn happened before the menu opened
+    assert r.ctl.presses.count("start") == 1
+
+
+def test_the_move_table_is_read_from_the_cartridge_once_and_then_cached(monkeypatch, tmp_path):
+    r = rig.Rig.__new__(rig.Rig)
+    r._moves = None
+    calls = {"n": 0}
+
+    def fake_move_names(rom):
+        calls["n"] += 1
+        return {"57": "SURF", "15": "CUT"}
+
+    rom = tmp_path / "fake.gb"
+    rom.write_bytes(b"")
+    monkeypatch.setattr(rig.rt, "move_names", fake_move_names)
+    monkeypatch.setattr(rig.rt, "ROM_DEFAULT", rom)
+    assert r._move_ids()["SURF"] == 57
+    assert r._move_ids()["CUT"] == 15
+    assert calls["n"] == 1  # the cartridge is read once per rig, not once per crossing
+
+
+def test_a_fainted_member_ahead_of_the_surfer_is_stepped_over():
+    """knows_move already skipped it; the arming loop has to skip it too, or it asks the menu
+    for a member the menu does not draw."""
+    party = [("Dugtrio", 100, 0), ("Gyarados", 20, 73)]
+    r, fake = _surf_rig(party, "Gyarados")
+    assert r._arm_surf() is True
+    assert fake.asked == ["Gyarados"]  # the fainted lead was never asked
+
+
+def test_arming_reports_failure_when_the_menu_will_not_take_the_selection():
+    """RAM says someone knows SURF and the menu still refuses — that is a false, not a crash."""
+    party = [("Dugtrio", 100, 259), ("Gyarados", 20, 73)]
+    r, _fake = _surf_rig(party, "Gyarados")
+    r.use_field_move = lambda *a, **k: False
     assert r._arm_surf() is False
     assert r._surfer is None
