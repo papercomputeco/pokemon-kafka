@@ -508,15 +508,16 @@ class Rig:
     def _face_away_from_bodies(self) -> None:  # pragma: no cover - drives the emulator
         """Turn toward a neighbour with nobody on it, so A advances text instead of starting it."""
         mp, x, y = self.pos()
-        m = self.truth["maps"].get(str(mp))
-        if not m:
-            return
+        m = self.truth["maps"].get(str(mp)) or {}
+        grid = m.get("grid")
+        if not grid:
+            return  # a map we do not model: turning blind is worse than not turning
         bodies = self.bodies()
         for direction, (dx, dy) in (("down", (0, 1)), ("left", (-1, 0)), ("right", (1, 0)), ("up", (0, -1))):
             nx, ny = x + dx, y + dy
-            if not (0 <= nx < m["width"] and 0 <= ny < m["height"]):
+            if not (0 <= ny < len(grid) and 0 <= nx < len(grid[ny])):
                 continue
-            if (nx, ny) in bodies or m["grid"][ny][nx] != "1":
+            if (nx, ny) in bodies or grid[ny][nx] != "1":
                 continue
             self.ctl.press(direction)
             self.ctl.wait(20)
