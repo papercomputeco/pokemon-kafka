@@ -28,6 +28,7 @@ class FakeRig:
         bodies=(),
         party=(("CHARIZARD", 99, 337),),
         heals_on_talk=False,
+        saying="",
     ):
         self._pos = start
         self._hops = list(hops or [])  # each entry: the map id we land on after cross/warp
@@ -44,6 +45,8 @@ class FakeRig:
         self.said = "MOVE ASIDE!"
         self._bag: list = []
         self._pickups: dict = {}
+        self._saying = saying
+        self.spoken: list = []
 
     # reads
     def pos(self):
@@ -56,7 +59,14 @@ class FakeRig:
         return list(self._party)
 
     def dialogue(self):
-        return ""
+        return self._saying
+
+    def probe_step(self):
+        """False exactly while a text box is up — the signal recon gates its read on."""
+        return not self._saying
+
+    def say(self, text, kind="dialogue"):
+        self.spoken.append((kind, text))
 
     def bodies(self):
         return set(self._bodies)
@@ -1696,3 +1706,69 @@ def test_engage_until_badge_on_an_empty_floor_reports_the_byte(tmp_path):
     rig = FakeRig(start=(2, 3, 3), badges=0b11111, bodies=set(), truth=_center_truth())
     runner = LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None)
     assert runner.run()["outcome"] == "engaged-no-badge"
+
+
+# ------------------------------------------------------------------------------------ recon
+
+
+def _truth_with_a_body_to_ask():
+    """The fake world plus one npc on map 1 — the map the leg is stuck on."""
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [{"x": 5, "y": 6, "kind": "npc"}]
+    return t
+
+
+def test_the_map_is_asked_before_a_model_is():
+    """Four legs consulted seats about a sea route without speaking to one body on it.
+
+    Recon runs before the first consult on a wall, and what it hears reaches the seats.
+    """
+    rig = FakeRig(hops=[None], truth=_truth_with_a_body_to_ask(), saying="The tide is low today!")
+    seen = {}
+
+    def consult(tier, facts, menu):
+        seen["facts"] = facts
+        return "GIVE_UP", "", "fake"
+
+    LegRunner(rig, goal=2, consult=consult, log=lambda *_: None).run()
+    assert "HEARD from the body at (5, 6): 'The tide is low today!'" in seen["facts"]
+
+
+def test_what_the_body_said_is_recorded_into_the_sink():
+    """A run that does not emit is unminable, and this is the sentence that unblocks the next one."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_body_to_ask(), saying="The tide is low today!")
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert ("recon", "The tide is low today!") in rig.spoken
+
+
+def test_a_sticky_window_is_not_mistaken_for_dialogue():
+    """The window layer keeps the last menu drawn, so 'OPTION EXIT' reads as a sentence at every
+    cell in every direction. Recon gates the read on the box actually blocking movement."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_body_to_ask(), saying="")
+    seen = {}
+
+    def consult(tier, facts, menu):
+        seen["facts"] = facts
+        return "GIVE_UP", "", "fake"
+
+    LegRunner(rig, goal=2, consult=consult, log=lambda *_: None).run()
+    assert "HEARD" not in seen["facts"]
+    assert rig.spoken == []
+
+
+def test_recon_asks_a_map_once_not_once_per_attempt():
+    """Recon precedes thinking; it is not a second exploration budget."""
+    rig = FakeRig(hops=[None, None, None], truth=_truth_with_a_body_to_ask(), saying="Hello!")
+    runner = LegRunner(rig, goal=2, consult=_consult("RETRY_SAME"), log=lambda *_: None)
+    runner.run()
+    assert runner.reconned == {1}
+    assert rig.spoken.count(("recon", "Hello!")) == 1
+
+
+def test_a_body_no_walk_reaches_is_skipped_not_waited_on():
+    """Recon is bounded. A body behind a wall is not a reason to stall the leg."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_body_to_ask(), saying="Hello!")
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    runner._go_and_talk = lambda spot: False  # nothing reaches it
+    assert runner.recon(1) == {}
+    assert rig.spoken == []

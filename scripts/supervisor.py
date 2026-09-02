@@ -286,7 +286,14 @@ def hop_blocker(rig, hop: dict | None) -> tuple[int, int] | None:
         return None
 
 
-def describe(rig, goal: int, hop: dict | None, failure: str, notes: list[str] | None = None) -> str:
+def describe(
+    rig,
+    goal: int,
+    hop: dict | None,
+    failure: str,
+    notes: list[str] | None = None,
+    heard: dict | None = None,
+) -> str:
     """The measured facts handed to a seat. Everything here was read from RAM or the cartridge."""
     import road
     import rom_truth as rt
@@ -329,6 +336,8 @@ def describe(rig, goal: int, hop: dict | None, failure: str, notes: list[str] | 
     text = rig.dialogue()
     if text:
         lines.append(f"TEXT ON SCREEN: {text!r}")
+    for spot, said in (heard or {}).items():
+        lines.append(f"HEARD from the body at {spot}: {said!r}")
     for note in notes or []:
         lines.append(f"OBSERVED: {note}")
     return "\n".join(lines)
@@ -425,6 +434,8 @@ class LegRunner:
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
         self.tried: list[str] = []  # every action executed, for the exhaustion record
         self.notes: list[str] = []  # measured observations that feed the next consult
+        self.heard: dict[tuple[int, int], str] = {}  # what bodies on this map actually said
+        self.reconned: set[int] = set()  # maps whose bodies have been asked
         self.consults: list[dict] = []
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
@@ -719,6 +730,56 @@ class LegRunner:
             self.notes.append(f"collected {gained} from map {mp}'s item balls")
         return gained
 
+    def recon(self, mp: int, cap: int = 4) -> dict[tuple[int, int], str]:
+        """Ask the map before asking a model. Talk to the bodies here and keep what they said.
+
+        This exists because of a measured pattern, not a theory. Across four legs of the badge-7
+        water arc the crew engaged **zero** bodies on maps 7, 30, 31, 8 and 166 — every one of the
+        76 recorded conversations belongs to the badge-6 arc — while map 30's own stuck doc listed
+        ten live bodies and used them only as obstacles to route around. The cartridge calls all
+        ten `trainer`. The first time anyone spoke to one, it answered.
+
+        A seat asked to choose an action from failure codes alone is reasoning about a world it
+        has not observed. So recon runs once per map before the first consult on it, and whatever
+        it hears goes into the facts under ``HEARD``.
+
+        Bounded on purpose: ``cap`` bodies, nearest first, and only bodies a walk can reach. Recon
+        is the cheap step that precedes thinking, not a second exploration budget.
+        """
+        if mp in self.reconned:
+            return self.heard
+        self.reconned.add(mp)
+        sprites = [
+            (s["x"], s["y"])
+            for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", [])
+            if s.get("kind") in ("trainer", "npc")
+        ]
+        if not sprites:
+            return self.heard
+        here = self.rig.pos()[1:]
+        for spot in sorted(sprites, key=lambda c: abs(c[0] - here[0]) + abs(c[1] - here[1]))[:cap]:
+            if spot in self.heard or not self._go_and_talk(spot):
+                continue
+            said = self._what_it_said()
+            if said:
+                self.heard[spot] = said
+                self.log(f"  heard at {spot}: {said[:120]}")
+                if hasattr(self.rig, "say"):
+                    self.rig.say(said, "recon")
+        return self.heard
+
+    def _what_it_said(self) -> str:
+        """The sentence on screen, but only when the game is actually saying one.
+
+        The window layer is **sticky**: it keeps the last menu drawn, so a naive read returns
+        'OPTION EXIT' at every cell in every direction and a leg records dialogue that never
+        happened. The reliable signal is that a text box blocks movement — ``probe_step`` is False
+        exactly while the game is talking, which is how the frozen-world bug was found.
+        """
+        if not hasattr(self.rig, "probe_step") or self.rig.probe_step():
+            return ""
+        return self.rig.dialogue() or ""
+
     def engage_trainers(self) -> bool:
         """Fight every trainer the cartridge lists for this map."""
         return self.engage_bodies(("trainer",))
@@ -927,7 +988,7 @@ class LegRunner:
             self.rig.run_id,
             f"reach map {self.goal}",
             where,
-            describe(self.rig, self.goal, hop, failure, self.notes),
+            describe(self.rig, self.goal, hop, failure, self.notes, self.heard),
             self.tried,
         )
         self.learnings_dir.mkdir(parents=True, exist_ok=True)
@@ -1014,13 +1075,15 @@ class LegRunner:
                     continue
                 self.write_exhaustion(failure, hop)
                 return self._finish("exhausted", f"the ladder ended on {wall} ({failure})")
+            self.recon(cur)  # ask the map before asking a model; the seats get what it said
             tier = "navigation" if attempt <= NAV_ATTEMPTS else "puzzle"
             facility = self.rig.truth["maps"].get(str(cur), {}).get("tileset") == road.FACILITY_TILESET
             unlooted = [b for b in self.rig.item_balls(cur) if (cur, b) not in self.looted]
             menu = menu_for(
                 failure, edge_hop=bool(hop and hop["via"] == "edge"), facility=facility, items=bool(unlooted)
             )
-            action, why, model = self.consult(tier, describe(self.rig, self.goal, hop, failure, self.notes), menu)
+            facts = describe(self.rig, self.goal, hop, failure, self.notes, self.heard)
+            action, why, model = self.consult(tier, facts, menu)
             self.consults.append({"wall": wall, "tier": tier, "model": model, "action": action, "why": why})
             self.rig.emit("supervisor.consult", wall=wall, tier=tier, model=model, action=action or "", why=why[:300])
             # A seat's WHY is evidence even when its ACTION does not clear the wall. Tonight the

@@ -5,12 +5,18 @@ cannot skip by accident. Titles come from benchmarks/2026-08-22-skill-matrix.md 
 three skill-isolated legs) and match the router's own table
 (`scripts/semantic_router.py missions`):
 
+* **The Investigator** ``qwen38-27b-128k`` — recon; observes before anyone reasons
 * **The Point Man** ``qwen38-27b-128k`` — navigation, best line of six (49 turns / 36 HP)
 * **The Extractor** ``kimi-k2.6:cloud`` — puzzle, deepest of six (B2F, 18 tiles)
 * **The Wheelman** ``laguna-xs-128k`` — battle, 6/6 execution baseline
 
 Anthropic is not a seat. A leg escalates navigation → puzzle and then *stops*, leaving a written
 failure for the operator; Opus is a human decision made holding that record, not a rung.
+
+Recon comes **before** the ladder, not on it. A wall is observed before it is reasoned about:
+``LegRunner.recon`` talks to the bodies on the map and the sentences land in the facts under
+``HEARD``. A seat handed only failure codes is reasoning about a world nobody looked at, and four
+legs were lost that way.
 
 Everything here is pure: prompt text, response parsing, tier selection, telemetry records and the
 failure document. The emulator-driving loop injects I/O around it.
@@ -41,6 +47,18 @@ CREW: dict[str, dict] = {
     # second call: `closing_prompt` hands the seat its own cut-off reasoning and asks only for the
     # line, and that answered in 49s. The thinking was never the problem; finishing was.
     "puzzle": {"title": "The Extractor", "model": "kimi-k2.6:cloud", "tokens": 8000, "timeout": 420},
+    # The Investigator exists because of a counted failure, not a hunch. Across four legs of the
+    # badge-7 water arc the crew engaged ZERO bodies on maps 7, 30, 31, 8 and 166 -- all 76
+    # recorded conversations belong to the badge-6 arc -- while map 30's stuck doc listed ten live
+    # bodies and used them only as obstacles. The cartridge calls all ten `trainer`. The first
+    # time anyone spoke to one it answered, and the operator's single question ("are you talking
+    # to NPCs?") moved the leg further than a day of engine work.
+    #
+    # This seat does not choose a route. It decides WHAT TO OBSERVE before anyone reasons: which
+    # body to talk to, which direction to face, which screen to read. It is seated on navigation's
+    # model because recon is a movement problem, and it is cheap on purpose -- it runs before the
+    # expensive seats, so its budget is small and its timeout short.
+    "recon": {"title": "The Investigator", "model": "qwen38-27b-128k", "tokens": 1200, "timeout": 120},
 }
 
 # The tapes capture proxy (~/.tapes/config.toml: provider openai, upstream 11434, listen 42345).
