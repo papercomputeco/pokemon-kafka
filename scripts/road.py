@@ -605,28 +605,150 @@ def cross_edge(io, truth, pairs, cur: int, nxt: int, *, battle=_default_battle):
     return "stuck-on-edge"
 
 
-SURF_MAX_STEPS = 200  # a water route is open water plus a walkable plaza; a straight run in the
-# connection direction reaches the far edge well under this, and more than this is a wrong map.
+# SURF crossings (sea-to-sea legs), one measured fact at a time: on the sea routes of this
+# cartridge the player stands ON the deep water (the surf move is what carries it), so
+# "unreachable" there is a SURF problem - walking will never get a single step - and the leg is
+# decided by arming the field move in the game's own menu before the step that failed.
+# The standable set is not recalled: it is proposed step-for-step by the water model below
+# and answered live by the game's refusals, which re-plan the route.
+SURF_MAX_STEPS = 200  # water steps per crossing; a straight run in the connection direction
+# reaches the far edge well under this, and more than this is a wrong map, not a long sea.
+WATER_TILES = {0x11, 0x14}  # 0x14 measured standable (the island ring stands on it); 0x11 is
+# the shallows class of the routes; either refusal re-plans around it
+
+
+def _water_model(m, x: int, y: int) -> bool:
+    """Propose whether this cell is standable mid-SURF. Maps without tile data (fake truth in
+    tests) propose everything and let the injected io's refusals be the authority."""
+    tiles = m.get("tiles")
+    if tiles is None:
+        return True
+    return int(tiles[y][2 * x : 2 * x + 2], 16) in WATER_TILES
+
+
+def _water_reach(m, sx: int, sy: int, blocked: set) -> dict:
+    """BFS predecessor map over the water model. The start cell stands unconditionally (the
+    shore left us here); everything after it must pass the model and no measured refusal."""
+    from collections import deque
+
+    w, h = m["width"], m["height"]
+
+    def ok(x, y, is_start=False):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked and (is_start or _water_model(m, x, y))
+
+    if not ok(sx, sy, is_start=True):
+        return {}
+    prev = {(sx, sy): None}
+    queue = deque([(sx, sy)])
+    while queue:
+        x, y = queue.popleft()
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if ok(nx, ny) and (nx, ny) not in prev:
+                prev[(nx, ny)] = (x, y)
+                queue.append((nx, ny))
+    return prev
+
+
+def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | None:
+    """Route the water to an opening edge row, live-corrected: propose a path on the water
+    model, verify it press-by-press, let each refusal re-plan. Returns True once the map has
+    flipped to the far map, "detoured" when a step flipped to a third map (the ladder takes
+    the state back), None when the whole shore has been asked and answered no (or no water
+    path exists - which for a walker means the calling refusal stands: there was no surf to
+    carry the route).
+
+    The measured 30->31 case forces the shape: the west edge opens on rows 40..52 only, the
+    approach is on row 10, and the column between carries a solid notch at rows 38..39, so a
+    single-column slide cannot round it. Slides find no row; a route finds one.
+
+    A step cancelled by a wild is fought and re-stepped on the SAME row: a cancelled step and
+    a refused step are the same bytes at the position, and reading the first as "solid" is the
+    exact error the encounter tests fixed for the crossing step.
+    """
+    m = truth["maps"][str(cur)]
+    w = m["width"]
+    h = m["height"]
+    edge_col = 0 if d == "left" else (w - 1 if d == "right" else None)
+    if edge_col is None:
+        return None
+
+    def key_between(a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        if dx:
+            return "right" if dx > 0 else "left"
+        return "down" if dy > 0 else "up"
+
+    blocked: set = set()  # cells the game has refused - measurements, not recall
+    start_y = read_pos(io)[2]
+    rows = sorted(range(h), key=lambda y: abs(y - start_y))  # near first; the opening band of
+    # an unequal-height edge can sit far along the shore (measured: 30 rows), so the whole
+    # shore is the candidate set and nearness is only the order
+    for y in rows:
+        sx, sy = read_pos(io)[1:3]
+        prev = _water_reach(m, sx, sy, blocked)
+        target = (edge_col, y)
+        if target not in prev:
+            continue  # no water path to this row now; a later refusal or row may change that
+        path = [target]
+        while prev[path[-1]] is not None:
+            path.append(prev[path[-1]])
+        path.reverse()  # stand -> target
+        walked = True
+        cell = (sx, sy)
+        for step in path[1:]:
+            k = key_between(cell, step)
+            while True:
+                io.press(k, hold=15, release=15)
+                io.wait(25)
+                if io.read(ADDR_IN_BATTLE) and battle:
+                    battle(io)
+                    continue  # a wild cancelled the step; re-step it
+                pos = read_pos(io)
+                if pos[0] != cur:
+                    return True if pos[0] == nxt else "detoured"
+                if pos[1:] == step:
+                    cell = step
+                    break
+                blocked.add(step)
+                walked = False
+                break
+            if not walked:
+                break
+        if not walked:
+            continue  # that cell is solid where the model said water; replan for the next row
+        while True:
+            io.press(d, hold=15, release=15)
+            io.wait(45)
+            if io.read(ADDR_IN_BATTLE) and battle:
+                battle(io)
+                continue
+            pos = read_pos(io)
+            if pos[0] != cur:
+                return True if pos[0] == nxt else "detoured"
+            break
+        # This row stands but does not open. `rows` visits each y exactly once, so there is
+        # nothing to remember: the next iteration is already a different row.
+    return None
 
 
 def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_default_battle):
     """Cross a connection whose near edge has no walkable cell to stand on - i.e. water - and
     the A* cannot plan. A route (measured on 30/31/32: 5-8% walkable, a central land plaza with
-    open water either side of it) traverses straight in its connection direction: SURF carries the
-    water, walking carries the plaza, and arming SURF glues them. A refused step is the one signal
-    I am walking (not yet surfing) and facing water, which is also the only moment the field-move
-    menu is openable (on land) - so SURF is armed exactly there, never in the middle of the water
-    where the START menu is locked out.
+    open water either side of it) traverses straight in its connection direction: SURF carries
+    the water, walking carries the plaza, and arming SURF glues them. A refused step is the
+    signal I am on the wrong side of the surf (facing water, not carrying it) - arm there, then
+    verify. Once the route is refused where the model proposed it, the shore is asked before
+    the leg is written "solid": edges of unequal height open as a BAND of rows (measured
+    30->31: rows 40..52, approach at row 10, a solid notch in the approach column between),
+    so the refusal replans the water route (``_water_cross``) instead of ending it.
 
-    Returns True once the map changes to the far side, "stuck-on-edge" when a step is refused on
-    water *and* after arming SURF (a solid tile, not a route) - the ladder then bans and reroutes,
-    so a bad line costs one hop rather than hanging."""
+    Returns True once the map changes to the far side, "detoured" when a step crossed an
+    unintended edge (the ladder backtracks the state), "stuck-on-edge" / "surfmoved-failed"
+    when the shore has refused every row (the ladder then bans and reroutes, so a bad line
+    costs one hop rather than hanging)."""
     _, d = edge_cells(truth, cur, nxt)
-    # A finite retry bound, not a fallthrough: the run either exits through the `return True`
-    # (the map flipped) or the inner `return "stuck-on-edge"` (refused after arming = a solid,
-    # not a route). The water is bounded, so a walk that never flips a map and never sticks on a
-    # solid cannot occur; the bound is the anti-hang guard the same way the cross_edge bound is.
     left = SURF_MAX_STEPS
+    armed = False
     while left > 0:
         left -= 1
         if io.read(ADDR_IN_BATTLE) and battle:
@@ -638,33 +760,37 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
         before = (x, y)
         _step(io, d)
         if io.read(ADDR_IN_BATTLE) and battle:
-            # A wild encounter CANCELS the step, so the position is unchanged - which is
-            # byte-for-byte indistinguishable from walking into a wall unless the battle is
-            # checked for first. Reading it as a refusal is what ended the badge-7 crossing: the
-            # leg armed SURF into a battle (where the START menu does not open), re-stepped,
-            # measured no movement again and reported "stuck-on-edge" in the middle of open
-            # water. Fight it and let the loop re-step from the same cell.
+            # A wild encounter CANCELS the step, so the position is unchanged - byte-for-byte
+            # indistinguishable from a refusal unless the battle is checked for first. Reading
+            # it as a refusal is what ended the badge-7 crossing last attempt: the leg armed
+            # SURF into a battle (where the START menu does not open), re-stepped, saw no
+            # movement and wrote "stuck-on-edge" in the middle of open water.
             battle(io)
             continue
         if read_pos(io)[0] != cur:
             io.wait(60)
             return True
         if read_pos(io)[1:] == before:
-            # refused: walking, facing water. Arm SURF (on land, the menu opens), dismiss the
-            # "ready" text, and run the same step into the water. A step this still refuses is
-            # solid, not water - a dead end on a route, and a wrong edge off one.
-            if not arm_surf():
-                return "surfmoved-failed"
-            for _ in range(3):
-                io.press("a")
-                io.wait(40)
-            _step(io, d)
-            io.wait(45)
-            if io.read(ADDR_IN_BATTLE) and battle:
-                battle(io)  # the armed step drew an encounter; that is not a solid tile
-                continue
-            if read_pos(io)[1:] == before:
-                return "stuck-on-edge"
+            # refused on this step. If SURF is not armed yet, arm it - the field-move menu is
+            # only openable while walking, so the arm belongs on the last dry step, never mid
+            # water - and give the same step one more try.
+            if not armed:
+                armed = arm_surf()
+                for _ in range(3):
+                    io.press("a")
+                    io.wait(40)
+                if not armed:
+                    r = _water_cross(io, truth, cur, nxt, d, battle)
+                    return "surfmoved-failed" if r is None else r
+                _step(io, d)
+                io.wait(45)
+                if io.read(ADDR_IN_BATTLE) and battle:
+                    battle(io)
+                    continue
+                if read_pos(io)[1:] != before:
+                    continue  # the arm took; the route is open; keep going
+            r = _water_cross(io, truth, cur, nxt, d, battle)
+            return "stuck-on-edge" if r is None else r
     raise RuntimeError(f"surf_cross({cur}->{nxt}) spun {SURF_MAX_STEPS} steps without crossing")
 
 

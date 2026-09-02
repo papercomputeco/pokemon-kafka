@@ -992,3 +992,227 @@ def test_an_encounter_on_the_armed_step_is_not_mistaken_for_a_solid_tile():
 
     assert road.surf_cross(io, _surf_truth(1), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
     assert io.battled == 1 and io.arms == 1  # armed once, fought once, crossed
+
+
+class ShoreIO:
+    """The 30->31 boundary shape: a water column at the west edge (x0), the player on the water
+    beside it (x1), and only the rows in `open` open to the far map. Sliding up/down along the
+    column is the SURF that carries it; the crossing press on a sealed row (cliff, or a far-map
+    cell that does not open) is refused."""
+
+    def __init__(self, height, open_rows, start_row=10):
+        self.height = height
+        self.open = set(open_rows)
+        self.mem = {qm.ADDR_MAP: 1, qm.ADDR_X: 1, qm.ADDR_Y: start_row}
+        self.battle = False
+        self.battled = 0
+        self.left_encounters = 0
+        self.arms = 0
+        self.arm_ok = True
+
+    def read(self, addr):
+        if addr == qm.ADDR_IN_BATTLE:
+            return 1 if self.battle else 0
+        return self.mem.get(addr, 0)
+
+    def wait(self, frames=30):
+        pass
+
+    def press(self, btn, hold=8, release=8):
+        x, y = self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y]
+        if btn in ("down", "up"):
+            ny = y + 1 if btn == "down" else y - 1
+            if not 0 <= ny < self.height:
+                return
+            if self.left_encounters:  # a wild draws on an accepted step and cancels it
+                self.left_encounters -= 1
+                self.battle = True
+                return
+            self.mem[qm.ADDR_Y] = ny
+            return
+        if btn != "left" or x != 1 or y not in self.open:
+            return  # a sealed row refuses even mid-surf
+        self.mem[qm.ADDR_MAP] = 2
+
+    def arm(self):
+        self.arms += 1
+        return self.arm_ok
+
+
+def _shore_truth(height):
+    return {
+        "maps": {
+            "1": _map(["01"] * height, connections={"west": 2}),
+            "2": _map(["10"] * height, connections={"east": 1}),
+        }
+    }
+
+
+def test_shunt_finds_the_open_band_far_down_the_shore():
+    # the 30->31 measurement: approach row 10 refuses, the edge opens at rows 40..52 -
+    # thirty rows of SURF between the refusal and the crossing
+    io = ShoreIO(height=54, open_rows=range(40, 53))
+    assert road.surf_cross(io, _shore_truth(54), set(), 1, 2, arm_surf=io.arm) is True
+    assert io.mem[qm.ADDR_MAP] == 2 and io.mem[qm.ADDR_Y] in range(40, 53)
+
+
+def test_shunt_finds_the_open_band_up_the_shore():
+    io = ShoreIO(height=12, open_rows={4}, start_row=10)
+    assert road.surf_cross(io, _shore_truth(12), set(), 1, 2, arm_surf=io.arm) is True
+    assert io.mem[qm.ADDR_MAP] == 2 and io.mem[qm.ADDR_Y] == 4
+
+
+def test_shunt_keeps_the_no_surf_verdict_when_the_shore_cannot_slide():
+    # arm refuses AND the slide refuses (not surfing at all): the caller's original verdict
+    # stands, exactly as before the shunt existed
+    inner = ShoreIO(height=54, open_rows=range(40, 53))
+
+    class WalkerShore:
+        """A walker's shore: every slide press is refused (no SURF to carry the water)."""
+
+        def __init__(self, inner):
+            self.inner = inner
+            for key in ("height", "read", "wait", "arm"):
+                setattr(self, key, getattr(inner, key))
+
+        def press(self, btn, hold=8, release=8):
+            if btn in ("down", "up"):
+                return  # walking into the shore: refused
+            self.inner.press(btn, hold=hold, release=release)
+
+    walker = WalkerShore(inner)
+    assert road.surf_cross(walker, _shore_truth(54), set(), 1, 2, arm_surf=lambda: False) == "surfmoved-failed"
+
+
+def test_shunt_keeps_the_stuck_verdict_when_the_shore_is_sealed_both_ways():
+    io = ShoreIO(height=12, open_rows=())  # no row opens the crossing
+    assert road.surf_cross(io, _shore_truth(12), set(), 1, 2, arm_surf=io.arm) == "stuck-on-edge"
+    assert io.mem[qm.ADDR_MAP] == 1  # never left the near map
+
+
+def test_wilds_on_shunt_steps_are_fought_not_read_as_a_sealed_shore():
+    # a cancelled step and a refused step are the same bytes; the sealed-shore break is the
+    # same error the encounter tests fixed for the crossing step, moved one slide over
+    io = ShoreIO(height=12, open_rows={6}, start_row=4)
+    io.left_encounters = 2
+
+    def fight(_io):
+        _io.battle = False
+        _io.battled += 1
+
+    assert road.surf_cross(io, _shore_truth(12), set(), 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.battled == 2 and io.mem[qm.ADDR_MAP] == 2 and io.mem[qm.ADDR_Y] == 6
+
+
+# --------------------------------------------------------------------- the water model / route
+
+
+def _water_map(rows, connections=None):
+    """A map whose tile grid is given row by row as hex pairs."""
+    return {
+        "width": len(rows[0]) // 2,
+        "height": len(rows),
+        "tileset": 0,
+        "tiles": list(rows),
+        "grid": ["1" * (len(rows[0]) // 2) for _ in rows],
+        "sprites": [],
+        "warps": [],
+        "connections": connections or {},
+    }
+
+
+def test_the_water_model_reads_the_grid_when_there_is_one():
+    """Tiles present: the model answers from the cartridge. Absent (fake truth): it proposes
+    everything and lets the game's refusals be the authority."""
+    m = _water_map(["1400", "1411"])
+    assert road._water_model(m, 0, 0) is True  # 0x14, water
+    assert road._water_model(m, 1, 0) is False  # 0x00, not water
+    assert road._water_model(m, 1, 1) is True  # 0x11, the shallows class
+    assert road._water_model({"tiles": None}, 9, 9) is True
+
+
+def test_water_reach_refuses_to_start_outside_the_map():
+    m = _water_map(["1414", "1414"])
+    assert road._water_reach(m, 9, 9, set()) == {}
+    assert road._water_reach(m, 0, 0, {(0, 0)}) == {}
+
+
+def test_water_reach_bfs_stands_on_the_start_unconditionally():
+    """The shore left us here, so the start cell stands even if the model dislikes it."""
+    m = _water_map(["0014", "1414"])
+    prev = road._water_reach(m, 0, 0, set())  # (0,0) is 0x00, not water, but it is where we are
+    assert (0, 0) in prev and prev[(0, 0)] is None
+    assert (0, 1) in prev  # reached downward through water
+
+
+def test_a_crossing_with_no_side_column_is_not_attempted():
+    """north/south connections have no edge column, so this router has nothing to aim at."""
+    truth = {"maps": {"1": _water_map(["1414"])}}
+    assert road._water_cross(None, truth, 1, 2, "up", None) is None
+
+
+class WaterIO:
+    """Sea that opens only on a chosen row: stepping the connection direction anywhere else is
+    refused, and one wild encounter interrupts the first press."""
+
+    def __init__(self, cur, dest, open_row, start=(0, 0), wilds=0):
+        self.mem = {qm.ADDR_MAP: cur, qm.ADDR_X: start[0], qm.ADDR_Y: start[1]}
+        self.cur, self.dest, self.open_row = cur, dest, open_row
+        self.wilds = wilds
+        self.battle = False
+        self.battled = 0
+
+    def read(self, addr):
+        if addr == qm.ADDR_IN_BATTLE:
+            return 1 if self.battle else 0
+        return self.mem.get(addr, 0)
+
+    def wait(self, frames=30):
+        pass
+
+    def press(self, btn, hold=8, release=8):
+        if self.wilds:
+            self.wilds -= 1
+            self.battle = True
+            return  # the step is cancelled by the encounter
+        dx, dy = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}[btn]
+        x, y = self.mem[qm.ADDR_X] + dx, self.mem[qm.ADDR_Y] + dy
+        if x < 0:  # stepping off the west edge: only the open row crosses
+            if y == self.open_row:
+                self.mem[qm.ADDR_MAP] = self.dest
+            return
+        if 0 <= x < 2 and 0 <= y < 4:
+            self.mem[qm.ADDR_X], self.mem[qm.ADDR_Y] = x, y
+
+
+def test_the_route_walks_the_shore_until_a_row_opens():
+    """The opening band can sit far from the approach row (measured: 30 rows on 30->31), so a
+    dead row is remembered and the next one tried rather than the crossing being abandoned."""
+    truth = {"maps": {"1": _water_map(["1414"] * 4)}}
+    io = WaterIO(1, 2, open_row=3)
+    assert road._water_cross(io, truth, 1, 2, "left", _default_battle_noop) is True
+    assert io.mem[qm.ADDR_MAP] == 2
+
+
+def _default_battle_noop(io):
+    io.battle = False
+    io.battled += 1
+
+
+def test_a_wild_on_the_way_is_fought_and_the_step_retried():
+    truth = {"maps": {"1": _water_map(["1414"] * 4)}}
+    io = WaterIO(1, 2, open_row=0, wilds=1)
+    assert road._water_cross(io, truth, 1, 2, "left", _default_battle_noop) is True
+    assert io.battled == 1
+
+
+def test_landing_on_a_third_map_is_reported_as_a_detour():
+    truth = {"maps": {"1": _water_map(["1414"] * 4)}}
+    io = WaterIO(1, 99, open_row=0)  # the edge leads somewhere that is not the goal
+    assert road._water_cross(io, truth, 1, 2, "left", _default_battle_noop) == "detoured"
+
+
+def test_a_sea_that_never_opens_reports_nothing_rather_than_spinning():
+    truth = {"maps": {"1": _water_map(["1414"] * 4)}}
+    io = WaterIO(1, 2, open_row=99)  # no row crosses
+    assert road._water_cross(io, truth, 1, 2, "left", _default_battle_noop) is None
