@@ -58,16 +58,36 @@ Badges: **6**. Gyarados 73 HP is the one fragile item — it must keep surviving
 done for us by the rig) so it stays the surfer. If Gyarados ever fainted, **SURF is lost** and
 the badge-7 leg is over.
 
-## The remaining blocker — precisely
+## The remaining blocker — precisely (revised with ground truth)
 
-Map 30 (20×54) is **island land (x4–13, y6–9) + a spine (x13, y0–5) surrounded by a rock/
-water checkerboard sea**. Surfing proves which tiles are real water: the **y10 row is a
-continuous water strip from x1 to x14** (surfed it). But it is a **dead-end pocket**: from
-(1,10) west is rock (x=0, the map-31 boundary), and (1,9)/(1,11) are rock — so that strip
-does **not** touch the west edge. The water *is* connected (the island is surrounded), so a
-path to the west edge exists, but it requires surfing **far** (east around the island, over
-x14–19, around, back up to x=0) — **many surf steps and several water encounters in a single
-uninterrupted run**.
+**The sea around map 30 is a water/rock CHECKERBOARD, not a free sea.** The ground-truth grid
+(`references/rom_truth.json` → `maps.30`) decodes as: `grid` `0`=water / `1`=land(island), and `tiles`
+alternate. Row y10 literally reads: `3 a 1 4 1 4 1 4 1 4 1 4 1 4 1 4 1 4 1 4` — i.e. **every other
+tile across the whole water lane is a different tile id (1 vs 4), alternating x by x.** The island
+(the land mass) is the `1` blob at x4–13, y6–9 plus the x13 spine y0–5.
+
+Two distinct game messages pin down the two refusal types (do not confuse them):
+- `No SURFing on GYARADOS here!` — facing a tile you cannot surf onto (solid rock/land). A
+  **location** refusal; Gyarados is fine.
+- `There's no place to get off!` — the game has you in the water but the surrounding cells give it
+  no legal landing/move; you stay put. This is what caps the surf on the checkerboard.
+
+So the `grid` 0/1 water mask ("all of y10 is water") is **not** the same as "all of y10 is
+surf-able": the alternating `1`/`4` tiles mean the surf-able subset is a checkerboard and a straight
+west run is impossible. You can only hop between the surf-able tiles, and once you land on one there
+is "no place to get off" toward the non-surf-able neighbour.
+
+**The decisive, repeatable failure is surf position-tracking + state.** When actually surfing, the
+rig's `settled_pos()` is not reliable (it reports cells the player isn't demonstrably on), and the
+SURF-armed state does not survive a bank/load cycle. So I can enter the water and make one or two
+surf hops (proven: I reached (14,10) and (1,10) in separate runs), but I **cannot reliably chain the
+many-hop path to the west edge (x=0) → map 31**, because each hop either (a) hits the checkerboard
+refusal, (b) loses the SURF-arm state, or (c) is reported at a mis-tracked position. Across ~15
+attempts the player never reached the map-31 boundary.
+
+This is consistent with the 09-02 crew (who had *more* turns) also leaving it open. It is an
+**engine/navigation-capability gap** (reliable multi-hop surf with correct position feedback), not a
+missing world fact — I have the facts (the exact water/rock layout above).
 
 Two things combine to block the last crossing (map 30 → map 31 → map 8/Cinnabar → 166/Blaine):
 
@@ -80,9 +100,10 @@ Two things combine to block the last crossing (map 30 → map 31 → map 8/Cinna
 
 ## The baton and the exact next move
 
-State: `data/local_runs/roster-bench/b8_aton_surf_proven.state` — **map 30 (1, 10)**, party as
-above, Gyarados 73 HP, badges 6. (Other good saves in the same dir: `b8_baton_fuchsia.state`
-(map 7, safe on land), `b8_mazewest.state` (map 30 island (6,9)).)
+State: **`data/local_runs/roster-bench/b8_BATON_island_gyarados_safe.state` — map 30 (6, 9),
+ON LAND (island), Gyarados 73 HP**, party as above. This is the safe baton (not stuck in water).
+Water-state saves (less reliable): `b8_aton_surf_proven.state` (map 30 (1,10) water),
+`b8_bfs_west.state` (map 30 (1,10)).
 
 **Next session, do the crossing in ONE run:**
 1. Boot `b8_aton_surf_proven.state`. It may be on land or water — read `settle_pos()`; if on the
