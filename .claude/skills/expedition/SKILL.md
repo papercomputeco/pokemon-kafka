@@ -20,6 +20,7 @@ From `benchmarks/2026-08-22-skill-matrix.md`, six models × three skill-isolated
 
 | seat | model | takes |
 |---|---|---|
+| **The Investigator** | `qwen38-27b-128k` | recon — observes before anyone reasons |
 | **The Point Man** | `qwen38-27b-128k` | navigation — best line of six (49 t / 36 HP) |
 | **The Extractor** | `kimi-k2.6:cloud` | puzzle — deepest of six (B2F, 18 tiles), top puzzle screen 0.55 |
 | **The Wheelman** | `laguna-xs-128k` | battle — 6/6, an execution baseline |
@@ -34,6 +35,18 @@ uv run python scripts/semantic_router.py route "<the leg>" # which seat this leg
 **Anthropic is not a seat.** Puzzle escalates to the Extractor, never to Claude. When the
 Extractor is exhausted, write the failure down (below) and hand it to the operator — Opus is a
 decision a human makes holding a failure record, not a rung the loop climbs.
+
+**Recon comes before the ladder, not on it.** A wall is *observed* before it is reasoned about.
+`LegRunner.recon` talks to the bodies the cartridge lists for the map, bounded and once per map,
+and the sentences land in the facts under `HEARD` before the first consult.
+
+This seat exists because of a counted failure. Across four legs of the badge-7 water arc the crew
+engaged **zero** bodies on maps 7, 30, 31, 8 and 166 — all 76 recorded conversations belong to the
+badge-6 arc — while map 30's own stuck doc listed ten live bodies and used them only as obstacles
+to route around. The cartridge calls all ten `trainer`, two are adjacent to walkable cells, and
+the first time anyone spoke to one it answered. **A seat handed only failure codes is reasoning
+about a world nobody looked at.** When a leg is stuck, the first question is not "what does the
+model think" but "what has the game said, and who here have we not asked".
 
 ## The rules
 
