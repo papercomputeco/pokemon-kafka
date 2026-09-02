@@ -58,13 +58,13 @@ Two refusals, and they mean different things — the sink records both:
 `0b00111111`, party whole: **Gyarados L20 73/73** (the only surfer, keep it off the lead and
 awake) plus Dugtrio L100, Charizard L100, Primeape L99, Pidgeot L99, Hypno L99.
 
-**SURF is refused at (6,9). Find a cell where it is not.** The island is a short walkable strip;
-walk it, try `_arm_surf()` from each cell and each facing, and read `Rig.textbox()` on every
-refusal. The game distinguishes *"No SURFing here!"* from *"There's no place to get off!"* —
-those are two different problems and the sentence tells you which one you have.
+**SURF is refused at (6,9), and so is every cell of the island's west edge (4,6)..(4,9) — I
+measured all four.** Do not re-sweep them. The launch is not on the island's west side: the edge
+that opens is the **rows 40..52 band**, thirty rows south of the approach. Get onto the water,
+then work SOUTH to that band before pressing west. `road._water_cross` already routes this; drive
+it rather than re-deriving it, and read `Rig.textbox()` on every refusal.
 
-Then chain hops west to the map-31 boundary, cross to **Cinnabar (map 8)**, and take the gym
-warp at **(18,3) -> map 166** for Blaine. Badge 8 is Giovanni in Viridian; **the gym's opening
+Then cross to **Cinnabar (map 8)** and take the gym warp at **(18,3) -> map 166** for Blaine. Badge 8 is Giovanni in Viridian; **the gym's opening
 condition is UNVERIFIED — measure it, do not assume seven badges opens it.**
 
 ## Discipline — this is where the budget has been lost
