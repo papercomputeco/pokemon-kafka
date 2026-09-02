@@ -6,7 +6,30 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won and **SURF is taught**. What remains is Cinnabar (Blaine, badge 7) and
 Viridian (Giovanni, badge 8).
 
-## START HERE — SURF is proven working, and the baton is already on the water
+## START HERE — the two bugs that ended the last leg are FIXED. Go and cross.
+
+Baton: **`data/local_runs/roster-bench/b7_badge_clean.state`** (map 30 at (6,7), 6 badges, party
+whole). Fixed since your last run, both with tests, both verified live — do not re-derive them:
+
+1. **`road.surf_cross` no longer reads a wild encounter as a wall.** An encounter *cancels* the
+   step, so the position is unchanged — identical bytes to walking into a wall. That is what
+   produced `stuck-on-edge` in the middle of open water. Both the outward step and the armed
+   re-step now check `ADDR_IN_BATTLE` first, fight, and re-step from the same cell.
+2. **`Rig.knows_move(name)` finds the surfer by move id, not by species name.** The engine briefly
+   carried `if lead in ("Gyarados", ...)`; that literal is gone. Verified live on this baton:
+   SURF -> party index 0, CUT -> index 5. `_arm_surf` uses it, and `surf_facing` (your fixed
+   keystroke path) still handles the lead.
+
+**Your job this leg is navigation, not engine work.** Cross map 31 and reach Cinnabar (map 8),
+then the gym warp at (18,3) -> map 166 for Blaine. If you find yourself reading ROM addresses or
+diffing RAM, you are on the wrong thread — that has now cost two legs.
+
+One measured thing still unexplained and worth your attention: after surfing to (6,6)/(6,7),
+**further `down` presses do not move the player**. The straight-line run `surf_cross` does may
+simply be the wrong shape for this water. Measure where it *can* move (try all four directions
+and read `settled_pos()` each time) before assuming a direction is blocked.
+
+## Background — SURF is proven working, and the baton is already on the water
 
 Read `docs/learnings/surf-is-armed-and-the-water-is-not-a-tile-id.md`. Measured 2026-09-02:
 
