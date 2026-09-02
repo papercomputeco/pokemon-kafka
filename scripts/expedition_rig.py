@@ -53,6 +53,11 @@ ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E  # quartermaster's, verified liv
 BAG_SLOTS = 20  # a full bag refuses pickups silently (measured in the Rocket Hideout)
 ADDR_LIST_SCROLL = 0xCC36  # item-list scroll offset; 0xCC26 is the cursor WITHIN the 3-row window
 BATTLE_TURN_CAP = 200  # a battle past this is wedged, not long
+# A special (no-FIGHT) menu — e.g. the Safari Zone's BAIT/ROCK/BALL/RUN — is undriveable by the
+# fight routine, which anchors every turn on that option. Once the routine has had this many
+# turns without the menu ever showing a FIGHT, the wild is fleeable and we run. A gym leader
+# always draws a FIGHT (so the guard below never fires on a trainer) and cannot be fled anyway.
+SPECIAL_MENU_GRACE = 5
 
 
 class BattleWedge(RuntimeError):
@@ -528,15 +533,66 @@ class Rig:
         self.ag._catch_enemy = None
         self.ag._catch_throws = 0
         turns = 0
+        no_fight = 0  # consecutive turns on a menu the routine cannot drive
         while self.mem[qm.ADDR_IN_BATTLE] and turns < BATTLE_TURN_CAP:
             self.ag.run_battle_turn()
             turns += 1
+            # The fight routine leaves a special (no-FIGHT) menu exactly where it found it: after a
+            # turn it has driven, if no FIGHT is drawn anywhere on the menu it could not reach one,
+            # and we have seen that repeatedly, the wild is fleeing away rather than spurning for the
+            # cap. RUN sits bottom-right of every 2x2 battle menu, so a directed press there ends it.
+            if not self._fightable():
+                no_fight += 1
+            else:
+                no_fight = 0
+            if no_fight >= SPECIAL_MENU_GRACE and self._flee_special_menu():
+                self.emit("battle.fled", pos=list(self.pos()), turns=turns)
+                return
             if turns in (60, 110, 160):
                 self.ag._recover_battle_wedge()
         if self.mem[qm.ADDR_IN_BATTLE]:
             self.bank("wedge")
             self.emit("battle.wedge", pos=list(self.pos()), turns=turns)
             raise BattleWedge(f"battle did not end in {turns} turns; banked wedge.state")
+
+    def _fightable(self, probes: int = 8) -> bool:  # pragma: no cover - drives the emulator
+        """B through intro/dialog (B is a no-op on a menu, A on the evolution screen); report
+        whether a standard menu — one with a FIGHT option — is up. False means a special menu the
+        fight routine cannot select from (the Safari Zone's), so a wild is better fled than fought."""
+        for _ in range(probes):
+            if not self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            if self.mr.battle_menu_visible():
+                return True
+            self.ag._press_b_unless_evolving()
+            self.ctl.wait(12)
+        return self.mr.battle_menu_visible()
+
+    def _flee_special_menu(self) -> bool:  # pragma: no cover - drives the emulator
+        """Flee a no-FIGHT menu: normalise the cursor to top-left then step to bottom-right (RUN,
+        on every 2x2 battle menu) and confirm; dismiss the 'you fled' text. Returns whether the
+        battle actually ended."""
+        for _ in range(4):
+            if not self.mem[qm.ADDR_IN_BATTLE]:
+                return True
+            self.ctl.press("b")
+            self.ctl.wait(16)
+            self.ctl.press("up")
+            self.ctl.wait(12)
+            self.ctl.press("left")
+            self.ctl.wait(12)
+            self.ctl.press("down")
+            self.ctl.wait(12)
+            self.ctl.press("right")
+            self.ctl.wait(12)
+            self.ctl.press("a")
+            self.ctl.wait(70)
+            for _ in range(10):
+                if not self.mem[qm.ADDR_IN_BATTLE]:
+                    return True
+                self.ctl.press("a")
+                self.ctl.wait(35)
+        return not self.mem[qm.ADDR_IN_BATTLE]
 
     def walk(self, map_id: int, targets, **kw):
         kw.setdefault("battle", self.battle)
