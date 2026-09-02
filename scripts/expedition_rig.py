@@ -636,6 +636,15 @@ class Rig:
             return res
         return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
 
+    # Measured: with the roster drawn on rows 0-11, the refusal "No SURFing on / GYARADOS here!"
+    # rendered on rows 12 and 13, so the game's text box lives in the bottom of the 18-row window.
+    TEXTBOX_ROWS = range(12, 18)
+
+    def textbox(self) -> str:
+        """What the game is currently saying, as one line. The screen is the instruction stream."""
+        rows = [self.window_row(i).strip() for i in self.TEXTBOX_ROWS]
+        return " ".join(t for t in rows if t)
+
     def knows_move(self, name: str) -> int | None:
         """Party index of the first *standing* member that knows ``name`` — from RAM, by move id.
 
@@ -725,23 +734,42 @@ class Rig:
         The faint-omission hazard that forced this design still stands: a fainted member is not
         drawn on the POKeMON menu, so a 0 HP surfer cannot be armed at all — the protect rule in
         ``BattleStrategy`` exists precisely to keep the lead's surfer alive across the crossings.
+
+        **The return value is measured, not assumed, and this is the whole point.** It used to
+        report success the moment the keystrokes had been sent. Measured on
+        ``b8_BATON_island_gyarados_safe.state`` at map 30 (6,9): the keys go in, the game answers
+        **"No SURFing on GYARADOS here!"**, the refusal text box swallows every subsequent input
+        (``probe_step()`` is False in all four directions), and the old code returned True. Three
+        legs then read "nothing moves anywhere" as a water/rock maze and as unreliable position
+        tracking, and wrote both up as world facts. They were neither: they were this boolean
+        lying.
+
+        Using SURF moves the player onto the water as part of using it, so the honest predicate is
+        the one ``surf_onto`` already documents — the position, never the menu. The text is
+        cleared first, because a refusal left up is what made the world look frozen.
         """
         holder = self.knows_move("SURF")
         if holder is None:
             return False
+        before = self.pos()
         if holder == 0:  # the lead: the fixed key sequence, which reads no window text
             self.surf_facing()
-            self._surfer = self.party()[0][0]
-            return True
-        if self._surfer and self.use_field_move("SURF", species=self._surfer):
-            return True
-        for name, _lvl, hp in self.party():
-            if hp <= 0 or name == self._surfer:
-                continue
-            if self.use_field_move("SURF", species=name):
-                self._surfer = name
-                return True
-        return False
+        elif not (self._surfer and self.use_field_move("SURF", species=self._surfer)):
+            for name, _lvl, hp in self.party():
+                if hp <= 0 or name == self._surfer:
+                    continue
+                if self.use_field_move("SURF", species=name):
+                    break
+        said = self.textbox()
+        for _ in range(6):  # a refusal left on screen freezes every later step
+            self.ctl.press("b")
+            self.ctl.wait(30)
+        if self.pos() == before:
+            if said:
+                self.say(said, "surf.refused")  # the sentence is the evidence, so it lands in the sink
+            return False
+        self._surfer = self.party()[holder][0]
+        return True
 
     def approach(self, cells) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Get onto one of ``cells`` on this map. Walk first; on a facility floor, use the oracle.

@@ -81,3 +81,38 @@ One more thing measured while doing it, which the next leg will hit: after the s
 the player lands on (6,6) and **three further `down` presses do not move it**. Whatever the
 crossing is, it is not "hold a direction until the map flips" — `surf_cross`'s straight-line run
 assumes exactly that, and it is the next thing worth measuring.
+
+## The bug that cost three legs: `_arm_surf` returned True while the game had refused
+
+Measured 2026-09-02 on `b8_BATON_island_gyarados_safe.state`, map 30 at (6,9):
+
+    before:  ['GYARADOS 20', ... 'AAAAAAAA SURF', 'Choose a P SWITCH', 'CANCEL']
+    armed=True   pos unchanged (30, 6, 9)
+    screen:  [... 'No SURFing on', 'GYARADOS here!']
+    probe_step (can the world take input?): False
+    -- after pressing B six times --
+    probe_step: True
+
+Three things at once, and only the last one is about water:
+
+1. **The arm reported success after a refusal.** The lead path sent its keystrokes and returned
+   `True` unconditionally; nothing checked the game's answer.
+2. **The refusal text box then swallowed every input.** `probe_step()` is False in all four
+   directions — not "this direction is blocked", but *the world is frozen*. Clearing the box with
+   six B presses restores it to True immediately.
+3. So a leg that armed, stepped, and measured no movement anywhere concluded the sea was a
+   **water/rock checkerboard** and that the rig had **unreliable surf position-tracking**. Both
+   were written up as measured world facts. Neither is real; they are this boolean lying.
+
+`_arm_surf` now judges by the world, exactly as `surf_onto` already documented — using SURF
+carries the player onto the water, so the position is the predicate and the menu is not. It
+clears the text first (a refusal left up is what froze everything) and records the sentence into
+the sink as a `surf.refused` event, so the next run can search for it instead of re-deriving it.
+
+After the fix, from the same cell: `armed=False`, and `probe_step()` is **True** — the leg is
+free to move to a cell that *can* surf rather than being stuck in a world that accepts nothing.
+
+**The lesson is the one this repo keeps paying for.** Two legs' worth of "measured" geography —
+the checkerboard, the alternating lanes, the position-tracking doubt — came from trusting a
+return value instead of the screen. When a probe says *nothing works in any direction*, suspect
+the harness before the cartridge.

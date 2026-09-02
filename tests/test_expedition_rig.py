@@ -977,22 +977,40 @@ def test_field_moves_reports_nothing_when_the_submenu_is_not_on_screen():
 
 
 class _SurfRig:
-    """A party plus the one member whose menu offers SURF, and a record of who was asked."""
+    """A party, the one member whose menu offers SURF, and a world that MOVES when it works.
+
+    Using SURF carries the player onto the water, so a fake that never moves would let a lying
+    boolean pass — which is precisely the bug these tests exist to pin.
+    """
 
     def __init__(self, party, knows):
         self._party = party
         self.knows = knows
         self.asked = []
+        self.at = (30, 6, 9)
+        self.said = ""
 
     def party(self):
         return self._party
 
     def use_field_move(self, name, face=None, member=0, species=None):
         self.asked.append(species)
-        return name == "SURF" and species == self.knows
+        if name == "SURF" and species == self.knows:
+            self.at = (30, self.at[1], self.at[2] + 1)  # the game rides us onto the water
+            return True
+        self.said = "No SURFing here!"
+        return False
 
 
-def _surf_rig(party, knows):
+class _NullCtl:
+    def press(self, button, hold=8, release=8):
+        pass
+
+    def wait(self, frames=0):
+        pass
+
+
+def _surf_rig(party, knows, *, lead_arms=True):
     """A rig whose party RAM really carries the move ids, laid out at the measured offsets."""
     r = rig.Rig.__new__(rig.Rig)
     fake = _SurfRig(party, knows)
@@ -1007,7 +1025,19 @@ def _surf_rig(party, knows):
             r.mem[base + off] = 0
         if name == knows:
             r.mem[base + rig.MOVE_SLOTS[-1]] = 57  # SURF, in the last slot as Gyarados carries it
-    r.surf_facing = lambda face=None: fake.asked.append("<keystroke>")
+
+    def surf_facing(face=None):
+        fake.asked.append("<keystroke>")
+        if lead_arms:
+            fake.at = (30, fake.at[1], fake.at[2] + 1)
+        else:
+            fake.said = "No SURFing on GYARADOS here!"
+
+    r.surf_facing = surf_facing
+    r.pos = lambda: fake.at
+    r.textbox = lambda: fake.said
+    r.ctl = _NullCtl()
+    r.say = lambda text, kind="dialogue": fake.__setattr__("logged", (kind, text))
     return r, fake
 
 
@@ -1175,3 +1205,51 @@ def test_arming_reports_failure_when_the_menu_will_not_take_the_selection():
     r.use_field_move = lambda *a, **k: False
     assert r._arm_surf() is False
     assert r._surfer is None
+
+
+def test_a_refused_arm_reports_failure_instead_of_lying_about_it():
+    """The bug that cost three legs, pinned.
+
+    Measured on b8_BATON_island_gyarados_safe.state at map 30 (6,9): the keystrokes go in, the
+    game answers "No SURFing on GYARADOS here!", the refusal text box swallows every later input
+    (probe_step is False in all four directions) — and the old code returned True. The legs then
+    read "nothing moves anywhere" as a water/rock maze and as unreliable position tracking, and
+    wrote both up as world facts.
+    """
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados", lead_arms=False)
+    assert r._arm_surf() is False  # the position did not change, so nothing was armed
+    assert r._surfer is None
+
+
+def test_the_refusal_sentence_is_recorded_into_the_sink():
+    """A run that does not emit is unminable, and this sentence is the whole diagnosis."""
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados", lead_arms=False)
+    r._arm_surf()
+    assert fake.logged == ("surf.refused", "No SURFing on GYARADOS here!")
+
+
+def test_a_refusal_is_cleared_so_the_next_step_is_not_swallowed():
+    """Leaving the box up is what made the world look frozen in every direction."""
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, _fake = _surf_rig(party, "Gyarados", lead_arms=False)
+    pressed = []
+    r.ctl.press = lambda button, hold=8, release=8: pressed.append(button)
+    r._arm_surf()
+    assert pressed.count("b") >= 1
+
+
+def test_the_textbox_is_read_off_the_bottom_of_the_window_and_joined():
+    """Measured: with the roster on rows 0-11, "No SURFing on / GYARADOS here!" rendered on 12
+    and 13, so the box is the bottom of the 18-row window and its rows are one sentence."""
+    r = rig.Rig.__new__(rig.Rig)
+    drawn = {12: "No SURFing on", 13: "GYARADOS here!"}
+    r.window_row = lambda row, cursor=False: drawn.get(row, "")
+    assert r.textbox() == "No SURFing on GYARADOS here!"
+
+
+def test_an_empty_textbox_reads_as_nothing_said():
+    r = rig.Rig.__new__(rig.Rig)
+    r.window_row = lambda row, cursor=False: "   "
+    assert r.textbox() == ""
