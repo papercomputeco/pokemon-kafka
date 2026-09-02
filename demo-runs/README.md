@@ -102,6 +102,32 @@ reading the cartridge instead of the map:
   ROD, cast off the dock at (18,29), and land the Magikarp that becomes a Gyarados — which learns
   Surf *and* Strength. 241 turns, one cast.
 
+## Planned: `beat16-bicycle`
+
+Reserved, not yet recorded — the bike is still being investigated. Worth a beat for the same
+reason Surf got one: it is a **hard blocker the game states out loud**, and the fix is a piece of
+detective work rather than a fight.
+
+The arc, and why it reads well on camera:
+
+1. The wall. `29 -> 28` refuses, and the cartridge says why in its own words:
+   **"You need a BICYCLE for CYCLING ROAD!"** The northern detour is refused too — `15 -> 14` is
+   `no-path` from four independent entry routes, all landing in the same sealed pocket of map 15.
+2. The deduction. `BICYCLE` is item 6 and `BIKE VOUCHER` is item 45, and **neither is an item ball
+   on any map** — so both come from a person. The shop's own script rules money out:
+   *"Sorry! You can't afford it!"* … *"Oh, that's A BIKE VOUCHER! OK! Here you go!"*
+3. The legwork. Find the voucher's giver, carry it to the BIKE SHOP, and free a bag slot first —
+   the bag sits at 20/20 and the shop says *"You better make room for this!"*
+4. The payoff. Walk `29 -> 28` and watch the gate that stopped two legs open.
+
+Record it the way beat15 was: let the recon leg do the messy discovery, then **replay the known
+route cleanly** with `Rig(live_label="16 · Bicycle — the voucher, the shop, Cycling Road")`, which
+writes frames + `events.jsonl` + `meta.json` automatically. Copy the run dir to
+`demo-runs/beat16-bicycle/` and add its entry above.
+
+The dialogue is the star here, so capture the text boxes: every sentence the investigation records
+lands in the sink as a `discovery` event and can be replayed alongside the frames.
+
 ## Grid order
 
 `viewer/store.py` sorts run folders reverse-alphabetically, so `beat10`/`beat11`
