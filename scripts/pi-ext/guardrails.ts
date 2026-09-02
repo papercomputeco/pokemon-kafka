@@ -169,6 +169,22 @@ export default async function (pi: ExtensionAPI) {
       if (/(^|[;&|]\s*)cat\s+[^|]*agent\.log\s*$/.test(input.command)) {
         return { block: true, reason: "Do not cat whole agent.log files; use grep/tail/sed -n ranges." };
       }
+      // `pkill -f <pattern>` matches the AGENT'S OWN command line, because the pattern is a
+      // literal substring of it. Two badge-8 legs ended themselves this way with
+      // `pkill -f "supervisor.py run"` -- the run dies mid-mission and looks like a crash. A
+      // written warning in the mission did not stop the second one, so it is enforced here.
+      // A bracketed pattern (`supervisor[.]py`) cannot match itself and is allowed through.
+      const pkillF = /\bpkill\s+(?:-\w+\s+)*-\w*f\w*\s+(\S+)/.exec(input.command);
+      if (pkillF && !pkillF[1].includes("[")) {
+        return {
+          block: true,
+          reason:
+            `pkill -f ${pkillF[1]} would match this shell's own command line and kill your run — ` +
+            "two legs have already died this way. Kill by PID (`kill 12345`, from a saved $! or " +
+            "pgrep in a SEPARATE command), or bracket the pattern so it cannot match itself " +
+            "(e.g. supervisor[.]py).",
+        };
+      }
     }
     if (event.toolName === "web_search" || event.toolName === "web_fetch") {
       return { block: true, reason: "web tools are disabled for this run (context overflow)." };
