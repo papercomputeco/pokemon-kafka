@@ -6,7 +6,32 @@ You are an autonomous operator on this repo. Use `uv run ...` for all Python (AG
 Six badges are won and **SURF is taught**. What remains is Cinnabar (Blaine, badge 7) and
 Viridian (Giovanni, badge 8).
 
-## Where the last run got to (read this first)
+## START HERE — SURF is proven working, and the baton is already on the water
+
+Read `docs/learnings/surf-is-armed-and-the-water-is-not-a-tile-id.md`. Measured 2026-09-02:
+
+- **`Rig.use_field_move("SURF", species="Gyarados")` arms and MOVES the player.** Verified live on
+  map 30: (6,4) -> (6,6) -> (6,7). The menu path is not broken. Do not debug it again.
+- **Your baton is `data/local_runs/roster-bench/b7_surfing.state`** — map 30 at **(6,7), already
+  surfing**, whole party healthy (Gyarados L20 73/73, Dugtrio 100, Primeape 99, Pidgeot 99,
+  Hypno 99, Charizard 100). Start from this, not from `b7_badge.state`.
+- **There is no water-tile constant and you must not go looking for one.** The last leg spent an
+  hour hunting a tileset movement-flags table. It is not needed and it does not answer the
+  question: `(6,3)` and `(6,5)` are the *same* tile id `0x36`, yet facing up refuses
+  **"No SURFing on GYARADOS here!"** and facing down surfs. The `0x14` histogram does not predict
+  this either.
+- **The probe is the game's own sentence.** Arm SURF facing a direction, read the text box, and
+  check whether `settled_pos()` changed. Four presses answer what an address hunt did not. If you
+  find yourself typing a hex offset into a probe, stop — `rom_truth` locates every table by
+  signature already (`TILESETS = 0xC7BE`), and re-deriving one is the largest measured waste in
+  this project.
+- A water route's walkable region is tiny and proves nothing: on map 30 it is **six cells**,
+  (6,4)..(11,4), a one-tile strip touching no water at all. "Cannot walk to water" is the normal
+  reading, not a wall. You cross by surfing off the strip.
+
+Spend the budget **driving toward Cinnabar (map 8)**, not on ROM archaeology.
+
+## Where the earlier run got to
 
 Your own record: `docs/learnings/badge7-8-surf-gap-and-heal-20260901.md`. It got out of the Safari
 Zone, healed at Fuchsia's Center (map **154**, found by interior template — it is not in the
