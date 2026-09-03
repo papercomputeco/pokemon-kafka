@@ -44,6 +44,14 @@ steps prove it.**
 - **Take a screenshot at every point you stop for more than a few tries**, and look at it before
   deciding what kind of stuck it is — boulder, body, leftover text, or a real edge.
 
+## Seafoam Islands may not be a detour — check it on the way
+
+A sign on this exact water reads **"SEA ROUTE 19: FUCHSIA CITY - SEAFOAM ISLANDS"**. That is this
+sea's real name, and it names Seafoam, not Cinnabar. There are two doors into Seafoam Islands on
+this map (they lead to map 192, a cave-style interior). **If you pass near either one, go in and
+look around before continuing past it.** It may sit on the direct line to Cinnabar rather than off
+to the side, and nobody has ever set foot in it to find out. Screenshot whatever you find.
+
 ## Two side questions worth a cheap check, not a detour
 
 - **Is there anything to interact with on these boulders?** Walk up to one and press A. Measured
