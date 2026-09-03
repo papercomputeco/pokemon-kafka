@@ -561,6 +561,11 @@ class _MenuRig:
     def list_index(self):
         return rig.Rig.list_index(self)
 
+    def _hit_or_shift(self, wanted, first=0, last=18):
+        """The real helper, bound to the fake: menu_row_of delegates to it now, and the cursor
+        nudge it performs is part of the behaviour under test."""
+        return rig.Rig._hit_or_shift(self, wanted, first, last)
+
 
 def test_menu_choose_selects_by_text_not_by_position():
     """The PC menu lists WITHDRAW, DEPOSIT, RELEASE and CHANGE BOX. Choosing by index would one
@@ -1046,7 +1051,10 @@ def test_surf_is_armed_on_whoever_knows_it_not_on_the_lead():
     party = [("Dugtrio", 100, 259), ("Gyarados", 20, 73)]
     r, fake = _surf_rig(party, "Gyarados")
     assert r._arm_surf() is True
-    assert fake.asked == ["Dugtrio", "Gyarados"]  # asked by species, in party order
+    # knows_move(name, species=) filters by a free RAM read, so members that provably cannot
+    # surf are never walked through the POKeMON menu -- that fumbling is what hid the
+    # cursor-spliced SURF row on the badge-7 crossing.
+    assert fake.asked == ["Gyarados"]
     assert r._surfer == "Gyarados"
 
 
@@ -1253,3 +1261,165 @@ def test_an_empty_textbox_reads_as_nothing_said():
     r = rig.Rig.__new__(rig.Rig)
     r.window_row = lambda row, cursor=False: "   "
     assert r.textbox() == ""
+
+
+# ------------------------------------------------------------------ the sink is a record
+
+
+def _say_rig(tmp_path):
+    r = rig.Rig.__new__(rig.Rig)
+    r.run_id = "sayrun"
+    r.telemetry_root = tmp_path
+    r._said = set()
+    r.pos = lambda: (30, 6, 9)
+    return r
+
+
+def _lines(tmp_path):
+    p = rig.telemetry_path(root=tmp_path)
+    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_the_same_sentence_on_one_map_is_recorded_once(tmp_path):
+    """Measured: a leg looped on the badge-explainer npc and wrote 1,455,047 discovery events
+    carrying 37 distinct sentences -- 273 MB for one day. A sink that large is unminable."""
+    r = _say_rig(tmp_path)
+    for _ in range(500):
+        r.say("Which of the 8 BADGEs should I describe?", "discovery")
+    assert len(_lines(tmp_path)) == 1
+
+
+def test_distinct_sentences_are_all_kept(tmp_path):
+    r = _say_rig(tmp_path)
+    r.say("Hi there! May I help you?")
+    r.say("POKe BALL? That will be 200. OK?")
+    assert len(_lines(tmp_path)) == 2
+
+
+def test_the_same_line_on_a_different_map_is_still_news(tmp_path):
+    """One mart clerk per city says the same thing; which city said it is the finding."""
+    r = _say_rig(tmp_path)
+    r.say("Hi there! May I help you?")
+    r.pos = lambda: (67, 2, 5)
+    r.say("Hi there! May I help you?")
+    assert len(_lines(tmp_path)) == 2
+
+
+def test_the_same_text_under_a_different_kind_is_kept(tmp_path):
+    """A refusal and a dialogue line that read alike are different observations."""
+    r = _say_rig(tmp_path)
+    r.say("No SURFing here!", "discovery")
+    r.say("No SURFing here!", "surf.refused")
+    assert len(_lines(tmp_path)) == 2
+
+
+def test_blank_text_is_never_recorded(tmp_path):
+    r = _say_rig(tmp_path)
+    r.say("   ")
+    r.say("")
+    assert _lines(tmp_path) == []
+
+
+# ------------------------------------------------- facing water, and the cursor that hides a row
+
+
+class _FaceRig:
+    """A map whose tile grid is real, plus a controller that records what was pressed."""
+
+    def __init__(self, rows, at=(1, 1)):
+        self.presses = []
+        self._at = at
+        self.truth = {
+            "maps": {
+                "30": {
+                    "width": len(rows[0]) // 2,
+                    "height": len(rows),
+                    "tileset": 0,
+                    "tiles": list(rows),
+                }
+            }
+        }
+
+        class Ctl:
+            def __init__(self, outer):
+                self.outer = outer
+
+            def press(self, button, *a, **kw):
+                self.outer.presses.append(button)
+
+            def wait(self, frames=30):
+                pass
+
+        self.ctl = Ctl(self)
+
+    def pos(self):
+        return (30, *self._at)
+
+
+def test_the_arm_turns_to_face_water_before_pressing_start():
+    """Measured on map 30: the same arm from (4,9) fails facing the solid 0x3a to the west and
+    succeeds facing the 0x14 to the south — the activation animates you onto the tile you face."""
+    r = _FaceRig(["000000", "003a14", "000000"], at=(1, 1))  # water (0x14) sits to the right
+    rig.Rig._face_water(r)
+    assert r.presses == ["right"]
+
+
+def test_facing_water_prefers_the_first_water_neighbour_and_stops():
+    r = _FaceRig(["001400", "001400", "001400"], at=(1, 1))  # water above and below
+    rig.Rig._face_water(r)
+    assert r.presses == ["down"]  # one press, not four
+
+
+def test_no_water_neighbour_means_no_turn():
+    r = _FaceRig(["3a3a3a", "3a3a3a", "3a3a3a"], at=(1, 1))
+    rig.Rig._face_water(r)
+    assert r.presses == []
+
+
+def test_a_map_without_tiles_is_left_alone():
+    r = _FaceRig(["001400"], at=(0, 0))
+    r.truth["maps"]["30"]["tiles"] = None
+    rig.Rig._face_water(r)
+    assert r.presses == []
+
+
+def test_a_row_hidden_by_the_cursor_is_found_by_nudging_it():
+    """The cursor splices its own row into a run of As, so a name that is 'missing' is usually
+    the row the cursor sits on. Nudge, re-read, and put the cursor back."""
+    menu = _MenuRig({2: "AAAAAAAAAA", 4: "DUGTRIO"}, cursor=0)
+    original = menu._rows.copy()
+
+    def rows_after_nudge(first=0, last=18):
+        # once the cursor has moved, the spliced row renders its real text
+        if menu.presses:
+            menu._rows = {2: "GYARADOS", 4: "DUGTRIO"}
+        return rig.Rig.menu_rows(menu, first, last)
+
+    menu.menu_rows = rows_after_nudge
+    hit, text = menu._hit_or_shift("GYARADOS")
+    assert hit == 2 and "GYARADOS" in text
+    assert "down" in menu.presses and "up" in menu.presses  # nudged, then restored
+    assert original[2] == "AAAAAAAAAA"
+
+
+def test_a_name_that_is_genuinely_absent_reports_nothing():
+    menu = _MenuRig({2: "DUGTRIO", 4: "HYPNO"}, cursor=0)
+    assert menu._hit_or_shift("GYARADOS") == (None, None)
+
+
+def test_a_roster_with_hp_rows_indexes_by_the_halved_row():
+    """The POKeMON roster interleaves an HP row under every entry, so the 'nothing between
+    entries' walkback stops a step short and calls every member index 0 — which is how a leg
+    armed Charizard's field list when Gyarados was asked for. The HP row is the discriminator."""
+    menu = _MenuRig(
+        {
+            0: "GYARADOS  20",
+            1: " 73/ 73",
+            2: "DUGTRIO  100",
+            3: "259/259",
+            4: "HYPNO     99",
+            5: "341/341",
+        }
+    )
+    assert rig.Rig.menu_row_of(menu, "HYPNO") == 2
+    assert rig.Rig.menu_row_of(menu, "GYARADOS") == 0

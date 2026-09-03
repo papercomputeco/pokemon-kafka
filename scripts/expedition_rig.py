@@ -118,6 +118,7 @@ class Rig:
         self.turn = 0
         self._surfer: str | None = None  # the party member that answered to SURF, once one has
         self._moves: dict[str, int] | None = None  # this cartridge's move-name table, read on demand
+        self._said: set[tuple] = set()  # (map, kind, text) already recorded; the sink is a record, not a tape
         self.recorder = None
         self.telemetry_root = telemetry_root
         self.run_id = run_id or uuid.uuid4().hex[:12]
@@ -727,6 +728,27 @@ class Rig:
         c.press("a")  # SURF
         c.wait(60)
 
+    def _face_water(self) -> None:
+        """Turn to face a water model (0x11/0x14) so the SURF activation has a tile to land on.
+
+        Measured on map 30: the identical arm from (4,9) fails while facing the solid western
+        tile (0x3a) — the player stays put — and succeeds while facing the water tile to the
+        south (0x14): the activation animates the player onto the tile they are facing. The
+        model is only an offer of which direction to face; a model-land direction is not
+        pressed (that would step into the island), and the game's own answer remains the
+        authority either way.
+        """
+        mp, x, y = self.pos()
+        truth = getattr(self, "truth", None)  # a Rig built by __new__ (fakes, probes) has none
+        m = truth["maps"].get(str(mp)) if truth else None
+        if not m or not m.get("tiles"):
+            return
+        for dx, dy, face in ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left")):
+            if road._water_model(m, x + dx, y + dy):
+                self.ctl.press(face)
+                self.ctl.wait(25)
+                return
+
     def _arm_surf(self) -> bool:
         """Arm SURF on whoever actually knows it — the measured lead first, then by species.
 
@@ -758,6 +780,13 @@ class Rig:
         holder = self.knows_move("SURF")
         if holder is None:
             return False
+        # Measured on map 30: the identical arm from (4,9) fails when the player faces the
+        # solid west tile (0x3a) and lands at (4,10) — on the water — when they face it from the
+        # south (0x14). The activation animates the player onto the tile they are facing, so the
+        # facing must be a water cell in the model before the arm is attempted. Pressing a
+        # direction onto water is a refusal (water is not walkable), so the move is free and
+        # only the facing changes.
+        self._face_water()
         before = self.pos()
         if holder == 0:  # the lead: the fixed key sequence, which reads no window text
             self.surf_facing()
@@ -845,6 +874,20 @@ class Rig:
         if not (text or "").strip():
             return
         mp, x, y = self.pos()
+        # Say each distinct sentence ONCE per map. Measured 2026-09-03: one leg looped on the
+        # badge-explainer npc and wrote 1,455,047 discovery events carrying **37 distinct
+        # sentences** -- the top five were ~207,000 repeats each -- for a 273 MB day file. A sink
+        # that large is not a richer record, it is an unminable one: the crew-vs-solo benchmark
+        # reads this file, and every query over it now pays for a quarter-gigabyte of one NPC
+        # explaining badges. The dedup key is (map, kind, text), so the same line said on a
+        # different map is still news.
+        said = getattr(self, "_said", None)
+        if said is None:  # a Rig built by __new__ (fakes, probes) still gets the guard
+            said = self._said = set()
+        seen_key = (mp, kind, text[:300])
+        if seen_key in said:
+            return
+        said.add(seen_key)
         self.emit("discovery", map=mp, x=x, y=y, kind=kind, text=text[:300])
 
     def talk(self, face: str) -> str:  # pragma: no cover - drives the emulator; verified live, not in unit tests
