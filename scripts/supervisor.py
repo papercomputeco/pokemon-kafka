@@ -749,6 +749,12 @@ class LegRunner:
         if mp in self.reconned:
             return self.heard
         self.reconned.add(mp)
+        if hasattr(self.rig, "screenshot"):
+            # A picture of the map, taken by default, not only when someone remembers to ask.
+            # Twice today a leg called this water sealed from the collision grid alone; on
+            # screen the tile it refused on was a boulder in open water, not a barrier. The
+            # Investigator's whole job is to look before reasoning, so it looks first.
+            self.rig.screenshot(f"recon_map{mp}")
         sprites = [
             (s["x"], s["y"])
             for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", [])
@@ -1034,11 +1040,19 @@ class LegRunner:
 
         mp, x, y = self.rig.pos()
         where = f"map {mp} ({x}, {y}) -> goal {self.goal}"
+        facts = describe(self.rig, self.goal, hop, failure, self.notes, self.heard)
+        shot = self.rig.screenshot(f"exhausted_map{mp}") if hasattr(self.rig, "screenshot") else None
+        if shot:
+            # This is the exact moment a leg declares a wall. Twice this project has been wrong
+            # doing that from the collision grid alone -- a "sealed" verdict written from wherever
+            # the leg happened to stop, generalised to the whole map. The picture goes in the
+            # record itself so the next reader can look before trusting the verdict.
+            facts += f"\n\nSCREENSHOT AT THE POINT OF FAILURE: {shot}"
         doc = crew.failure_doc(
             self.rig.run_id,
             f"reach map {self.goal}",
             where,
-            describe(self.rig, self.goal, hop, failure, self.notes, self.heard),
+            facts,
             self.tried,
         )
         self.learnings_dir.mkdir(parents=True, exist_ok=True)

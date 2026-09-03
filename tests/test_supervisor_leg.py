@@ -47,6 +47,7 @@ class FakeRig:
         self._pickups: dict = {}
         self._saying = saying
         self.spoken: list = []
+        self.shots: list = []
 
     # reads
     def pos(self):
@@ -67,6 +68,10 @@ class FakeRig:
 
     def say(self, text, kind="dialogue"):
         self.spoken.append((kind, text))
+
+    def screenshot(self, tag):
+        self.shots.append(tag)
+        return f"<fake>/{tag}.png"
 
     def bodies(self):
         return set(self._bodies)
@@ -1864,3 +1869,29 @@ def test_recon_does_not_spend_a_consult_when_every_body_fits_the_budget():
     order = [(5, 6), (5, 7)]
     assert runner._recon_order(1, order, cap=4) == order
     assert calls == []
+
+
+def test_recon_takes_a_screenshot_of_the_map_by_default():
+    """The Investigator looks before it reasons. Twice this arc a leg called water 'sealed'
+    from the collision grid alone; the tile it refused on was a boulder, visible on sight."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_body_to_ask(), saying="Hello!")
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert "recon_map1" in rig.shots
+
+
+def test_recon_only_screenshots_a_map_once():
+    rig = FakeRig(hops=[None, None], truth=_truth_with_a_body_to_ask(), saying="Hello!")
+    runner = LegRunner(rig, goal=2, consult=_consult("RETRY_SAME"), log=lambda *_: None)
+    runner.run()
+    assert rig.shots.count("recon_map1") == 1
+
+
+def test_exhaustion_attaches_a_screenshot_to_the_written_record(tmp_path):
+    """This is the exact moment a leg declares a wall. The picture goes in the record so the
+    next reader can look before trusting the verdict."""
+    rig = FakeRig(hops=[None])
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert "exhausted_map1" in rig.shots
+    doc = next(tmp_path.iterdir()).read_text()
+    assert "SCREENSHOT AT THE POINT OF FAILURE: <fake>/exhausted_map1.png" in doc

@@ -994,6 +994,7 @@ class _SurfRig:
         self.asked = []
         self.at = (30, 6, 9)
         self.said = ""
+        self.shots = []
 
     def party(self):
         return self._party
@@ -1043,6 +1044,7 @@ def _surf_rig(party, knows, *, lead_arms=True):
     r.textbox = lambda: fake.said
     r.ctl = _NullCtl()
     r.say = lambda text, kind="dialogue": fake.__setattr__("logged", (kind, text))
+    r.screenshot = lambda tag: fake.shots.append(tag) or f"<fake>/{tag}.png"
     return r, fake
 
 
@@ -1423,3 +1425,45 @@ def test_a_roster_with_hp_rows_indexes_by_the_halved_row():
     )
     assert rig.Rig.menu_row_of(menu, "HYPNO") == 2
     assert rig.Rig.menu_row_of(menu, "GYARADOS") == 0
+
+
+def test_a_refusal_takes_a_screenshot_not_only_a_sentence():
+    """Twice this project called water 'sealed' from the collision grid. On screen the tile it
+    refused on was a boulder in open water. A refusal is a picture by default now, not only
+    a sentence someone remembers to capture."""
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados", lead_arms=False)
+    r._arm_surf()
+    assert fake.shots == ["surf_refused"]
+
+
+def test_a_successful_arm_does_not_bother_taking_a_picture():
+    party = [("Gyarados", 20, 73), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados", lead_arms=True)
+    r._arm_surf()
+    assert fake.shots == []
+
+
+def test_screenshot_path_is_pure_and_namespaced_per_run():
+    r = rig.Rig.__new__(rig.Rig)
+    r.run_id = "runX"
+    r.telemetry_root = None
+    p = r.screenshot_path("surf refused!!")
+    assert p.name == "surf_refused.png"
+    assert p.parent.name == "runX"
+    assert p.parent.parent.name == "screens"
+
+
+def test_screenshot_path_respects_a_custom_telemetry_root(tmp_path):
+    r = rig.Rig.__new__(rig.Rig)
+    r.run_id = "runY"
+    r.telemetry_root = tmp_path / "game"
+    p = r.screenshot_path("stuck")
+    assert p == tmp_path / "screens" / "runY" / "stuck.png"
+
+
+def test_an_empty_tag_still_produces_a_usable_filename():
+    r = rig.Rig.__new__(rig.Rig)
+    r.run_id = "runZ"
+    r.telemetry_root = None
+    assert r.screenshot_path("!!!").name == "screen.png"

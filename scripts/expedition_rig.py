@@ -44,6 +44,7 @@ import rom_truth as rt  # noqa: E402
 ROM_DEFAULT = WORKSPACE / "rom" / "pokemon_red.gb"
 BATON_DIR = WORKSPACE / "data" / "local_runs" / "roster-bench"
 TELEMETRY_DIR = WORKSPACE / "data" / "telemetry" / "game"
+SCREENS_DIR = TELEMETRY_DIR.parent / "screens"  # what a stuck moment actually looked like
 RUNS_DIR = WORKSPACE / "runs"
 VIEWER_WS = "ws://127.0.0.1:8201"
 
@@ -799,10 +800,13 @@ class Rig:
                 if self.use_field_move("SURF", species=name):
                     break
         said = self.textbox()
+        refused = self.pos() == before  # settled before the clear loop; pressing B never moves us
+        if refused:
+            self.screenshot("surf_refused")  # the picture, not just the sentence -- see screenshot()
         for _ in range(6):  # a refusal left on screen freezes every later step
             self.ctl.press("b")
             self.ctl.wait(30)
-        if self.pos() == before:
+        if refused:
             if said:
                 self.say(said, "surf.refused")  # the sentence is the evidence, so it lands in the sink
             return False
@@ -862,6 +866,30 @@ class Rig:
         and an off-map "blocker" is one a leg will walk across the floor to argue with."""
         m = self.truth["maps"].get(str(self.pos()[0]))
         return road.live_bodies(self.io, (m["width"], m["height"]) if m else None)
+
+    def screenshot_path(self, tag: str) -> Path:
+        """Where a tagged screen grab for this run lives. Pure — no PyBoy, so it is testable."""
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", tag).strip("_") or "screen"
+        root = (self.telemetry_root or TELEMETRY_DIR).parent / "screens" / self.run_id
+        return root / f"{safe}.png"
+
+    def screenshot(self, tag: str) -> str:  # pragma: no cover - drives the emulator; verified live
+        """Save what the screen actually shows, tagged, and record where it landed.
+
+        A refusal's sentence is evidence; today proved the picture is too. Twice today a leg
+        called this water "sealed" from the collision grid alone. On screen, the tile it refused
+        on was a boulder sitting in open water — not a barrier, something to go around. Every
+        genuine stuck moment now gets a picture by default, because "what the model claims" and
+        "what the screen shows" have disagreed here more than once, and only one of them is true.
+        """
+        from PIL import Image
+
+        mp, x, y = self.pos()
+        path = self.screenshot_path(tag)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(self.pb.screen.ndarray).save(path)
+        self.emit("screenshot", path=str(path), tag=tag, map=mp, x=x, y=y)
+        return str(path)
 
     def say(self, text: str, kind: str = "dialogue") -> None:
         """Record something the game said, where it said it, into the run's event stream.
