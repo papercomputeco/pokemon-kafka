@@ -1,0 +1,11 @@
+{
+  "outcome": "bicycle + the marts opened",
+  "turns": 191,
+  "party": "[('Charizard', 100, 341), ('Dugtrio', 100, 259), ('Gloom', 99, 313), ('Primeape', 99, 300), ('Pidgeot', 99, 347), ('Hypno', 99, 341)]",
+  "pos": "(67, 2, 5)",
+  "params": {
+    "label": "16 - The counter: a bike, and every mart in the game",
+    "rom": "/home/bdougie/code/pcc-labs/pokemon-kafka/rom/pokemon_red.gb"
+  },
+  "run_id": "20260903-033448-2b5e"
+}

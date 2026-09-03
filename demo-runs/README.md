@@ -102,33 +102,27 @@ reading the cartridge instead of the map:
   ROD, cast off the dock at (18,29), and land the Magikarp that becomes a Gyarados — which learns
   Surf *and* Strength. 241 turns, one cast.
 
-## Planned: `beat16-bicycle`
+- `beat16-bicycle` — **the counter: one fix, two doors**. 191 frames. The badge-8 overland
+  route is blocked at `29 -> 28` and the cartridge says why in its own words: *"You need a
+  BICYCLE for CYCLING ROAD!"* `BICYCLE` is item 6 and `BIKE VOUCHER` is item 45, and **neither
+  is an item ball on any map** — both come from a person, which makes it a talking problem. The
+  shop rules money out: *"Sorry! You can't afford it!"*
 
-Reserved, not yet recorded — the bike is still being investigated. Worth a beat for the same
-reason Surf got one: it is a **hard blocker the game states out loud**, and the fix is a piece of
-detective work rather than a fight.
+  A recon leg reached that shop holding the voucher and reported `body (6,2) unreachable/no
+  response`. It was right that (6,2) has no walkable neighbour and wrong that the clerk was
+  unreachable — **you talk across the counter**, from (4,2) facing right, the geometry
+  `center_counter` already hard-coded for Center nurses and nobody generalised. The beat runs
+  the exchange (*"Oh, that's… A BIKE VOUCHER!"* → *"exchanged the BIKE VOUCHER for a
+  BICYCLE"*), then walks straight to Cerulean's MART (map 67, clerk at (0,5)) and opens that
+  too: *"Hi there! May I help you?"* … *"POKé BALL? That will be ₽200. OK?"*
 
-The arc, and why it reads well on camera:
+  That second door is the point. 778 bodies have a walkable neighbour, **15 do not but sit
+  behind a counter, and seven of those are the mart template — one per city.** Every shop in
+  the game was closed to this project since the first run, with `quartermaster.buy()` already
+  written and ₽92,360 unspent. Recorded from `cerulean_bike.state`;
+  `benchmarks/2026-09-02-crew-vs-solo.md` has the census.
 
-1. The wall. `29 -> 28` refuses, and the cartridge says why in its own words:
-   **"You need a BICYCLE for CYCLING ROAD!"** The northern detour is refused too — `15 -> 14` is
-   `no-path` from four independent entry routes, all landing in the same sealed pocket of map 15.
-2. The deduction. `BICYCLE` is item 6 and `BIKE VOUCHER` is item 45, and **neither is an item ball
-   on any map** — so both come from a person. The shop's own script rules money out:
-   *"Sorry! You can't afford it!"* … *"Oh, that's A BIKE VOUCHER! OK! Here you go!"*
-3. The legwork. Find the voucher's giver, carry it to the BIKE SHOP, and free a bag slot first —
-   the bag sits at 20/20 and the shop says *"You better make room for this!"*
-4. The payoff. Walk `29 -> 28` and watch the gate that stopped two legs open.
-
-Record it the way beat15 was: let the recon leg do the messy discovery, then **replay the known
-route cleanly** with `Rig(live_label="16 · Bicycle — the voucher, the shop, Cycling Road")`, which
-writes frames + `events.jsonl` + `meta.json` automatically. Copy the run dir to
-`demo-runs/beat16-bicycle/` and add its entry above.
-
-The dialogue is the star here, so capture the text boxes: every sentence the investigation records
-lands in the sink as a `discovery` event and can be replayed alongside the frames.
-
-## Grid order
+## Grid order## Grid order
 
 `viewer/store.py` sorts run folders reverse-alphabetically, so `beat10`/`beat11`
 land between `beat2` and `beat1` in the grid. The deep links `/10` and `/11` —
