@@ -86,10 +86,22 @@ body[data-view="grid"] #grid { display: grid; }
 #back-btn:hover { background: #a52020; }
 
 /* ══ POKÉDEX CLAMSHELL ═══════════════════════════════════════════ */
+/* A grid of four tracks: face | hinge | data page | agent state. Everything
+   except the data page has a fixed width, and the screen picture is sized so
+   the four tracks always fit the shell — the data page never gets crushed.
+   The widths below are the sum of padding/border chrome around each piece;
+   keep them in step with the rules that set that chrome. */
 .pokedex-shell {
-  display: flex;
+  --shell-chrome: 60px;    /* .pokedex-shell padding 26×2 + border 4×2 */
+  --screen-chrome: 152px;  /* .screen-frame 44 + .screen-bezel 44 + #screen border 4, each side summed */
+  --hinge-w: 62px;         /* .dex-hinge 26 + margin 18×2 */
+  --state-w: 260px;        /* #state-panel 240 + margin-left 20 */
+  --right-min: 360px;      /* the narrowest the data page may go */
+  --screen-max-h: min(640px, 56vh);
+  display: grid;
+  grid-template-columns: auto var(--hinge-w) minmax(var(--right-min), 1fr) var(--state-w);
+  grid-template-areas: "left hinge right state";
   align-items: stretch;
-  gap: 0;
   width: min(1860px, 98vw);
   background: linear-gradient(160deg, #e11919 0%, #c40d0d 55%, #a70808 100%);
   border: 4px solid #7a0505;
@@ -100,7 +112,8 @@ body[data-view="grid"] #grid { display: grid; }
 
 /* ── LEFT HALF: the face ─────────────────────────────────────── */
 .dex-left {
-  flex: 0 0 auto;
+  grid-area: left;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -177,10 +190,14 @@ body[data-view="grid"] #grid { display: grid; }
 }
 #screen {
   /* Native 160×144, scaled way up and kept pixel-crisp for a big room.
-     Height tracks the viewport so the whole device fits on a projector. */
-  height: min(640px, 56vh);
-  width: auto;
-  max-width: 54vw;
+     Width is the smaller of "as tall as the projector allows" and "what is
+     left after the other three columns take their fixed widths", so the
+     picture shrinks before the feed does. height:auto keeps the aspect. */
+  width: min(
+    calc(var(--screen-max-h) * 160 / 144),
+    calc(98vw - var(--shell-chrome) - var(--screen-chrome) - var(--hinge-w) - var(--state-w) - var(--right-min))
+  );
+  height: auto;
   image-rendering: pixelated;
   background: #0a200a;
   display: block;
@@ -192,8 +209,10 @@ body[data-view="grid"] #grid { display: grid; }
 /* ── Controls: buttons + D-pad ───────────────────────────────── */
 .dex-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 0 10px;
 }
 .ctrl-left { display: flex; align-items: center; gap: 16px; }
@@ -253,7 +272,7 @@ body[data-view="grid"] #grid { display: grid; }
 
 /* ── HINGE ───────────────────────────────────────────────────── */
 .dex-hinge {
-  flex: 0 0 26px;
+  grid-area: hinge;
   margin: 0 18px;
   border-radius: 6px;
   background: repeating-linear-gradient(#7a0505, #7a0505 8px, #5a0303 8px, #5a0303 16px);
@@ -262,8 +281,9 @@ body[data-view="grid"] #grid { display: grid; }
 
 /* ── RIGHT HALF: the data page ───────────────────────────────── */
 .dex-right {
-  flex: 1;
+  grid-area: right;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -309,9 +329,13 @@ h1 {
 /* ── Feed list (the on-screen logs) ──────────────────────────── */
 #feed {
   list-style: none;
-  flex: 1;
+  /* The data page is stretched to the face's height by the grid row; the
+     feed starts at zero and grows to fill it, so its bottom edge always
+     lines up with the scrubber instead of guessing with a vh cap. */
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 0;
   overflow-y: auto;
-  max-height: min(720px, 62vh);
   background: #061a0d;
   border: 3px solid #0a2a15;
   border-radius: 10px;
@@ -359,13 +383,13 @@ h1 {
   opacity: 0.9;
 }
 
-/* --- Agent state panel (fourth flex child of .pokedex-shell) --- */
+/* --- Agent state panel (fourth grid track of .pokedex-shell) --- */
 #state-panel {
+  grid-area: state;
   width: 240px;
-  flex-shrink: 0;
+  min-height: 0;
   margin-left: 20px;
   overflow-y: auto;
-  max-height: min(720px, 62vh);
   padding: 16px;
   background: #0d2818;
   border: 4px solid #072813;
@@ -479,6 +503,29 @@ h1 {
   font-size: 0.78em; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
 
+/* ══ Laptop: the state panel moves under the feed ═════════════════
+   Below 1440px four columns leave the screen picture under 600px wide, so the
+   agent state gives up its column and stacks beneath the data page. The face
+   spans both rows; the feed fills the top row and the state panel takes only
+   what it needs at the bottom. */
+@media (min-width: 901px) and (max-width: 1440px) {
+  .pokedex-shell {
+    --state-w: 0px;
+    --right-min: 340px;
+    grid-template-columns: auto var(--hinge-w) minmax(var(--right-min), 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "left hinge right"
+      "left hinge state";
+  }
+  #state-panel {
+    width: auto;
+    margin-left: 0;
+    margin-top: 14px;
+    max-height: min(280px, 24vh);
+  }
+}
+
 /* ══ Mobile: the phone check-in layout ═══════════════════════════
    The clamshell is projector furniture; on a phone the run itself is the
    whole point. Shared rules drop the decorative chrome; then PORTRAIT stacks
@@ -529,22 +576,29 @@ h1 {
 
 /* Portrait phone: one thumb-scrolled column, the screen full width. */
 @media (max-width: 900px) and (orientation: portrait) {
-  .pokedex-shell { flex-direction: column; }
+  .pokedex-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "left" "right" "state";
+  }
   #screen { width: 100%; max-width: 100%; height: auto; }
-  #feed { max-height: 44vh; }
+  #feed { height: auto; max-height: 44vh; }
   #state-panel { width: 100%; margin-left: 0; max-height: 32vh; padding: 12px; }
 }
 
 /* Landscape phone: rotate the layout, not the content — screen sized by the
    short axis, the feed beside it using the rest of the width. */
 @media (max-height: 520px) and (orientation: landscape) {
-  .pokedex-shell { flex-direction: row; align-items: stretch; }
-  .dex-left { flex: 0 0 auto; justify-content: center; }
-  #screen { height: min(62vh, 340px); width: auto; max-width: 48vw; }
+  .pokedex-shell {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "left right";
+    align-items: stretch;
+  }
+  .dex-left { justify-content: center; }
+  #screen { width: min(calc(min(62vh, 340px) * 160 / 144), 48vw); height: auto; }
   .dex-controls { display: none; }  /* HEAL is a desk job; keep landscape for watching */
   .scrub-container { padding: 6px 10px; }
   .scrub-container label { font-size: 0.6rem; }
-  .dex-right { flex: 1; min-width: 0; }
-  #feed { max-height: 58vh; }
+  .dex-right { min-width: 0; }
+  #feed { height: auto; max-height: 58vh; }
   #state-panel { display: none; }
 }
