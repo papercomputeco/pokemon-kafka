@@ -1772,3 +1772,36 @@ def test_a_body_no_walk_reaches_is_skipped_not_waited_on():
     runner._go_and_talk = lambda spot: False  # nothing reaches it
     assert runner.recon(1) == {}
     assert rig.spoken == []
+
+
+def _truth_with_a_counter_body():
+    """A body with NO walkable neighbour, reachable only across a counter — the BIKE SHOP shape."""
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [{"x": 5, "y": 5, "kind": "npc"}]
+    return t
+
+
+def test_a_body_behind_a_counter_is_talked_to_across_it():
+    """Measured in the BIKE SHOP: the clerk at (6,2) has no reachable neighbour, and the talk
+    fires from (4,2) facing right. A recon leg holding the BIKE VOUCHER reported it unreachable."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_counter_body(), saying="Oh, that's...")
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    faced, approached = [], []
+    rig.talk = lambda face: faced.append(face) or "Oh, that's..."
+    rig.approach = lambda cells: approached.append(set(cells)) or True
+    import road as road_mod
+
+    # every neighbour of (5,5) is blocked; only the across-counter cells are walkable
+    reach = {c for c, _f in road_mod.counter_stands((5, 5))} | {(4, 11)}
+
+    def only_the_counter(*_a, **_k):
+        return reach
+
+    road_mod_walkable = road_mod.walkable
+    road_mod.walkable = only_the_counter
+    try:
+        assert runner._go_and_talk((5, 5)) is True
+    finally:
+        road_mod.walkable = road_mod_walkable
+    assert faced, "the counter body was never faced"
+    assert faced[0] in ("up", "down", "left", "right")

@@ -903,7 +903,18 @@ class LegRunner:
             # exactly when a ride might. Sabrina sits behind thirty intra-map pads, and a leg that
             # returned here without ever calling `approach` met the guide at the door and reported
             # the gym cleared.
-            near = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
+            reach = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot})
+            near = reach & adjacent
+            if not near:
+                # No neighbouring tile: this body may be behind a COUNTER, which is a shape the
+                # engine only knew about for Pokemon Center nurses. Measured on the BIKE SHOP
+                # clerk at (6,2): every adjacent cell is solid, and the talk fires from (4,2)
+                # facing right. A recon leg holding the BIKE VOUCHER stood in that shop and
+                # reported the clerk unreachable -- the clerk was fine, the approach was not.
+                for cell, face in road.counter_stands(spot):
+                    if cell in reach and self.rig.approach({cell}):
+                        self.rig.talk(face)
+                        return True
             if not self.rig.approach(near or adjacent):
                 return False
             mp, x, y = self.rig.pos()
