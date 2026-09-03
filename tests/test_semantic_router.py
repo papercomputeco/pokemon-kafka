@@ -14,6 +14,7 @@ import yaml
 
 CFG = sr.load_config()
 MISSIONS = {
+    "operator_prompt_skill_recon.md": ("recon-to-investigator", "qwen38-27b-128k"),
     "operator_prompt_skill_battle.md": ("battle-to-driver", "laguna-xs-128k"),
     "operator_prompt_skill_nav.md": ("navigation-to-best-line", "qwen38-27b-128k"),
     "operator_prompt_skill_puzzle.md": ("puzzle-to-deepest", "kimi-k2.6:cloud"),
@@ -48,6 +49,15 @@ def test_unmatched_text_falls_to_default():
     [
         # A higher-priority decision's vocabulary firing on a lower leg's mission would
         # steal that leg's traffic — the exact contamination the priorities can't fix.
+        # recon outranks all three, so its vocabulary must fire on none of their missions
+        (
+            "recon_keywords",
+            [
+                "operator_prompt_skill_battle.md",
+                "operator_prompt_skill_nav.md",
+                "operator_prompt_skill_puzzle.md",
+            ],
+        ),
         ("puzzle_keywords", ["operator_prompt_skill_battle.md", "operator_prompt_skill_nav.md"]),
         ("navigation_keywords", ["operator_prompt_skill_battle.md"]),
     ],
