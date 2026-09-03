@@ -68,3 +68,47 @@ this is a capability rather than a story.
 - **The sink was flooded.** The recon leg emitted **221,504 `discovery` events** in one session and
   the day's telemetry file is **42 MB**. Recording every sentence is right; recording every frame's
   worth of them is not. Worth a de-dup before the next long recon.
+
+## The counter was not a bike-shop quirk: it closed every shop in the game
+
+Once `counter_stands` existed it was worth asking how many bodies it unlocks. Counted over the
+whole cartridge — a body with **no walkable neighbour** was unreachable to every leg this project
+has ever run:
+
+    bodies with a walkable neighbour (always reachable): 778
+    bodies with NO neighbour but a walkable COUNTER stand:  15
+    bodies with neither (sealed or decorative):             25
+
+Fifteen sounds small until you look at where they are. Seven sit at **exactly (0,5) in an 8x8
+tileset-2 room**, and those rooms are one per city:
+
+| room | entered from |
+|---|---|
+| map 42 | Viridian (1) |
+| map 56 | Pewter (2) |
+| map 67 | Cerulean (3) |
+| map 91 | Vermilion (5) |
+| map 150 | map 4 |
+| map 172 | Cinnabar (8) |
+
+It is a building template, and it is the **MART**. Confirmed live at Cerulean's map 67, standing
+at (2,5) facing left:
+
+    "Hi there! May I help you?"   "Take your time."
+    "POKe BALL? That will be 200. OK?"   "Here you are! Thank you!"
+
+**So an entire game system has been closed to this project since the first run.** Not through a
+missing capability — `quartermaster.buy()` has existed all along, with the shop menu, the BCD
+money read at 0xD347 and a purchase plan. It was never reachable, so it was never called: the
+telemetry contains **zero purchase events across every run ever recorded**, while the bag carries
+**92,360** unspent and **no Poke Balls at all**.
+
+Two lessons worth more than the bike:
+
+1. **A count of 15 was the wrong way to size it.** The number that mattered was not how many
+   bodies were blocked but *which* — one per city, all the same role. A rare shape can gate a
+   common system.
+2. **The static count is a lower bound.** It uses collision only, so it misses bodies blocked by
+   reachability rather than geometry — the BIKE SHOP clerk that started all of this does not
+   appear in the 15, because his neighbour tile is collision-walkable but not reachable from the
+   door. The live failures are a superset of the geometric ones.
