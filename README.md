@@ -346,7 +346,8 @@ one slot per model per leg ([benchmarks/2026-08-22-skill-matrix.md](benchmarks/2
 
 | title | model | the measured evidence |
 |---|---|---|
-| **The Point Man** — the brute-force investigator | `qwen38-27b` | Best navigation line of six (49 turns / 36 HP, dominating the column on both axes); the only model whose first puzzle attempt didn't die on the entrance spring; measured at 33 single-lane probes before its one relay — and the model that committed Mt. Moon's root-cause diagnosis to the repo (`obstacles.md`) |
+| **The Investigator** — reads the room before anyone reasons | `qwen38-27b` | Not from the six-model matrix — earned by a counted failure. Across two arcs of one run, same crew and same engine, the arc that engaged **82 bodies** across 8 maps won its badge and the arc that engaged **0** across 6 maps lost five legs ([benchmarks/2026-09-02-crew-vs-solo.md](benchmarks/2026-09-02-crew-vs-solo.md)). Recon is a movement problem, so it takes the nav winner's model; it runs *before* the ladder, not on it |
+| **The Point Man** — the brute-force navigator | `qwen38-27b` | Best navigation line of six (49 turns / 36 HP, dominating the column on both axes); the only model whose first puzzle attempt didn't die on the entrance spring; measured at 33 single-lane probes before its one relay — and the model that committed Mt. Moon's root-cause diagnosis to the repo (`obstacles.md`) |
 | **The Extractor** — goes in deepest when the job is a puzzle | `kimi-k2.6:cloud` | Deepest of six on the puzzle leg (B2F, 18 tiles in a 50-minute slot) and top puzzle screen score (0.55) — and the screen's ordering predicted the expedition's exactly |
 | **The Wheelman** — fast on an open road | `laguna-xs` | The battle leg went 6/6 with near-identical rows — an execution baseline, not a discriminator — so it goes to the measured Driver: Haiku's cadence (3.3–4.0 s/turn), first model to reach the Gym |
 
@@ -357,8 +358,9 @@ Point Man's diagnosis on different sheets — which is exactly why the crew need
 
 The [vllm semantic-router](https://github.com/vllm-project/semantic-router) turns the casting
 table above into infrastructure: `references/semantic_router.yaml` routes model `vllm-sr/auto`
-by keyword signals — battle → the Wheelman (laguna-xs), navigation → the Point Man
-(qwen38-27b), puzzle → the Extractor (kimi cloud) — through the tapes proxy, so routed
+by keyword signals — recon → the Investigator (qwen38-27b), battle → the Wheelman
+(laguna-xs), navigation → the Point Man (qwen38-27b), puzzle → the Extractor (kimi cloud) —
+through the tapes proxy, so routed
 sessions stay captured. The router reads each request and puts the right specialist on the
 job; in its first field run it escalated the seat from the Point Man to the Extractor
 mid-session as a wall's vocabulary took over the transcript. `scripts/semantic_router.py`

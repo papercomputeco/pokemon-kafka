@@ -757,7 +757,8 @@ class LegRunner:
         if not sprites:
             return self.heard
         here = self.rig.pos()[1:]
-        for spot in sorted(sprites, key=lambda c: abs(c[0] - here[0]) + abs(c[1] - here[1]))[:cap]:
+        order = sorted(sprites, key=lambda c: abs(c[0] - here[0]) + abs(c[1] - here[1]))
+        for spot in self._recon_order(mp, order, cap)[:cap]:
             if spot in self.heard or not self._go_and_talk(spot):
                 continue
             said = self._what_it_said()
@@ -767,6 +768,44 @@ class LegRunner:
                 if hasattr(self.rig, "say"):
                     self.rig.say(said, "recon")
         return self.heard
+
+    def _recon_order(self, mp: int, order: list[tuple[int, int]], cap: int) -> list[tuple[int, int]]:
+        """Which body is worth the budget when there are more than we can afford to ask.
+
+        This is the decision The Investigator seat owns, and it is a different question from the
+        one navigation answers. Navigation is asked *how to move* when a hop fails, off a menu of
+        movements. Recon is asked *what to look at* — and nearest-first is a fine default but it is
+        not a judgement. On the bike hunt the real question was which of six Cerulean buildings
+        held the shop; that call was made by hand from ROM text and handed to the crew as a ranked
+        list, which is exactly the work this seat exists to do.
+
+        One consult per map, only when there are more candidates than budget, and the answer only
+        promotes a body to the front — the nearest-first order is still the fallback, because an
+        unparsed reply is a non-answer and must move nothing.
+        """
+        if len(order) <= cap or self.consult is None:
+            return order
+        menu = [f"{x},{y}" for x, y in order]
+        facts = (
+            f"You are on map {mp} at {self.rig.pos()[1:]}, doing RECON: choosing which body to "
+            f"speak to first. Budget is {cap} of {len(order)} bodies. The cartridge lists these "
+            f"at {menu}. Bodies are listed nearest-first already, so choose one only if something "
+            "about the goal makes it worth more than proximity does."
+            f"\nGOAL: reach map {self.goal}."
+        )
+        action, why, model = self.consult("recon", facts, menu)
+        self.rig.emit("supervisor.recon_pick", map=mp, pick=action or "", model=model, why=why[:200])
+        if not action:
+            return order
+        try:
+            px, py = (int(v) for v in action.split(","))
+        except ValueError:
+            return order
+        pick = (px, py)
+        if pick not in order:
+            return order
+        self.log(f"  recon picks {pick} first: {why[:90]}")
+        return [pick] + [c for c in order if c != pick]
 
     def _what_it_said(self) -> str:
         """The sentence on screen, but only when the game is actually saying one.
@@ -903,7 +942,18 @@ class LegRunner:
             # exactly when a ride might. Sabrina sits behind thirty intra-map pads, and a leg that
             # returned here without ever calling `approach` met the guide at the door and reported
             # the gym cleared.
-            near = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot}) & adjacent
+            reach = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot})
+            near = reach & adjacent
+            if not near:
+                # No neighbouring tile: this body may be behind a COUNTER, which is a shape the
+                # engine only knew about for Pokemon Center nurses. Measured on the BIKE SHOP
+                # clerk at (6,2): every adjacent cell is solid, and the talk fires from (4,2)
+                # facing right. A recon leg holding the BIKE VOUCHER stood in that shop and
+                # reported the clerk unreachable -- the clerk was fine, the approach was not.
+                for cell, face in road.counter_stands(spot):
+                    if cell in reach and self.rig.approach({cell}):
+                        self.rig.talk(face)
+                        return True
             if not self.rig.approach(near or adjacent):
                 return False
             mp, x, y = self.rig.pos()

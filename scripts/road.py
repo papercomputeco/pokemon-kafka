@@ -731,6 +731,31 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
     return None
 
 
+# Measured twice, on two different counters: a Pokemon Center nurse at (3,1) is talked to from
+# (3,3) facing up, and the BIKE SHOP clerk at (6,2) from (4,2) facing right. The body sits two
+# tiles away along one axis with the counter tile between, so NO cell is adjacent to it and a
+# neighbour-only approach reports it unreachable -- which is exactly what happened when a recon
+# leg stood in the shop holding the BIKE VOUCHER and logged "body (6,2) unreachable/no response".
+COUNTER_SPAN = 2
+
+
+def counter_stands(body: tuple[int, int]) -> list[tuple[tuple[int, int], str]]:
+    """``[(cell, facing)]`` for talking to a body ACROSS a counter, two tiles away.
+
+    ``center_counter`` hard-codes this geometry for the 14x8 tileset-6 Center interior. Nothing
+    generalised it, so every other counter in the game -- shops, clerks, desks -- was invisible to
+    a walk that only ever tries the four neighbouring tiles.
+    """
+    bx, by = body
+    n = COUNTER_SPAN
+    return [
+        ((bx - n, by), "right"),
+        ((bx + n, by), "left"),
+        ((bx, by - n), "down"),
+        ((bx, by + n), "up"),
+    ]
+
+
 def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_default_battle):
     """Cross a connection whose near edge has no walkable cell to stand on - i.e. water - and
     the A* cannot plan. A route (measured on 30/31/32: 5-8% walkable, a central land plaza with

@@ -19,6 +19,11 @@
 #   puzzle     -> kimi-k2.6:cloud   0/6 leg, but kimi went deepest (B2F, 18 tiles) and
 #                                   topped the puzzle screen (0.55); the screen ordered the
 #                                   expedition exactly (skill matrix).
+#   recon      -> qwen38-27b-128k   observation before reasoning. Counted over the badge-6 and
+#                                   badge-7 arcs: the arc that engaged 82 bodies won its badge,
+#                                   the arc that engaged 0 lost five legs
+#                                   (benchmarks/2026-09-02-crew-vs-solo.md). Recon is a
+#                                   movement problem, so it takes the nav winner's model.
 #   default    -> qwen38-27b-128k   best local operator score and the roster's proven
 #                                   investigator (skill_matrix_chain.sh roster note).
 #
@@ -122,6 +127,23 @@ routing:
           - spring
         case_sensitive: false
         bm25_threshold: 0.1
+      # Recon vocabulary is deliberately disjoint from the other three lists: a recon word
+      # firing on a puzzle/nav/battle mission would steal traffic from the leg that earned it.
+      # "observation"/"observe" were tried and REMOVED -- the puzzle mission earns those words
+      # ("anomalies that demand live observation over confident theory"), and the guard caught it.
+      # Guarded by tests/test_semantic_router.py::test_no_downward_contamination.
+      - name: recon_keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - recon
+          - npc
+          - dialogue
+          - clerk
+          - counter
+          - interview
+        case_sensitive: false
+        bm25_threshold: 0.1
       # Nav vocabulary must not appear in the battle mission (same guard). Bare
       # "navigation" is deliberately absent: the battle mission says "navigation is
       # deliberately trivial here".
@@ -154,6 +176,19 @@ routing:
         bm25_threshold: 0.1
 
   decisions:
+    - name: recon-to-investigator
+      description: >-
+        Observation before anyone reasons. The arc that engaged 82 bodies won its badge;
+        the arc that engaged 0 lost five legs (2026-09-02-crew-vs-solo). Recon is a
+        movement problem, so it takes the nav winner's model.
+      priority: 400
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: recon_keywords
+      modelRefs:
+        - model: qwen38-27b-128k
     - name: puzzle-to-deepest
       description: >-
         Anomaly work — observation over confident theory. kimi went deepest of six

@@ -1216,3 +1216,26 @@ def test_a_sea_that_never_opens_reports_nothing_rather_than_spinning():
     truth = {"maps": {"1": _water_map(["1414"] * 4)}}
     io = WaterIO(1, 2, open_row=99)  # no row crosses
     assert road._water_cross(io, truth, 1, 2, "left", _default_battle_noop) is None
+
+
+# ------------------------------------------------------------------------ counters
+
+
+def test_a_counter_body_is_talked_to_from_two_tiles_away():
+    """Measured on two different counters: the Center nurse at (3,1) is talked to from (3,3)
+    facing up, and the BIKE SHOP clerk at (6,2) from (4,2) facing right."""
+    stands = dict(road.counter_stands((6, 2)))
+    assert stands[(4, 2)] == "right"
+    assert stands[(8, 2)] == "left"
+    nurse = dict(road.counter_stands((3, 1)))
+    assert nurse[(3, 3)] == "up"  # exactly what center_counter hard-codes
+
+
+def test_every_counter_stand_faces_back_at_the_body():
+    """A stand cell that faces away is not a way to talk to anything."""
+    body = (6, 2)
+    step = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+    for (cx, cy), face in road.counter_stands(body):
+        dx, dy = step[face]
+        # walking COUNTER_SPAN steps in the facing direction arrives at the body
+        assert (cx + dx * road.COUNTER_SPAN, cy + dy * road.COUNTER_SPAN) == body

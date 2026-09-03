@@ -1772,3 +1772,95 @@ def test_a_body_no_walk_reaches_is_skipped_not_waited_on():
     runner._go_and_talk = lambda spot: False  # nothing reaches it
     assert runner.recon(1) == {}
     assert rig.spoken == []
+
+
+def _truth_with_a_counter_body():
+    """A body with NO walkable neighbour, reachable only across a counter — the BIKE SHOP shape."""
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [{"x": 5, "y": 5, "kind": "npc"}]
+    return t
+
+
+def test_a_body_behind_a_counter_is_talked_to_across_it():
+    """Measured in the BIKE SHOP: the clerk at (6,2) has no reachable neighbour, and the talk
+    fires from (4,2) facing right. A recon leg holding the BIKE VOUCHER reported it unreachable."""
+    rig = FakeRig(hops=[None], truth=_truth_with_a_counter_body(), saying="Oh, that's...")
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    faced, approached = [], []
+    rig.talk = lambda face: faced.append(face) or "Oh, that's..."
+    rig.approach = lambda cells: approached.append(set(cells)) or True
+    import road as road_mod
+
+    # every neighbour of (5,5) is blocked; only the across-counter cells are walkable
+    reach = {c for c, _f in road_mod.counter_stands((5, 5))} | {(4, 11)}
+
+    def only_the_counter(*_a, **_k):
+        return reach
+
+    road_mod_walkable = road_mod.walkable
+    road_mod.walkable = only_the_counter
+    try:
+        assert runner._go_and_talk((5, 5)) is True
+    finally:
+        road_mod.walkable = road_mod_walkable
+    assert faced, "the counter body was never faced"
+    assert faced[0] in ("up", "down", "left", "right")
+
+
+def _truth_with_many_bodies():
+    """More bodies than one recon budget can afford — so the order becomes a decision."""
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [
+        {"x": 5, "y": 6, "kind": "npc"},
+        {"x": 5, "y": 7, "kind": "npc"},
+        {"x": 6, "y": 6, "kind": "npc"},
+        {"x": 7, "y": 7, "kind": "npc"},
+        {"x": 2, "y": 2, "kind": "npc"},
+    ]
+    return t
+
+
+def test_the_investigator_is_asked_which_body_is_worth_the_budget():
+    """Navigation is asked HOW TO MOVE; recon is asked WHAT TO LOOK AT. Different question,
+    different seat — and it only fires when there are more bodies than budget."""
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    asked = {}
+
+    def consult(tier, facts, menu):
+        asked[tier] = menu
+        return (
+            ("2,2", "the far one is the one the goal cares about", "fake")
+            if tier == "recon"
+            else ("GIVE_UP", "", "fake")
+        )
+
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None)
+    runner.recon(1, cap=2)
+    assert "recon" in asked, "the Investigator seat was never consulted"
+    assert "2,2" in asked["recon"]
+    assert (2, 2) in runner.heard, "the seat's pick was not visited first"
+
+
+def test_a_recon_non_answer_leaves_the_nearest_first_order_alone():
+    """An unparsed reply is a non-answer and must move nothing — the same rule the ladder uses."""
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    runner = LegRunner(rig, goal=2, consult=lambda *_a: (None, "", "fake"), log=lambda *_: None)
+    order = [(5, 6), (5, 7), (2, 2)]
+    assert runner._recon_order(1, order, cap=2) == order
+
+
+def test_a_recon_pick_outside_the_menu_is_ignored():
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    order = [(5, 6), (5, 7), (2, 2)]
+    for bogus in ("99,99", "not-a-cell", "5"):
+        runner = LegRunner(rig, goal=2, consult=lambda *_a, _b=bogus: (_b, "", "fake"), log=lambda *_: None)
+        assert runner._recon_order(1, order, cap=2) == order
+
+
+def test_recon_does_not_spend_a_consult_when_every_body_fits_the_budget():
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    calls = []
+    runner = LegRunner(rig, goal=2, consult=lambda t, f, m: calls.append(t) or (None, "", "x"), log=lambda *_: None)
+    order = [(5, 6), (5, 7)]
+    assert runner._recon_order(1, order, cap=4) == order
+    assert calls == []
