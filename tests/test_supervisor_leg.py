@@ -1805,3 +1805,62 @@ def test_a_body_behind_a_counter_is_talked_to_across_it():
         road_mod.walkable = road_mod_walkable
     assert faced, "the counter body was never faced"
     assert faced[0] in ("up", "down", "left", "right")
+
+
+def _truth_with_many_bodies():
+    """More bodies than one recon budget can afford — so the order becomes a decision."""
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [
+        {"x": 5, "y": 6, "kind": "npc"},
+        {"x": 5, "y": 7, "kind": "npc"},
+        {"x": 6, "y": 6, "kind": "npc"},
+        {"x": 7, "y": 7, "kind": "npc"},
+        {"x": 2, "y": 2, "kind": "npc"},
+    ]
+    return t
+
+
+def test_the_investigator_is_asked_which_body_is_worth_the_budget():
+    """Navigation is asked HOW TO MOVE; recon is asked WHAT TO LOOK AT. Different question,
+    different seat — and it only fires when there are more bodies than budget."""
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    asked = {}
+
+    def consult(tier, facts, menu):
+        asked[tier] = menu
+        return (
+            ("2,2", "the far one is the one the goal cares about", "fake")
+            if tier == "recon"
+            else ("GIVE_UP", "", "fake")
+        )
+
+    runner = LegRunner(rig, goal=2, consult=consult, log=lambda *_: None)
+    runner.recon(1, cap=2)
+    assert "recon" in asked, "the Investigator seat was never consulted"
+    assert "2,2" in asked["recon"]
+    assert (2, 2) in runner.heard, "the seat's pick was not visited first"
+
+
+def test_a_recon_non_answer_leaves_the_nearest_first_order_alone():
+    """An unparsed reply is a non-answer and must move nothing — the same rule the ladder uses."""
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    runner = LegRunner(rig, goal=2, consult=lambda *_a: (None, "", "fake"), log=lambda *_: None)
+    order = [(5, 6), (5, 7), (2, 2)]
+    assert runner._recon_order(1, order, cap=2) == order
+
+
+def test_a_recon_pick_outside_the_menu_is_ignored():
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    order = [(5, 6), (5, 7), (2, 2)]
+    for bogus in ("99,99", "not-a-cell", "5"):
+        runner = LegRunner(rig, goal=2, consult=lambda *_a, _b=bogus: (_b, "", "fake"), log=lambda *_: None)
+        assert runner._recon_order(1, order, cap=2) == order
+
+
+def test_recon_does_not_spend_a_consult_when_every_body_fits_the_budget():
+    rig = FakeRig(hops=[None], truth=_truth_with_many_bodies(), saying="Hello!")
+    calls = []
+    runner = LegRunner(rig, goal=2, consult=lambda t, f, m: calls.append(t) or (None, "", "x"), log=lambda *_: None)
+    order = [(5, 6), (5, 7)]
+    assert runner._recon_order(1, order, cap=4) == order
+    assert calls == []
