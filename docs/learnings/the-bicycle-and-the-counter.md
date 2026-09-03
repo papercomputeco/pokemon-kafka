@@ -53,8 +53,9 @@ From (4,2) facing right, first press:
     "AAAAAAA exchanged the BIKE VOUCHER for a BICYCLE."
     "How do you like your new BICYCLE?  You can take it on CYCLING ROAD and in caves!"
 
-`Rig.talk_across` now tries the across-the-counter cell whenever no adjacent cell is reachable, so
-this is a capability rather than a story.
+`road.counter_stands(body)` returns the across-the-counter cells and facings, and
+`LegRunner._go_and_talk` falls back to it whenever no adjacent cell is reachable — so this is a
+capability rather than a story.
 
 ## Still open
 
