@@ -114,6 +114,16 @@ def test_the_probe_uses_a_door_only_when_there_is_nothing_else():
     assert r.pos()[0] == 999  # it went through, because every neighbour was a door
 
 
+def test_a_last_resort_warp_says_so_out_loud(capsys):
+    """Measured on door_check.state, banked right at Seafoam's own entrance: every plain
+    floor tile refused (rock on three sides), the only open neighbour was the warp back
+    outside, and probe_step took it silently. A caller checking only the boolean saw
+    "input works" with no sign the map underneath had changed. This is that sign."""
+    r = _stub_rig(at=(5, 28), warps=[(5, 27), (5, 29), (4, 28), (6, 28)], warp_to={(5, 29): 999})
+    r.probe_step()
+    assert "map 157 -> 999" in capsys.readouterr().out
+
+
 def test_the_rig_points_at_this_repos_rom_and_baton_shelf():
     assert rig.ROM_DEFAULT.name == "pokemon_red.gb"
     assert rig.BATON_DIR.parts[-2:] == ("local_runs", "roster-bench")

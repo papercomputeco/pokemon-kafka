@@ -442,9 +442,19 @@ class Rig:
             self.io.wait(30)
             after = self.pos()
             if after != before:
-                if after[0] == before[0]:  # a map change is a warp we could not avoid: leave it be
+                if after[0] == before[0]:
                     self.io.press(back, hold=8, release=8)
                     self.io.wait(30)
+                else:
+                    # Every plain floor tile refused, so the last resort was a warp -- and it
+                    # moved us. That is not a bug by itself (a real doorway alcove can be walled
+                    # on three sides), but it is invisible unless said out loud: a baton banked
+                    # right inside an entrance can silently step back out on its very first
+                    # probe, and a caller checking only the boolean sees "input works" with no
+                    # sign the map underneath just changed. Measured today: door_check.state,
+                    # banked at Seafoam's own entrance (192, 4, 17), landed back on map 31 the
+                    # next time anything called settle() on it.
+                    print(f"  probe_step warped map {before[0]} -> {after[0]} to prove input", flush=True)
                 return True
         return False
 
