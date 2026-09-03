@@ -44,13 +44,22 @@ steps prove it.**
 - **Take a screenshot at every point you stop for more than a few tries**, and look at it before
   deciding what kind of stuck it is — boulder, body, leftover text, or a real edge.
 
-## Seafoam Islands may not be a detour — check it on the way
+## STOP. You are about to walk across Seafoam Islands and not notice.
 
-A sign on this exact water reads **"SEA ROUTE 19: FUCHSIA CITY - SEAFOAM ISLANDS"**. That is this
-sea's real name, and it names Seafoam, not Cinnabar. There are two doors into Seafoam Islands on
-this map (they lead to map 192, a cave-style interior). **If you pass near either one, go in and
-look around before continuing past it.** It may sit on the direct line to Cinnabar rather than off
-to the side, and nobody has ever set foot in it to find out. Screenshot whatever you find.
+A sign on this water reads **"SEA ROUTE 19: FUCHSIA CITY - SEAFOAM ISLANDS"**. Checked, and it is
+not just a name — it is a real landmass sitting directly on this crossing:
+
+    the dry-land patch at roughly x 46..61, y 2..11 on map 31 IS Seafoam Islands
+    door 1: (48,5) -> map 192      door 2: (58,9) -> map 192
+
+**A previous leg already walked over this exact land at (58,5) — three tiles from door 2 — and
+kept going without entering.** That is the same mistake as yesterday's NPC problem: the ground
+under your feet is not "rock" or "sandbar," it has a name and a door, and reading only the tile
+collision hides both. Do not repeat it.
+
+**When you reach anywhere in that x 46..61 / y 2..11 patch, stop and enter map 192 before doing
+anything else.** Screenshot what is inside. This may be the actual route to Cinnabar, not a
+detour — nobody has ever set foot past that door.
 
 ## Two side questions worth a cheap check, not a detour
 
