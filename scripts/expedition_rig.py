@@ -26,6 +26,7 @@ happens after a failure, and a harness that kills the process denies it that.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -645,9 +646,13 @@ class Rig:
         rows = [self.window_row(i).strip() for i in self.TEXTBOX_ROWS]
         return " ".join(t for t in rows if t)
 
-    def knows_move(self, name: str) -> int | None:
+    def knows_move(self, name: str, species: str | None = None) -> int | None:
         """Party index of the first *standing* member that knows ``name`` — from RAM, by move id.
 
+        Pass ``species=`` to ask about one member specifically, without the menu: the badge-7
+        crossing walked all five non-surfers through the POKeMON submenu before it reached
+        Gyarados, and that fumbling is what hid the cursor-spliced "SURF" row. A RAM read is free,
+        so the members that cannot be arming candidates are filtered before any menu is opened.
         This replaces a species literal in the engine (``if lead in ("Gyarados", ...)``), which is
         the same class of mistake as ``cut_facing``'s "CUT is row 0": true of one party on one
         leg, silently wrong on the next. Nothing here is recalled. The move ids come from this
@@ -665,6 +670,8 @@ class Rig:
             return None
         for i, (_n, _lvl, hp) in enumerate(self.party()):
             if hp <= 0:
+                continue
+            if species is not None and _n.strip().upper() != species.strip().upper():
                 continue
             base = ADDR_PARTY_STRUCTS + PARTY_STRUCT_SIZE * i
             if want in (self.mem[base + off] for off in MOVE_SLOTS):
@@ -757,6 +764,8 @@ class Rig:
         elif not (self._surfer and self.use_field_move("SURF", species=self._surfer)):
             for name, _lvl, hp in self.party():
                 if hp <= 0 or name == self._surfer:
+                    continue
+                if not self.knows_move("SURF", name):  # a RAM read, so no member is walked through
                     continue
                 if self.use_field_move("SURF", species=name):
                     break
@@ -973,6 +982,32 @@ class Rig:
             out.append(t.strip())
         return out
 
+    def _hit_or_shift(self, wanted: str, first: int = 0, last: int = 18) -> tuple[int | None, str | None]:
+        """The first row containing ``wanted`` (and its text) — the cursor row read clean.
+
+        The cursor renders as an A-runs that splice its own row, names and all: the badge-7
+        first- attempt read the lead's roster row as 'AAAAAAAAAA100' and Gyarados' own "SURF"
+        entry as a run of As, and both of those are precisely the rows the cursor was pointing at
+        when the menu opened. So a name nowhere to be seen is usually a cursor, not an absence:
+        nudge the cursor — both directions, because it caps and a press past the end does nothing
+        — and read again before declaring the row missing.
+        """
+        rows = self.menu_rows(first, last)
+        hit = next(((i, t) for i, t in rows if wanted.upper() in t.upper()), None)
+        if hit is not None:
+            return hit
+        c = self.ctl
+        for direction, restore in (("down", "up"), ("up", "down")):
+            c.press(direction)
+            c.wait(20)
+            rows = self.menu_rows(first, last)
+            hit = next(((i, t) for i, t in rows if wanted.upper() in t.upper()), None)
+            if hit is not None:
+                c.press(restore)
+                c.wait(20)
+                return hit
+        return None, None
+
     def menu_row_of(self, wanted: str, first: int = 0, last: int = 18) -> int | None:
         """The cursor index of the entry whose text contains ``wanted``, or None.
 
@@ -981,10 +1016,20 @@ class Rig:
         caller meant. Match the name the menu prints instead — measured on the badge-7 leg, where
         the only surfer was the one that had fainted and the menu simply did not list it.
         """
-        rows = self.menu_rows(first, last)
-        hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
+        hit, _text = self._hit_or_shift(wanted, first, last)
         if hit is None:
             return None
+        rows = self.menu_rows(first, last)
+        text = {i: t for i, t in rows}
+        if hit + 1 in text and re.fullmatch(r"\d+\s*/\s*0*\d+", text[hit + 1].strip()):
+            # The roster interleaves an HP row under every entry — measured here: six members at
+            # rows 0..11 with the levels on the odd rows — so the "nothing between entries"
+            # walkback above stops one step short and reports every member as index 0. That is how
+            # this leg armed Charizard's field list (row 10 spliced 'GYARADOS CUT') when Gyarados
+            # was asked for. Roster entries are top-aligned at two rows per member, so the index
+            # is the row halved; the HP row under the hit is the discriminator a pure entry list
+            # never has.
+            return hit // 2
         present = {i for i, _t in rows}
         start = hit
         while start - 2 in present and start - 1 not in present:
@@ -1054,6 +1099,10 @@ class Rig:
             if (i - base) % 2 == 0 and 0 <= (i - base) // 2 <= maxc and target in t.strip().upper():
                 want = (i - base) // 2
                 break
+        if want is None:  # the cursor row hides its entry the same way it hides a roster name
+            hit, _t = self._hit_or_shift(name, 0, 20)
+            if hit is not None and (hit - base) % 2 == 0 and 0 <= (hit - base) // 2 <= maxc:
+                want = (hit - base) // 2
         if want is None:
             print(f"  no field move called {name!r} on party member {member}", flush=True)
             for _ in range(6):
@@ -1183,13 +1232,22 @@ class Rig:
             return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
-        if not any("SWITCH" in t.upper() for _i, t in self.menu_rows(0, 20)):
+        rows = self.menu_rows(0, 20)
+        canc = next((i for i, t in rows if t.strip().upper().startswith("CANCEL")), None)
+        if canc is None:
             return bail()
-        # Measured on this screen: the submenu renders STATS(12) / SWITCH(14) / CANCEL(16) with
-        # the cursor capped at 2, so SWITCH is index 1 — and the highlighted row is the one whose
-        # space is eaten by the cursor glyph ('Choose a PSWITCH'). Index arithmetic over the rows
-        # cannot be used here because the roster underneath is also two rows apart.
-        if not self.menu_cursor_to(1, presses=6):
+        # The entry count is not fixed by position: a member with a field move draws
+        # CUT/SURF(0) STATS(1) SWITCH(2) CANCEL(3), one without draws STATS(0) SWITCH(1)
+        # CANCEL(2). Measured on this roster: Charizard's list put STATS where SWITCH was
+        # assumed, and the seat picked the stats page — the swap silently never happened.
+        # So the index is read from CANCEL (always last, always clean) like use_field_move,
+        # then the row that carries "SWITCH" is mapped onto the entry space.
+        maxc = self.mem[qm.ADDR_MENU_MAX]
+        base = canc - 2 * maxc
+        want = next(((i - base) // 2 for i, t in rows if "SWITCH" in t.upper() and (i - base) % 2 == 0), None)
+        if want is None:
+            return bail()
+        if not self.menu_cursor_to(want, presses=8):
             return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
@@ -1635,7 +1693,7 @@ class Rig:
         rows = self.menu_rows()
         if not rows:
             return False
-        hit = next((i for i, text in rows if wanted.upper() in text.upper()), None)
+        hit, _text = self._hit_or_shift(wanted)
         if hit is None:
             return False
         # Menus OVERLAY: choosing DEPOSIT renders the party list on top of the box menu, and the
