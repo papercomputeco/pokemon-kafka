@@ -56,6 +56,7 @@ class Mission:
         self.moves: list[dict] = []  # every hop and its verdict
         self.refusals: list[dict] = []
         self.talked: set[int] = set()  # maps whose listed bodies have been engaged
+        self._bodied: set[int] = set()  # maps whose trainer/npc bodies have been engaged (items are separate)
         self.buildings: set[int] = set()  # buildings whose own bodies have been engaged
         self.deadline = time.monotonic() + WALL_BUDGET_S
 
@@ -89,10 +90,17 @@ class Mission:
         """Ask every body the cartridge lists for this map what it will say. Measured, not assumed."""
         rig = self.rig
         mp = rig.pos()[0]
-        if mp in self.talked and not forced and "item" not in kinds:
-            return
-        self.talked.add(mp)
-        self._engage_bodies(tag, mp, kinds)
+        sprites = rig.truth["maps"].get(str(mp), {}).get("sprites", [])
+        bodies = [s for s in sprites if s["kind"] in ("trainer", "npc")]
+        items = [s for s in sprites if s["kind"] == "item"]
+        need_items = bool(items) and "item" in kinds
+        if forced or mp not in self.talked or need_items:
+            self.talked.add(mp)
+        if bodies and ("trainer" in kinds or "npc" in kinds) and (forced or mp not in self._bodied):
+            self._bodied.add(mp)
+            self._engage_bodies(tag, mp)
+        if need_items:
+            self._engage_items(tag, mp)
         # A body the walk cannot reach may be across the street of a door with a name; those
         # bodies are on the road too, so the road goes through the door.
         for pad_x, pad_y, dest in self.door_pads():
@@ -115,10 +123,38 @@ class Mission:
 
     def _engage_bodies(self, tag: str, mp: int, kinds: tuple[str, ...] = ("trainer", "npc")) -> None:
         runner = self.runner()
-        runner.engage_bodies(kinds)
+        runner.engage_bodies(("trainer", "npc"))
         self.rig.settle()
         log(f"[{tag}] map {mp} engaged")
         self.off_body()
+
+    def _engage_items(self, tag: str, mp: int) -> None:
+        runner = self.runner()
+        runner.engage_bodies(("item",))
+        self.rig.settle()
+        log(f"[{tag}] items on map {mp} handled")
+        self.off_body()
+
+    def pull_away(self) -> None:
+        """A cross lands the feet on the seam row; the settle probe then steps back across
+        (measured in run 5: 'crossed 3 -> 35', and the very next line we are at 3 (21,0) again --
+        the settle walked us home, and to_map re-crossed in a loop). Step off the boundary
+        toward the map's middle before anything else runs."""
+        rig = self.rig
+        mp, x, y = rig.pos()
+        m = rig.truth["maps"].get(str(mp))
+        if not m:
+            return
+        w, h = m["width"], m["height"]
+        if not (x <= 1 or y <= 1 or x >= w - 2 or y >= h - 2):
+            return
+        tx = x + (1 if x < w / 2 else -1)
+        ty = y + (1 if y < h / 2 else -1)
+        for t in ((tx, y), (x, ty)):
+            if 0 <= t[0] < w and 0 <= t[1] < h and m["grid"][t[1]][t[0]] == "1":
+                rig.walk(mp, [t], cap=40)
+                rig.settle()
+                return
 
     def off_body(self) -> None:
         """Measured twice now (run 1, run 2): an engagement can leave the feet ON a body's tile,
@@ -179,6 +215,7 @@ class Mission:
                 res = f"crashed:{type(exc).__name__}"
             now = rig.pos()
             if now[0] == hop["to"]:
+                self.pull_away()
                 rig.settle()
                 rec = {"tag": tag, "from": mp, "to": hop["to"], "via": hop["via"], "res": str(res), "pos": list(now)}
                 self.moves.append(rec)
