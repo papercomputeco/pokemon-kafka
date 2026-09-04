@@ -163,6 +163,25 @@ def engage_156(body: tuple[int, int]) -> dict:
     assert RIG is not None
     mp, x, y = cur()
     if mp != 156:
+        # A settle probe may have stepped the feet back through the north door (156(4,0) -> 220).
+        # The 217 hall door is measured this run to carry straight into the building, so
+        # recovery is an engine drive back to 217, then the same door again.
+        say(f"  not on 156 at {cur()}; recovering via the measured 217 door")
+        RIG.drive(217)
+        RIG.settled_pos()
+        if cur()[0] != 217:
+            rec = {"body": list(body), "reached": False, "note": f"recovery failed, on {cur()}"}
+            rows.append(rec)
+            save()
+            return rec
+        if not go_door(217, 0, 22, 156, "recovery: 217 hall door -> the building"):
+            rec = {"body": list(body), "reached": False, "note": f"recovery door refused; on {cur()}"}
+            rows.append(rec)
+            save()
+            return rec
+        say(f"  back at {cur()}")
+    mp, x, y = cur()
+    if mp != 156:
         rec = {"body": list(body), "reached": False, "note": f"on {mp}, not 156"}
         say(f"  engage {body}: wrong map ({mp})")
         rows.append(rec)
@@ -251,7 +270,10 @@ def go_door(fr: int, wx: int, wy: int, to: int, note: str = "") -> bool:
     RIG.settled_pos()
     here = cur()
     attempts = 1
-    while here[0] != to and attempts < 4:
+    # Retrying while the feet are NOT on the source map is a no-op that reads as success
+    # (measured this run: the 217 door fired from 156, res=True, and the loop burned three
+    # false attempts). Once the world has moved us off the source map, the trip is over.
+    while here[0] == fr and attempts < 4:
         attempts += 1
         res = RIG.warp(fr, wx, wy)
         RIG.settled_pos()
@@ -311,29 +333,33 @@ def main() -> None:
     bank = RIG.bank("teeth_in_bag", directory=BANK_DIR)
     say(f"teeth_in_bag banked {bank}")
 
-    # Step 2: the corridor to the building on map 156.
-    seq = [
-        (219, 20, 0, 218, "219 pocket 3 -> field 218; 218(39,30) is in the same pocket"),
-        (218, 39, 30, 217, "field 218 -> field 217 (0,4) [proven both ways, leg three]"),
-        (217, 0, 22, 220, "field 217 -> building hall (29,10) [proven both ways, leg three]"),
-        (220, 14, 25, 156, "building hall -> the SAFARI ZONE building (the Warden)"),
-    ]
-    for fr, wx, wy, to, note in seq:
-        if cur()[0] != fr:
-            # Drifted (a battle or a step may have moved the feet). The pocket contains both
-            # ends of every door on this corridor, so route back with the engine.
-            say(f"  on {cur()[0]} before door {fr}({wx},{wy}); driving back to {fr}")
-            RIG.drive(fr)
-            RIG.settled_pos()
+    # Step 2: the corridor to the building on map 156. If the feet are already inside
+    # (measured this morning: the 217 hall door carries straight through to (156,4,x)),
+    # the corridor is done.
+    if cur()[0] == 156:
+        say(f"ALREADY at the building on 156 at {cur()} (carried through by the last door)")
+    else:
+        seq = [
+            (219, 20, 0, 218, "219 pocket 3 -> field 218; 218(39,30) is in the same pocket"),
+            (218, 39, 30, 217, "field 218 -> field 217 (0,4) [proven both ways, leg three]"),
+            (217, 0, 22, 156, "217 hall door -> the SAFARI ZONE building [measured live this morning]"),
+        ]
+        for fr, wx, wy, to, note in seq:
             if cur()[0] != fr:
-                say(f"!! cannot get back to {fr}; at {cur()}")
-        if not go_door(fr, wx, wy, to, note):
-            say(f"!! corridor broken at {fr}({wx},{wy} -> {to}); reporting with the evidence above")
-            RIG.screenshot(f"corridor_blocked_{fr}_{wx}_{wy}")
-            bank = RIG.bank("corridor_blocked", directory=BANK_DIR)
-            say(f"banked {bank} at {cur()}")
-            RIG.finish(outcome="gold_teeth: corridor blocked", teeth=True)
-            sys.exit(1)
+                # Drifted (a battle or a step may have moved the feet). Every door on this
+                # corridor sits in one pocket, so route back with the engine.
+                say(f"  on {cur()[0]} before door {fr}({wx},{wy}); driving back to {fr}")
+                RIG.drive(fr)
+                RIG.settled_pos()
+                if cur()[0] != fr:
+                    say(f"!! cannot get back to {fr}; at {cur()}")
+            if not go_door(fr, wx, wy, to, note):
+                say(f"!! corridor broken at {fr}({wx},{wy} -> {to}); reporting with the evidence above")
+                RIG.screenshot(f"corridor_blocked_{fr}_{wx}_{wy}")
+                bank = RIG.bank("corridor_blocked", directory=BANK_DIR)
+                say(f"banked {bank} at {cur()}")
+                RIG.finish(outcome="gold_teeth: corridor blocked", teeth=True)
+                sys.exit(1)
 
     say(f"ARRIVED on 156 at {cur()} holding {TEETH}")
     RIG.screenshot("at_156")
