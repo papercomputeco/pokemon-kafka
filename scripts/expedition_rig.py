@@ -432,7 +432,9 @@ class Rig:
                     self.ctl.press("b")
                     self.ctl.wait(25)
             else:
-                self.toss_stack(by_name[name])
+                freed = self.toss_stack(by_name[name])  # measured in the Hideout: a whole stack frees the slot
+                if freed:
+                    before = len(self.bag()) + 1
             if len(self.bag()) < before:
                 if hasattr(self, "emit"):
                     self.emit("bag.freed", action=action, item=name, slots=len(self.bag()))
