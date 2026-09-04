@@ -1631,10 +1631,18 @@ class Rig:
         for _ in range(4):
             self.ctl.press("a")
             self.ctl.wait(50)
-        before = self.pos()
-        self.io.press(face, hold=8, release=8)
-        self.io.wait(45)
-        return self.pos() != before
+        # Measured on Seafoam B3 (2026-09-04): an 8-frame press never moves a boulder and a 16-frame
+        # hold does; the player's own cell may not change on the press that moves it, so the
+        # verdict is the sprite table. A page left on screen swallows the press, so clear it first.
+        for _ in range(8):
+            if not self.textbox():
+                break
+            self.ctl.press("b")
+            self.ctl.wait(24)
+        before, sprites = self.pos(), sorted(tuple(b[:3]) for b in self.bodies())
+        self.io.press(face, hold=16, release=16)
+        self.io.wait(70)
+        return self.pos() != before or sorted(tuple(b[:3]) for b in self.bodies()) != sprites
 
     # ---- surveying --------------------------------------------------------------------------
 
