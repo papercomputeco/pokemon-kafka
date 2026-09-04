@@ -1639,3 +1639,46 @@ def test_room_plan_tosses_the_largest_multi_stack_before_singles():
 
 def test_room_plan_is_empty_when_nothing_is_expendable():
     assert rig.room_plan([("HM04", 1), ("CARD KEY", 1)]) == []
+
+
+def test_make_room_uses_a_stat_booster_before_tossing_anything(tmp_path):
+    """Using what only helps costs nothing; the verdict is the stack count, not the menu."""
+    r = _bag_rig([(74, 1), (60, 6), (40, 2)], items={"60": "FRESH WATER", "74": "LIFT KEY", "40": "HP UP"})
+    r.telemetry_root = tmp_path
+    used, tossed = [], []
+
+    def use_item(name):
+        used.append(name)
+        r.mem[rig.ADDR_BAG_COUNT] -= 1  # the game consumed the stack
+        return True
+
+    class Ctl:
+        def press(self, *a, **kw):
+            pass
+
+        def wait(self, *a, **kw):
+            pass
+
+    r.use_item, r.ctl, r.toss_stack = use_item, Ctl(), lambda item: tossed.append(item) or True
+    r.emit = lambda *a, **kw: None
+    assert r.make_room() is True
+    assert used == ["HP UP"] and tossed == []
+
+
+def test_make_room_moves_past_a_use_the_game_refused(tmp_path):
+    r = _bag_rig([(74, 1), (60, 6), (40, 1)], items={"60": "FRESH WATER", "74": "LIFT KEY", "40": "HP UP"})
+    r.telemetry_root = tmp_path
+    tossed = []
+
+    class Ctl:
+        def press(self, *a, **kw):
+            pass
+
+        def wait(self, *a, **kw):
+            pass
+
+    r.use_item, r.ctl = (lambda name: True), Ctl()  # selected, but the count never moved
+    r.toss_stack = lambda item: tossed.append(item) or True
+    r.emit = lambda *a, **kw: None
+    assert r.make_room() is True
+    assert tossed == [60]  # the largest stack, once using got nowhere

@@ -408,32 +408,34 @@ class Rig:
             self.ctl.wait(30)
         return len(self.bag()) < before
 
-    def make_room(self) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+    def make_room(self) -> bool:
         """Free one bag slot along ``room_plan``: use what only helps, toss what only sells.
 
-        The verdict is the stack count dropping -- never the menu having been navigated. A use that
-        the game refuses ("It won't have any effect") leaves the count alone and the plan moves on.
+        The caller decides when (``bag_full``); this frees exactly one slot. The verdict is the
+        stack count dropping -- never the menu having been navigated. A use the game refuses
+        ("It won't have any effect") leaves the count alone and the plan moves on; so does a toss
+        the game refuses (a key item), which is the backstop against lore about what is safe.
         """
         before = len(self.bag())
-        if before < BAG_SLOTS:
-            return True
         by_name = {self.item_name(i): i for i, _q in self.bag()}
+        can_use = hasattr(self, "use_item") and hasattr(self, "ctl")
         for action, name in room_plan(self.bag_named(full=True)):
-            if name not in by_name:
+            if name not in by_name or (action == "use" and not can_use):
                 continue
             print(f"  bag full: {action} {name} to free a slot", flush=True)
             if action == "use":
                 if self.use_item(name):
-                    for _ in range(6):  # the member prompt / the "went up" pages; B backs out of a refusal
+                    for _ in range(6):  # the member prompt and the "went up" pages
                         self.ctl.press("a")
                         self.ctl.wait(40)
-                for _ in range(6):
+                for _ in range(6):  # and back out of a refusal
                     self.ctl.press("b")
                     self.ctl.wait(25)
             else:
                 self.toss_stack(by_name[name])
             if len(self.bag()) < before:
-                self.emit("bag.freed", action=action, item=name, slots=len(self.bag()))
+                if hasattr(self, "emit"):
+                    self.emit("bag.freed", action=action, item=name, slots=len(self.bag()))
                 return True
         print("  bag is full and nothing in it is expendable", flush=True)
         return False
