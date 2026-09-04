@@ -1581,3 +1581,29 @@ def test_cursor_to_gives_up_rather_than_pressing_forever():
     menu.ctl = Stuck()
     assert rig.Rig.cursor_to(menu, 5, presses=4) is False
     assert len(menu.presses) == 4
+
+
+# ------------------------------------------------- the "Which move should be forgotten?" list
+
+
+MOVES = {"SPLASH": 150, "TACKLE": 33, "BITE": 44, "STRENGTH": 70, "SURF": 57}
+
+
+def test_forget_pick_reads_the_measured_list_and_skips_hm_moves():
+    """Measured 2026-09-04 teaching HM03 to a four-move Gyarados: the moves draw on consecutive
+    rows over the roster, some with a one-glyph sprite prefix from the row underneath."""
+    rows = [(0, "AAAAAAAAAA100"), (1, "NOT ABLE"), (8, "H SPLASH"), (9, "TACKLE"), (10, "G BITE"), (11, "STRENGTH")]
+    assert rig.forget_pick(rows, MOVES, {"STRENGTH", "SURF"}) == (0, "SPLASH")
+
+
+def test_forget_pick_index_is_relative_to_the_first_move_row():
+    rows = [(8, "STRENGTH"), (9, "TACKLE"), (10, "BITE")]
+    assert rig.forget_pick(rows, MOVES, {"STRENGTH"}) == (1, "TACKLE")
+
+
+def test_forget_pick_refuses_when_every_move_is_one_to_keep():
+    assert rig.forget_pick([(8, "STRENGTH"), (9, "SURF")], MOVES, {"STRENGTH", "SURF"}) is None
+
+
+def test_forget_pick_refuses_when_no_move_is_on_screen():
+    assert rig.forget_pick([(0, "AAAAAAAAAA100"), (1, "NOT ABLE")], MOVES, set()) is None

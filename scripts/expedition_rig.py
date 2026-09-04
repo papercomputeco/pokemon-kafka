@@ -133,6 +133,30 @@ def engaged_near(map_id: int, sprite: tuple[int, int], radius: int = 1, root: Pa
     return found
 
 
+def forget_pick(rows, move_ids: dict, keep: set) -> tuple[int, str] | None:
+    """Which row of the "Which move should be forgotten?" list to give up, and its name.
+
+    Measured on surf_strength_hm03.state teaching HM03 to a four-move Gyarados (2026-09-04): the
+    list is drawn OVER the ABLE/NOT ABLE roster on consecutive rows (8..11), one move per row --
+    not every other row like the field menus -- and a row can carry a one-glyph sprite prefix
+    from the roster underneath ("H SPLASH", "G BITE"). The victim is the first listed move that
+    is a real move on this cartridge and not in ``keep`` (the HM moves). The index returned is
+    relative to the first move row, which is what the raw cursor register counts.
+    """
+    moves = []
+    for row, text in rows:
+        name = re.sub(r"^[A-Za-z] (?=[A-Z])", "", text.strip()).strip().upper()
+        if name in move_ids:
+            moves.append((row, name))
+    if not moves:
+        return None
+    first = moves[0][0]
+    for row, name in moves:
+        if name not in keep:
+            return row - first, name
+    return None
+
+
 class Rig:
     """A loaded cartridge plus the road engine, recording and emitting as it plays."""
 
@@ -1518,24 +1542,29 @@ class Rig:
         self.ctl.press("a")
         self.ctl.wait(90)
         hms = {v for k, v in (self.truth.get("machines") or {}).items() if k.startswith("HM")}
-        for _ in range(8):
+        # Measured on a four-move Gyarados (2026-09-04): "GYARADOS is trying to learn SURF!" ->
+        # "But, GYARADOS can't learn more than 4 moves!" -> "Delete an older move to make room
+        # for SURF?" (YES highlighted) -> "Which move should be forgotten?" with the four moves on
+        # consecutive rows. That is seven typewriter presses before the first prompt, so the old
+        # budget of eight ran out exactly as the YES / NO drew. The wording it looked for
+        # ("WHICH MOVE") never appears on this cartridge; "FORGOTTEN" does.
+        for _ in range(24):
             if knows(pick):
                 break
-            text = " ".join(t for _i, t in self.menu_rows()).upper()
-            if "FORGOTTEN" in text or "WHICH MOVE" in text:
-                # The replace prompt: give up the first listed move that is not an HM move.
-                victim = next(
-                    (
-                        t
-                        for _i, t in self.menu_rows()
-                        if t.strip().upper() in self._move_ids() and t.strip().upper() not in hms
-                    ),
-                    None,
-                )
-                if victim is None or not self.menu_choose(victim):
+            text = self.textbox().upper()
+            rows = [(i, t) for i, t in self.menu_rows(0, 18) if t.strip()]
+            if "FORGOTTEN" in text:
+                choice = forget_pick(rows, self._move_ids(), hms)
+                if choice is None:
                     return bail("the replace prompt offered nothing this could forget")
-            else:
+                idx, victim = choice
+                if not self.cursor_to(idx):
+                    return bail(f"could not put the cursor on {victim}")
+                print(f"  forgetting {victim} for {move}", flush=True)
                 self.ctl.press("a")
+                self.ctl.wait(120)
+                continue
+            self.ctl.press("a")  # typewriter, or YES on "make room?" (measured: YES is the default)
             self.ctl.wait(80)
         for _ in range(8):
             self.ctl.press("b")
