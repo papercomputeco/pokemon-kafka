@@ -85,3 +85,13 @@ def test_catalog_summarises_where_the_water_carried_the_surfer(tmp_path):
     cat.save()
     s = bo.Catalog(tmp_path / "cat.json").summary(161)
     assert "lands at [162, 20, 15] for 2 configuration(s)" in s and "lands at [161, 25, 14] for 1" in s
+
+
+def test_a_boulder_on_a_hole_tile_has_fallen_and_is_never_pushed():
+    t = _truth()
+    m = t["maps"]["7"]
+    m["tiles"] = ["0505050505", "0522050505", "0505050505"]  # (1,1) is a hole
+    assert bo.fallen(t, 7, {(1, 1), (3, 1)}) == {(1, 1)}
+    cands = bo.candidate_pushes(t, set(), 7, (0, 0), {(1, 1), (3, 1)})
+    assert all(b == (3, 1) for _s, _d, b in cands) and cands
+    assert bo.fallen({"maps": {"7": {"tiles": None}}}, 7, {(1, 1)}) == set()

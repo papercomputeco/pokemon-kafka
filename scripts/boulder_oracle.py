@@ -38,16 +38,35 @@ def config_key(boulders) -> str:
     return ";".join(f"{x},{y}" for x, y in sorted(boulders))
 
 
+HOLE_TILE = 0x22  # measured 2026-09-04: the tile a boulder falls through (B1 (18,6); B3 (3,16))
+
+
+def fallen(truth, map_id: int, boulders) -> set[tuple[int, int]]:
+    """Boulders whose sprite slot sits on a hole tile: they fell, the slot just kept the coordinates.
+
+    Measured: after (3,15) dropped into (3,16) the sprite table still listed (3,16), and every
+    'push' on it was the player stepping onto the open hole and falling to B4 -- 56 wasted pushes
+    in one run. Such a boulder is not a candidate; the open hole is a cell to avoid.
+    """
+    m = truth["maps"][str(map_id)]
+    tiles = m.get("tiles")
+    if not tiles:
+        return set()
+    return {(x, y) for x, y in boulders if int(tiles[y][2 * x : 2 * x + 2], 16) == HOLE_TILE}
+
+
 def candidate_pushes(truth, pairs, map_id: int, player, boulders) -> list[tuple[tuple[int, int], str, tuple[int, int]]]:
     """Every (stand, direction, boulder) the player can walk to from here with the boulders solid.
 
     The far tile is not consulted: whether a boulder enters a hole, a floor or a wall is the
-    cartridge's call, and asking it is the whole point of the catalog.
+    cartridge's call, and asking it is the whole point of the catalog. A boulder on a hole tile
+    has already fallen (see ``fallen``): the open hole is blocked for walking and never pushed.
     """
     boulders = set(boulders)
+    gone = fallen(truth, map_id, boulders)
     region = road.reachable(truth, pairs, map_id, tuple(player), blocked=boulders)
     out = []
-    for bx, by in sorted(boulders):
+    for bx, by in sorted(boulders - gone):
         for name, (dx, dy) in DIRS.items():
             stand = (bx - dx, by - dy)
             if stand in region:
