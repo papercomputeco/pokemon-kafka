@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Fuchsia's mart (152): buy as many REPEL (or MAX REPEL) as the bag can hold.
+"""Fuchsia's mart (152), v3 — buy 99 REPEL (or MAX REPEL) into one empty slot.
 
-v2, after the v1 incident: the clerk's UI does NOT behave like Cerulean's. v1 assumed
-(shop extent 2, A-advances-everything) and an A-spam loop bought 3x ULTRA BALL by accident
-— caught by the bag delta, which is why every purchase here is gated on BOTH the money
-delta and the bag delta, and every keypress is bracketed by a state+rows read. Measured so
-far (this cartridge, these screens):
+What v1 and v2 cost us, measured, so this version stops guessing:
 
-* the item list shows a "How many? <n>" quantity band; A-presses inside that band can
-  change the quantity rather than buy (v1 parked at "How many? 3" with the 3x ULTRA only
-  in the bag after a settle-A)
-* the money is 3 BCD bytes at 0xD347 (hex-digit read); the bag delta is the verdict
-* which REPEL is offered and its price are read off the live screen and the deltas — never
-  recalled.
+* The room's BACKGROUND permanently decodes as 'MONEY / BUY 87400 / SELL / QUIT / Thank you!' —
+  it moves with the player (probe moved (2,5)->(2,7), rows unchanged). Row text is
+  decoration; the MENU REGISTERS (0xCC26 cur / 0xCC28 max / 0xD125 id) + money + bag are truth.
+* Flow, measured by walking it: face clerk + A -> greeting (id 1) -> clerk question (id 1) ->
+  shop menu (id 14, max=2, entries BUY/SELL/QUIT, cursor 0 = BUY) -> A -> BUY list (id 13,
+  stock rows with prices) -> cursor down (measured per press) -> A -> 'How many?' band ->
+  A -> '<item>? That's <n>.' box -> A -> MONEY DROPS (the purchase) -> back at the list.
+  B backs one level at a time (band -> list -> menu -> 'Thank you!').
+* A 'Thank you!' box parks on boot (register id 1); it swallows A (v2's settle loop fed its A's
+  into it and the START menu stayed up). Settles by facing the body away and A'ing (the
+  measured settle doctrine, expedition_rig.settle docstring).
+* v1's A-spam bought 3x ULTRA BALL and parked in the SELL flow — caught by the bag delta.
+  Therefore: every purchase round is gated on money drop AND the bag delta naming the target;
+  quantity stays 1 per round (the band's quantity keys are unproven; 98 one-unit rounds at
+  40 frames apiece is nothing headless, and every round proves itself).
 
-Resume: starts from the parked state if given (B's out of any open shop screen, banks a
-clean snapshot), then drives: greet -> list -> find REPEL row -> buy cycles verified by
-deltas until the 99-stack is full or the game refuses.
-
-Usage:  uv run python scripts/buy_repel_leg.py [state-file]
+Usage:  uv run python scripts/buy_repel_leg.py [state-file]   (default b8_mart_counter_map.state)
 """
 
 from __future__ import annotations
@@ -34,42 +35,21 @@ from expedition_rig import BattleWedge, Rig  # noqa: E402
 
 WORKSPACE = SCRIPT_DIR.parent
 BANK_DIR = WORKSPACE / "data" / "local_runs" / "roster-bench"
-BANKED = BANK_DIR / "repel_stopped.state"  # parked at the counter, "How many? 3" band open
+DEFAULT_STATE = BANK_DIR / "b8_mart_counter_map.state"
 STACK_CAP = 99
 RESERVE_MONEY = 100
-# Preference is policy, not a claim about the stock; the stock is read live.
-CANDIDATES = ("MAX REPEL", "REPEL", "SUPER REPEL")
+# Preference is policy; the stock itself is read off its live window rows (list id 13 only).
+CANDIDATES = ("MAX REPEL", "REPEL")
+
+ID_TEXTBOX, ID_SHOP_MENU, ID_ITEM_LIST = 1, 14, 13
 
 
-def log(*args) -> None:
-    print(*args, flush=True)
+def log(*a):
+    print(*a, flush=True)
 
 
-def rows(rig: Rig) -> list[tuple[int, str]]:
-    return rig.menu_rows()
-
-
-def tx(rig: Rig) -> str:
-    return " ".join(t for _i, t in rows(rig)).upper()
-
-
-def state(rig: Rig) -> tuple[int, int, int]:
+def regs(rig: Rig) -> tuple[int, int, int]:
     return qm.menu_state(rig.io)
-
-
-def in_shop_tx(rig: Rig) -> bool:
-    t = tx(rig)
-    return any(tok in t for tok in ("HOW MANY", "BUY", "SELL", "QUIT", "THAT'LL", "THAT WILL"))
-
-
-def advance(rig: Rig, key: str, wait: int = 40) -> None:
-    """One keypress bracketed by before/after reads — the screen is the instruction stream."""
-    before = (state(rig), tx(rig)[:70])
-    rig.ctl.press(key)
-    rig.ctl.wait(wait)
-    after = (state(rig), tx(rig)[:70])
-    log(f"  [{key}] {before[0]} {before[1]!r}\n        -> {after[0]} {after[1]!r}")
-    rig.emit("repel.key", key=key, before=list(before[0]), after=list(after[0]), tx=after[1])
 
 
 def money(rig: Rig) -> int:
@@ -81,204 +61,250 @@ def bag_map(rig: Rig) -> dict[int, int]:
 
 
 def repel_stack(rig: Rig) -> int:
-    return sum(q for n, q in rig.bag_named(full=True) if "REPEL" in n.upper())
+    return sum(q for n, q in rig.bag_named(full=True) if "REPEL" in n.upper() and "S.S." not in n.upper())
 
 
-def escapeshop(rig: Rig, cap: int = 6) -> None:
-    """B is the universal back here (band -> list -> menu -> map); A is NOT (it can buy).
-    A money-guard records the screen state honestly if B were to commit a purchase instead."""
-    m0 = money(rig)
-    for _ in range(cap):
-        if not in_shop_tx(rig) and state(rig)[2] not in (qm.TEXT_SHOP_MENU, qm.TEXT_ITEM_LIST):
-            break
-        advance(rig, "b")
-    if money(rig) != m0:
-        rig.emit("repel.gate", escapeshop_money_delta=m0 - money(rig), bag=str(rig.bag_named(full=True)))
-        log("!! money moved during escape (delta", m0 - money(rig), ") — bag:", rig.bag_named(full=True))
-    if in_shop_tx(rig):
-        shot = rig.shot(BANK_DIR / "repel_escape_fail.png")
-        log("!! could not B out of the shop screens; screenshot:", shot)
+def window(rig: Rig) -> list[tuple[int, str]]:
+    """Non-empty rows. On the background-only screens these are the room's decorative
+    'MONEY BUY 87400 SELL QUIT Thank you!' — so callers pair this WITH the registers."""
+    return rig.menu_rows()
 
 
-def find_repel_row(rig: Rig) -> tuple[str, int] | None:
-    """(name, row) of the offered repel in the current window, preference per CANDIDATES."""
-    for name in CANDIDATES:
-        r, t = next(
-            (
-                (i, s)
-                for i, s in rows(rig)
-                if name in s.upper() and not any(o in s.upper() for o in ("MAX", "SUPER") if o not in name)
-            ),
-            None,
-        )
-        if r is not None:
-            return name, r
-    return None
+def show(rig: Rig, label: str) -> None:
+    log(f"-- {label} :: regs={regs(rig)} money={money(rig)} bag_n={len(bag_map(rig))} :: {window(rig)[:8]}")
+    rw = [(i, s) for i, s in window(rig)[:10]]
+    rig.emit("repel.screen", label=label, regs=list(regs(rig)), money=money(rig), rows=rw)
 
 
-def top_row(rig: Rig) -> tuple[int, str] | None:
-    return next(((i, s) for i, s in rows(rig) if s.strip()), None)
+def key(rig: Rig, k: str, wait: int = 40) -> None:
+    rig.ctl.press(k)
+    rig.ctl.wait(wait)
 
 
-def buy_one_verified(rig: Rig) -> tuple[int, int]:
-    """Buy exactly ONE of the cursor's item, with the money delta + bag delta as the gate.
-    Returns (bought, unit_price). 0/0 if the game refused. The confirmation presses are
-    bounded: each A is immediately followed by a money read; a money drop closes the cycle."""
-    m0, b0 = money(rig), bag_map(rig)
-    # confirm the band is ours (a quantity band is on screen)
-    if "HOW MANY" not in tx(rig):
-        advance(rig, "a")  # list -> band
-    bought, price = 0, 0
-    for strike in range(4):
-        if money(rig) < m0:
-            now = bag_map(rig)
-            delta_bag = {k: now[k] - b0.get(k, 0) for k in now if now[k] != b0.get(k, 0)}
-            bought = sum(v for v in delta_bag.values() if v > 0)
-            price = max(1, (m0 - money(rig)) // max(1, bought))
-            if bought != 1:
-                log(f"  !! gate: expected a 1x buy, deltas say bag {delta_bag} money {bought and (m0 - money(rig))}")
-                rig.emit("repel.gate", bought=bought, delta=delta_bag)
-            return bought, price
-        # no money movement: A may just be nudging the band; check what's on screen, then A again
-        advance(rig, "a")
-        if "HOW MANY" not in tx(rig) and "REPEL" not in tx(rig) and not in_shop_tx(rig):
-            rig.emit("repel.refusal", phase="confirm", tx=tx(rig)[:120])
-            log("!! confirmation left the shop entirely; rows:", rows(rig))
-            return 0, 0
-    shot = rig.shot(BANK_DIR / "repel_confirm_stuck.png")
-    rig.emit("repel.refusal", phase="confirm_stuck", tx=tx(rig)[:120], shot=str(shot))
-    log("!! 4 bounded confirm presses moved no money; screenshot:", shot)
-    if bag_map(rig) != b0:
-        now2 = bag_map(rig)
-        delta = {k: now2[k] - b0.get(k, 0) for k in now2 if now2[k] != b0.get(k, 0)}
-        bought = sum(v for v in delta.values() if v > 0)
-        price = max(1, (m0 - money(rig)) // max(1, bought))
-    return bought, price
+def close_parked_box(rig: Rig) -> bool:
+    """A parked box (reg id 1) swallows A aimed at menus. Face away from the body, then A —
+    the settle doctrine: A facing an NPC re-opens the conversation, so turn away first."""
+    for _ in range(4):
+        if regs(rig)[2] == 0:
+            return True
+        rig.ctl.press("down" if rig.pos()[2] == 5 else "right")  # step off the clerk's row if on it
+        rig.ctl.wait(40)
+        # re-face the body's row from a safe tile is not needed; the point is the A not facing
+        key(rig, "a", 50)
+    return regs(rig)[2] == 0
+
+
+def bank_stop(rig: Rig, why: str) -> None:
+    show(rig, why)
+    rig.shot(BANK_DIR / f"repel_{why}.png")
+    rig.emit("repel.stop", why=why, pos=list(rig.pos()), money=money(rig), bag=str(rig.bag_named(full=True)))
+    rig.bank(f"repel_{why}", directory=BANK_DIR)
+    log(f"== stopped: {why} — banked; money {money(rig)}")
 
 
 def main() -> int:
-    started = sys.argv[1] if len(sys.argv) > 1 else str(BANKED)
+    started = sys.argv[1] if len(sys.argv) > 1 else str(DEFAULT_STATE)
     rig = Rig(started)
-    log(f"== buy-repel from {rig.pos()} bag={len(rig.bag())}/20 money={money(rig)} stack_now={repel_stack(rig)}")
-    rig.emit("repel.open", from_state=str(started), pos=list(rig.pos()), bag=str(rig.bag_named()), money=money(rig))
+    log(
+        f"== v3 from {rig.pos()} regs={regs(rig)} money={money(rig)} "
+        f"bag={len(bag_map(rig))}/20 repel_stack={repel_stack(rig)}"
+    )
+    rig.emit("repel.open", from_state=str(started), pos=list(rig.pos()), money=money(rig))
 
     try:
-        # ---- recovery: B any open shop screen closed, then a clean snapshot --------------
-        escapeshop(rig)
-        rig.settle()
-        rig.shot(BANK_DIR / "repel_clean.png")
-        log("clean screen rows:", rows(rig), "pos:", rig.pos())
-        rig.emit("repel.clean", pos=list(rig.pos()), tx=tx(rig)[:80])
-        clean = rig.bank("b8_mart_counter_clean", directory=BANK_DIR)
-        log(f"clean snapshot banked: {clean.name}")
+        # ---- 0. a parked 'Thank you!' box (reg id 1) is bootable: the probe walked under it and
+        # banked from it. A/B on it are no-ops (measured) — so no settle theatre up front; the
+        # engage below just A's past whatever the clerk has to say, register-gated.
+        show(rig, "boot_state")
 
-        # ---- room (the bag is 20/20 with the accidental ULTRA stack on the line) ---------
+        # ---- 1. room: the baton arrived 20/20 with the v1 ULTRA stack on the line --------
         if rig.bag_full() and repel_stack(rig) == 0:
-            log("bag full with no repel on board — make_room (the loss is the measured log line)")
-            rig.make_room()
-            log(f"bag now {len(rig.bag())}/20: {rig.bag_named(full=True)}")
-            rig.emit("repel.room", bag=str(rig.bag_named()))
+            log("-- bag full, no repel yet: make_room (loss is the measured toss line)")
+            free = rig.make_room()
+            log(f"   make_room={free} bag={len(bag_map(rig))}/20 regs={regs(rig)}")
+            rig.emit("repel.room", free=free, bag=str(rig.bag_named(full=True)), regs=list(regs(rig)))
+            # make_room's settle can wedge a START menu (v2's crash): a menu register is a hard
+            # stop; everything else (map, ghost box id 1) is bootable — the probe booted one.
+            if regs(rig)[2] in (ID_SHOP_MENU, ID_ITEM_LIST):
+                for _ in range(6):
+                    if regs(rig)[2] == 0:
+                        break
+                    key(rig, "b", 50)
+                if regs(rig)[2] in (ID_SHOP_MENU, ID_ITEM_LIST):
+                    bank_stop(rig, "menu_wedged")
+                    return 9
+            if rig.bag_full():
+                bank_stop(rig, "room_still_full")
+                return 9
+            show(rig, "after_make_room")
 
-        # ---- the clerk: greet -> buy menu -> item list, every press measured --------------
-        rig.ctl.press("left")
-        rig.ctl.wait(40)
-        for i in range(12):
-            if state(rig)[2] == qm.TEXT_ITEM_LIST:
+        # ---- 2. engage the clerk: v1's measured path — walk up to him, A, registers decide -
+        # (1,5) stands directly in front of the clerk at (0,5); the last step faces him.
+        target = (1, 5)
+        if rig.pos()[1:] != target:
+            ok = rig.walk(152, {target}, cap=200)
+            log(f"-- walk {target}: {ok} at {rig.pos()} regs={regs(rig)}")
+            rig.emit("repel.walk", ok=ok, pos=list(rig.pos()), regs=list(regs(rig)))
+            if rig.pos()[1:] != target:
+                bank_stop(rig, "counter_unreachable")
+                return 9
+        show(rig, "at_clerk")
+
+        # ---- 3. the conversation, register-gated: A until id 14 (menu). 13 is an early slip,
+        # one measured B takes it back to the menu path. The ghost 'Thank you!' (id 1) just
+        # soaks A presses; the cap makes that cost bounded and logged.
+        steps = 0
+        while regs(rig)[2] != ID_SHOP_MENU and steps < 12:
+            steps += 1
+            key(rig, "a", 80)
+            show(rig, f"greet_{steps}")
+            if regs(rig)[2] == ID_ITEM_LIST:
+                key(rig, "b", 60)
+        if regs(rig)[2] != ID_SHOP_MENU:
+            bank_stop(rig, "shop_menu_not_open")
+            return 10
+        log(
+            f"   shop menu reached after {steps} A (cur={regs(rig)[0]} max={regs(rig)[1]}) "
+            "— cursor 0 = BUY (measured in v1's buy)"
+        )
+        show(rig, "shop_menu")
+
+        # ---- 4. BUY list: id 13; the stock rows are REAL here (background has no REPEL) ---
+        m0 = money(rig)
+        key(rig, "a", 90)
+        show(rig, "buy_list_open")
+        if regs(rig)[2] != ID_ITEM_LIST or money(rig) != m0:
+            bank_stop(rig, "buy_list_refused")
+            return 10
+        name: str | None = None
+        for p in range(24):
+            rows = window(rig)
+            for cand in CANDIDATES:
+                hit = next(((i, s) for i, s in rows if cand in s.upper()), None)
+                if hit is None:
+                    continue
+                # exclude 'SUPER REPEL' when hunting plain REPEL, and vice versa, by full name
+                if cand == "REPEL" and "SUPER" in hit[1].upper():
+                    continue
+                name = cand
+                hitrow = hit[0]
                 break
-            if state(rig)[2] == qm.TEXT_SHOP_MENU:
-                advance(rig, "a")
+            else:
+                prev = "|".join(t for _i, t in window(rig))
+                key(rig, "down", 50)
+                if "|".join(t for _i, t in window(rig)) == prev:
+                    log("   list bottom reached, row set did not move")
+                    break
                 continue
-            advance(rig, "a")
-        if state(rig)[2] != qm.TEXT_ITEM_LIST:
-            shot = rig.shot(BANK_DIR / "repel_list_refused.png")
-            rig.emit("repel.refusal", phase="list", tx=tx(rig)[:120], shot=str(shot))
-            log("!! never reached the item list:", rows(rig), "screenshot:", shot)
-            escapeshop(rig)
-            rig.bank("repel_stopped", directory=BANK_DIR)
-            return 4
-
-        rig.shot(BANK_DIR / "repel_stock.png")
-        rig.emit("repel.stock", tx=tx(rig)[:200])
-        log("stock window:", rows(rig))
-
-        # ---- find the repel row; move the cursor by measured downs (cursor = window top) --
-        name, hitrow = find_repel_row(rig)
-        tops = 0
-        while name is None and tops < 25:
-            advance(rig, "down")
-            name, hitrow = find_repel_row(rig)
-            if name is None and top_row(rig) is None:
-                break
-            tops += 1
+            break
         if name is None:
-            rig.emit("repel.not_stocked", tx=tx(rig)[:200])
-            log("!! no REPEL-grade item found in 25 rows of scroll; stock window:", rows(rig))
-            escapeshop(rig)
-            rig.bank("repel_not_stocked", directory=BANK_DIR)
-            return 5
-        # cursor sits on the window's top entry (measured in v1's screen); walk it to the row
-        moves = 0
-        while top_row(rig) is not None and top_row(rig)[0] != hitrow and moves < 12:
-            advance(rig, "down")
-            moves += 1
-            if find_repel_row(rig) is None and moves >= 2:
-                log("  the repel row scrolled away — overshoot, stop")
-                break
-        if top_row(rig) is None or top_row(rig)[0] != hitrow:
-            shot = rig.shot(BANK_DIR / "repel_cursor_refused.png")
-            rig.emit("repel.refusal", phase="cursor", row=hitrow, top=top_row(rig), shot=str(shot))
-            log("!! could not bring the cursor's row to", hitrow, "screenshot:", shot)
-            escapeshop(rig)
-            rig.bank("repel_stopped", directory=BANK_DIR)
-            return 6
-        log(f"cursor on {name!r} (row {hitrow}) after {moves} measured downs")
-        rig.emit("repel.cursor", name=name, row=hitrow, moves=moves)
+            show(rig, "stock_page_final")
+            rig.emit("repel.not_stocked", window=[t for _i, t in window(rig)])
+            bank_stop(rig, "not_stocked")
+            return 11
 
-        # ---- the buy loop: verified one-units until the stack is full or it refuses --------
+        # ---- 5. walk the list cursor to the REPEL row by measured downs (cursor = window top)
+        top = next(((i, s) for i, s in window(rig) if s.strip()), None)
+        moves = 0
+        while top is not None and top[0] != hitrow and moves < 20:
+            key(rig, "down", 45)
+            moves += 1
+            top = next(((i, s) for i, s in window(rig) if s.strip()), None)
+            if name not in " ".join(t for _i, t in window(rig)).upper():
+                log("   the REPEL row scrolled away — overshoot; back up")
+                key(rig, "up", 45)
+                top = next(((i, s) for i, s in window(rig) if s.strip()), None)
+        show(rig, "cursor_at_repel")
+        if top is None or top[0] != hitrow:
+            bank_stop(rig, "cursor_not_on_repel")
+            return 11
+        iid = None
+        for k, v in (rig.truth.get("items") or {}).items():
+            if v == name:
+                iid = int(k)
+        if iid is None:
+            bank_stop(rig, "no_item_id_for_name")
+            return 11
+        log(f"   buying {name} (cart item id {iid}) — cursor is on its row after a measured {moves} downs")
+
+        # ---- 6. the buy loop: 1 unit per round, gated on money drop + bag delta naming it -
         total = 0
         price = 0
         rounds = 0
-        while total < STACK_CAP and rounds < 120:
+        while total < STACK_CAP and rounds < 130:
             rounds += 1
+            # wherever the last round left us, get back AT the list by register (id 13), B only
+            for _ in range(5):
+                if regs(rig)[2] == ID_ITEM_LIST:
+                    break
+                key(rig, "b", 60)
+            if regs(rig)[2] != ID_ITEM_LIST:
+                show(rig, f"round{rounds}_lost_the_list")
+                break
             m0 = money(rig)
-            if m0 <= RESERVE_MONEY + 100:
-                log("money floor reached, stopping the buy loop")
+            b0 = bag_map(rig)
+            key(rig, "a", 80)  # list -> band
+            # band -> '<item>? That's 1.' box (quantity is 1: we never touch the band's quantity keys)
+            key(rig, "a", 80)
+            for confirm in range(3):
+                if money(rig) < m0:
+                    break
+                key(rig, "a", 80)  # the box's yes
+                show(rig, f"round{rounds}_confirm{confirm}")
+            now = bag_map(rig)
+            dm = m0 - money(rig)
+            if dm <= 0:
+                show(rig, f"round{rounds}_refused")
+                rig.emit("repel.refused", round=rounds, window=[t for _i, t in window(rig)])
                 break
-            # (re)open the band on the cursor's entry: from the list, A opens "How many?"
-            if "HOW MANY" not in tx(rig):
-                if state(rig)[2] != qm.TEXT_ITEM_LIST:
-                    # back at the list, verified by the register
-                    advance(rig, "b")
-                advance(rig, "a")
-            bought, p = buy_one_verified(rig)
-            total += bought
-            price = p or price
-            log(f"round {rounds}: +{bought} of {name} (total {total}) unit price {p or price} money {money(rig)}")
-            rig.emit("repel.round", n=rounds, name=name, bought=bought, total=total, price=price, money=money(rig))
-            if bought == 0:
+            gained = now.get(iid, 0) - b0.get(iid, 0)
+            other = {k: v - b0.get(k, 0) for k, v in now.items() if k != iid and v > b0.get(k, 0)}
+            if gained <= 0 or other:
+                log(
+                    f"   !! round {rounds}: money -{dm} but bag delta says {iid}: {gained}, "
+                    f"other gains {other} — NOT {name}"
+                )
+                rig.emit("repel.gate", round=rounds, gain=iid and gained, other=other, dm=dm)
+                rig.shot(BANK_DIR / f"repel_bad_round{rounds}.png")
                 break
-        final_stack = repel_stack(rig)
-        log(f"== {name} stack in bag now: {final_stack}; money {money(rig)}; bag {len(rig.bag())}/20")
-        rig.emit("repel.done", name=name, rounds=rounds, stack=final_stack, money=money(rig), bag=str(rig.bag_named()))
+            price = dm // max(1, gained)
+            total += gained
+            log(
+                f"   round {rounds}: +{gained} (stack {total}) price/delta {dm} per {gained} "
+                f"=> unit ~{price} money {money(rig)}"
+            )
+            rig.emit("repel.round", n=rounds, name=name, gained=gained, total=total, dm=dm, money=money(rig))
+            if money(rig) <= RESERVE_MONEY + price:
+                log("   money floor — the game can no longer take a full unit safely")
+                break
+        show(rig, "buy_loop_end")
+        final = repel_stack(rig)
+        log(f"== {name}: stack in bag {final} (loop total {total}), money {money(rig)}, bag {len(bag_map(rig))}/20")
+        bagtxt = str(rig.bag_named(full=True))
+        rig.emit("repel.done", name=name, rounds=rounds, stack=final, money=money(rig), bag=bagtxt)
 
-        escapeshop(rig)
-        rig.settle()
-        rig.shot(BANK_DIR / "repel_final.png")
-        rig.emit("repel.final_screen", pos=list(rig.pos()), tx=tx(rig)[:80])
-        bag_named = rig.bag_named(full=True)
-        log(f"bag at end: {bag_named}")
-        if final_stack == 0:
-            rig.bank("repel_stopped", directory=BANK_DIR)
-            return 7
-        out = rig.bank("repel_bought", directory=BANK_DIR)
-        log(f"== banked {out.name}")
-        rig.emit("repel.bank", path=str(out), pos=list(rig.pos()))
+        # ---- 7. leave the clerk's screens by measured B's (band -> list -> menu -> goodbye);
+        # the goodbye box (id 1) may park — that banked fine as a baton (the probe booted one)
+        for n in range(6):
+            key(rig, "b", 70)
+            show(rig, f"leaving_{n}")
+            if regs(rig)[2] == 0 and not any("THANK" in t.upper() for _i, t in window(rig)):
+                break
+        show(rig, "at_the_map")
+        shot = rig.shot(BANK_DIR / "repel_final.png")
+        rig.emit("repel.final", pos=list(rig.pos()), shot=str(shot), regs=list(regs(rig)))
+        if final == 0 or total == 0:
+            bank_stop(rig, "no_repel_landed")
+            return 12
+        out = rig.bank("b8_REPEL_bought", directory=BANK_DIR)
+        log(f"== banked {out.name}; {name} stack = {final}; party={rig.party()}")
+        rig.emit("repel.bank", path=str(out), pos=list(rig.pos()), stack=final)
         return 0
     except BattleWedge as e:
         log(f"BATTLE WEDGE: {e}")
         rig.emit("repel.wedge", err=str(e), pos=list(rig.pos()))
         rig.bank("repel_wedged", directory=BANK_DIR)
-        return 8
+        return 13
 
 
 if __name__ == "__main__":
