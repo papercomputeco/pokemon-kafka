@@ -54,6 +54,16 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   way. The patrol's three measured lessons (never anchor ON a warp, never yield a roamable
   floor to the ladder-hunter, never answer a standstill with "a") are in the agent.
 
+- `beat17-articuno` — **the legendary**: Seafoam Islands B3 to B4 on the 7-badge run, every step
+  measured rather than recalled. The twelve STRENGTH pushes that fill both floor holes (the twelfth is
+  the push the boulder oracle had logged "unreachable" for a day — the tile-pair model's verdict, not
+  the game's), the fall through (6,16) into B4's west water, the shore at (7,11) that now accepts SURF
+  ("The current is much too fast!" is gone), the left channel to the platform, "Gyaoo!", and the catch:
+  Dugtrio SAND-ATTACK x2, Hypno POISON GAS, then an ULTRA BALL every turn — Articuno L50 on the 12th
+  ball, "transferred to BILL's PC". Recorded from `states/seafoam_seeds/seafoam_b3_main.state` with
+  `frame_interval=1`. The catch is a race against the poison tick (~9 HP a turn); the recipe that
+  loses is the one that also SCRATCHes first.
+
 ### Why beat 11 needed a fix first
 
 `badge_to_mtmoon` had never landed — six genome lanes × 12,000 turns all wedged on

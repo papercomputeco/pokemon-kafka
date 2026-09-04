@@ -1,0 +1,13 @@
+{
+  "outcome": "caught",
+  "throws": 12,
+  "caught": true,
+  "party": "[('Charizard', 100, 341), ('Dugtrio', 100, 95), ('Primeape', 99, 300), ('Pidgeot', 99, 347), ('Hypno', 99, 184), ('Gyarados', 20, 74)]",
+  "pos": "(162, 6, 2)",
+  "turns": 5102,
+  "params": {
+    "label": "17 \u00b7 Seafoam Islands \u2014 Articuno",
+    "rom": "/home/bdougie/code/pcc-labs/pokemon-kafka/rom/pokemon_red.gb"
+  },
+  "run_id": "20260904-222152-98dc"
+}
