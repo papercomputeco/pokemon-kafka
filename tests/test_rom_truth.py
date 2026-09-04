@@ -828,3 +828,19 @@ def test_machine_moves_keeps_searching_past_a_false_marker(rom):
     forged = bytearray(0x200) + bytearray(decoy) + bytearray(data)
     machines = rt.machine_moves(bytes(forged))
     assert machines["HM03"] == "SURF"  # skipped the decoy, found the table
+
+
+def test_a_battle_page_is_never_recorded_as_a_gate(tmp_path):
+    """Twenty-one Silph/Saffron 'doors' were the award page 'got 500 for winning!'."""
+    import rom_truth as rt
+
+    p = tmp_path / "gates.json"
+    merged = rt.merge_measured_gates(
+        {"10": {"13,25,left": "AAAAAAA got 500 for winning!", "4,7,left": "Excuse me! Wait up please"}}, path=p
+    )
+    assert merged == {"10": {"4,7,left": "Excuse me! Wait up please"}}
+    assert rt.is_battle_sentence("AAAAAAAAAA gained 438 EXP. Points!")
+    assert rt.is_battle_sentence("AAAAAAAAAA's attack missed!")
+    assert not rt.is_battle_sentence("This requires STRENGTH to move!")
+    # a survey made only of battle pages leaves no trace at all
+    assert rt.merge_measured_gates({"99": {"1,1,up": "AAAAAAA got 840 for winning!"}}, path=p) == merged

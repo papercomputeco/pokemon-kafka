@@ -149,12 +149,29 @@ def load_measured_gates(path: Path | None = None) -> dict:
     return json.loads(path.read_text())
 
 
+BATTLE_PAGE_WORDS = ("for winning", "gained", "exp. points", "attack missed", "fainted", "sent out", "got on ")
+
+
+def is_battle_sentence(text: str) -> bool:
+    """A sentence the battle engine prints, not a door: the award and EXP pages, a missed attack.
+
+    Measured 2026-09-04: twenty-one 'gates' across Saffron and five Silph floors were the award
+    page "got 500 for winning!" -- a step refused while that page owned the screen was recorded
+    as a shut door, and every planner since routed around a wall that was never there.
+    """
+    t = (text or "").lower()
+    return any(w in t for w in BATTLE_PAGE_WORDS)
+
+
 def merge_measured_gates(gates: dict, path: Path | None = None) -> dict:
-    """Fold a survey's gates into the shared file. Knowledge accumulates or it is not knowledge."""
+    """Fold a survey's gates into the shared file. Knowledge accumulates or it is not knowledge --
+    but a battle page is not knowledge about a door, and it is dropped here (see is_battle_sentence)."""
     path = path or MEASURED_GATES
     merged = load_measured_gates(path)
     for map_id, entries in gates.items():
-        merged.setdefault(str(map_id), {}).update(entries)
+        kept = {k: v for k, v in entries.items() if not is_battle_sentence(str(v))}
+        if kept:
+            merged.setdefault(str(map_id), {}).update(kept)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
     return merged
