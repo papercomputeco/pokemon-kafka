@@ -52,11 +52,26 @@ print("start", rig.pos(), "| bag stacks:", len(rig.bag()), flush=True)
 if rig.bag_full():
     print("bag full -> make_room:", rig.make_room(), "| stacks now", len(rig.bag()), flush=True)
 drain()
-# The Snorlax that left (26,10) still occupies its sprite slot, so walk() calls the road east
-# body-blocked. The cartridge lets us through: step past it by hand, then plan from there.
-while rig.pos()[1] < 27 and step("right"):
-    pass
-print("past the phantom body:", rig.pos(), flush=True)
+# On the branch that already used the flute, the Snorlax slot at (26,10) is a phantom the cartridge
+# lets us walk through. On a branch where it still sleeps, the step is refused and the game says
+# "A sleeping POKeMON blocks the way!": play the flute facing it, let settle() page the wake-up and
+# fight the battle it starts, then continue east.
+print("walk to (25,10):", rig.walk(27, {(25, 10)}, battle=rig.battle), rig.pos(), flush=True)
+for _ in range(4):
+    if rig.pos()[1] >= 27:
+        break
+    if not step("right") and (26, 10) in rig.bodies():
+        said = rig.textbox()
+        print("blocked at (26,10):", repr(said), flush=True)
+        flute = next((n for n, _ in rig.bag_named(full=True) if "FLUTE" in n.upper()), None)
+        if flute and rig.use_item(flute, face="right"):
+            rig.settle()
+            drain()
+            print("played the flute; now", rig.pos(), "bodies", sorted(rig.bodies())[:3], flush=True)
+        else:
+            print("no flute to play", flush=True)
+            break
+print("past (26,10):", rig.pos(), flush=True)
 print("walk to (34,10):", rig.walk(27, {(34, 10)}, battle=rig.battle), rig.pos(), flush=True)
 drain()
 rig.io.press("up", hold=4, release=8)
