@@ -286,6 +286,32 @@ def hop_blocker(rig, hop: dict | None) -> tuple[int, int] | None:
         return None
 
 
+def prior_observations(map_id: int, path: str | Path = "pokedex/memory/observations.md", limit: int = 8) -> list[str]:
+    """What the self-healing pipeline already recorded about THIS map, newest first.
+
+    pokemon-kafka advances an upstream that already ships a Pokedex and an observations
+    journal: ``observer.py`` and the Flink alerts-consumer both write structured signals here
+    (``IN_PLACE_WEDGE map=3 pos=(16,18) stuck_turns=5947``, ``DOOR_STALL``, ``POSITION_DEADLOCK``)
+    and ``discovery.py`` already reads the tail for its own prompts. The expedition path never
+    did — so every leg started blind to thousands of recorded alerts, and prior-run knowledge
+    reached a mission only if a human pasted it into the brief by hand.
+
+    Scoped to the map on purpose: a raw tail is mostly other maps' noise, and a seat handed noise
+    learns to skip the section. ``map=<id>`` is the pipeline's own convention in the alert text.
+    """
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return []
+    needle = f"map={map_id} "
+    hits = [
+        ln.strip()
+        for ln in text.splitlines()
+        if ln.startswith("- [") and (needle in ln or ln.rstrip().endswith(f"map={map_id}"))
+    ]
+    return hits[-limit:][::-1]
+
+
 def describe(
     rig,
     goal: int,
@@ -338,6 +364,9 @@ def describe(
         lines.append(f"TEXT ON SCREEN: {text!r}")
     for spot, said in (heard or {}).items():
         lines.append(f"HEARD from the body at {spot}: {said!r}")
+    for note in prior_observations(mp):
+        # What the pipeline already knows about this map, from every previous run.
+        lines.append(f"ALREADY OBSERVED HERE: {note}")
     for note in notes or []:
         lines.append(f"OBSERVED: {note}")
     return "\n".join(lines)

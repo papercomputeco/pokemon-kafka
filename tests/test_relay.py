@@ -438,7 +438,25 @@ def test_main_runs_segment_end_to_end_success(tmp_path, monkeypatch):
         return winner, results
 
     monkeypatch.setattr(relay, "run_segment", fake_run_segment)
-    rc = main([str(rom), "--run-dir", str(run_dir), "--segments", "route1_to_forest", "--seed-state", str(seed)])
+    # --memory-dir is REQUIRED here: without it main() falls through to DEFAULT_MEMORY_DIR and
+    # writes a real "[important] relay ... cleared by winner" line into the repo's own
+    # pokedex/memory/observations.md. Measured: 438 such lines had accumulated from test runs,
+    # every one citing a /tmp/pytest-of-*/ run dir that no longer exists. The agent loads that
+    # file at session start, so a green test suite was quietly seeding the pipeline's memory
+    # with its own fixtures.
+    rc = main(
+        [
+            str(rom),
+            "--run-dir",
+            str(run_dir),
+            "--segments",
+            "route1_to_forest",
+            "--seed-state",
+            str(seed),
+            "--memory-dir",
+            str(tmp_path / "memory"),
+        ]
+    )
     assert rc == 0
     assert (run_dir / "report.json").exists()
     report = json.loads((run_dir / "report.json").read_text())

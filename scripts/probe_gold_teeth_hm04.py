@@ -188,23 +188,19 @@ def engage_156(body: tuple[int, int]) -> dict:
         save()
         return rec
 
-    m = RIG.truth["maps"]["156"]
-    warps = {(w[0], w[1]) for w in m["warps"]}
-    bodies = {(s["x"], s["y"]) for s in m.get("sprites", ())}
     bx, by = body
-    cells: list[tuple[int, int]] = []
-    for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
-        cx, cy = bx + dx, by + dy
-        if (
-            0 <= cx < m["width"]
-            and 0 <= cy < m["height"]
-            and m["grid"][cy][cx] == "1"
-            and (cx, cy) not in warps
-            and (cx, cy) not in bodies
-        ):
-            cells.append((cx, cy))
+    # Measured this run: both staff alcoves are SEALED off the center room by the counter
+    # rows — pocket 0 = (1,2),(1,3),(1,4) and pocket 2 = (6,3),(6,4) share no open edge with
+    # the (3,4)-column room. Adjacent cells are unreachable, so the talk must come across
+    # the counter, the way a counter talk comes: same ROW as the body, facing it, press A.
+    if bx < 4:
+        stand = [(3, by), (4, by)]
+        face = "left"
+    else:
+        stand = [(4, by), (3, by)]
+        face = "right"
     tried: list = []
-    for cell in cells:
+    for cell in stand:
         res = RIG.walk(156, {cell}, cap=240)
         here = cur()
         if here[0] != 156:
@@ -218,13 +214,10 @@ def engage_156(body: tuple[int, int]) -> dict:
             if in_battle():
                 RIG.battle()
             continue
-        face = "right" if bx > cell[0] else "left" if bx < cell[0] else "down" if by > cell[1] else "up"
         for _ in range(3):  # a parked box is stale: close it before talking
             RIG.ctl.press("b")
             RIG.ctl.wait(30)
-        RIG.ctl.press(face)
-        RIG.ctl.wait(25)
-        pages = read_conversation()
+        pages = [p for p in RIG.talk(face).split(" | ") if p]
         text = " | ".join(pages)
         rec = {"body": list(body), "reached": True, "cell": list(cell), "face": face, "pages": pages, "heard": text}
         if text:
@@ -236,10 +229,10 @@ def engage_156(body: tuple[int, int]) -> dict:
             RIG.battle()
             RIG.settle()
         if WARDEN_RE.search(text):
-            say(f"  ** MARKER on {body}: re-reading the exchange to its end **")
-            # The handoff can continue while the box is still open; run it once more from
-            # the same body so the exchange that grants STRENGTH finishes naturally.
-            pages2 = read_conversation()
+            say(f"  ** MARKER on {body}: the handoff is mid-exchange; pressing it to its end **")
+            # Further A presses advance a waiting page (the grant can sit behind one);
+            # re-facing first keeps the step-A sequence intact.
+            pages2 = [p for p in RIG.talk(face).split(" | ") if p]
             text2 = " | ".join(p for p in pages2 if p not in pages)
             rec["followup"] = pages2
             if text2:
@@ -247,9 +240,12 @@ def engage_156(body: tuple[int, int]) -> dict:
             say(f"     FOLLOWS: {text2}" if text2 else "     (nothing new)")
             rows.append(rec)
             save()
+        for _ in range(3):
+            RIG.ctl.press("b")
+            RIG.ctl.wait(25)
         check_hm04(rec)
         return rec
-    rec = {"body": list(body), "reached": False, "tried": tried, "note": "no page, no adjacency reached"}
+    rec = {"body": list(body), "reached": False, "tried": tried, "note": "no page, no stand reached"}
     rec["evidence"] = RIG.screenshot(f"evidence_156_{bx}_{by}")
     say(f"     {rec['note']} {rec['evidence']}")
     rows.append(rec)

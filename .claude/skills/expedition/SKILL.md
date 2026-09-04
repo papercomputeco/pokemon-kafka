@@ -70,6 +70,15 @@ model think" but "what has the game said, and who here have we not asked".
    Ollama thinking models put the answer in `message.reasoning` when `content` is empty — read both.
 6. **Every run emits events** to `data/telemetry/game/<UTC-date>.jsonl` with a stable `run_id`.
    That sink is what the benchmarks mine; a run that doesn't emit is unminable.
+   **And run knowledge belongs in the upstream journal, not a parallel one.** This repo advances
+   `pcc-labs/pokemon`, which already ships a Pokédex and `pokedex/memory/observations.md` — the
+   file `observer.py` and the Flink alerts-consumer write to and the agent loads at session start.
+   `supervisor.describe()` now feeds each map's prior alerts to the seats as `ALREADY OBSERVED
+   HERE`. **Before inventing a new place to record what a run learned, use that one.** A day was
+   lost writing 51 `docs/learnings/*.md` files that only ever reached a future run if a human
+   pasted them into a mission by hand, while thousands of structured alerts — including the exact
+   `IN_PLACE_WEDGE` for the map legs kept dying on — sat unread. `docs/learnings/` is for
+   human-readable postmortems; the journal is the machine's memory.
 7. **Fix the engine, don't fork the scratchpad.** When `rig.drive()` or the road engine fails,
    the convergent move is to repair `scripts/` and merge it. A one-off scratchpad script solves
    this leg and teaches the repo nothing; six of them in a day is how a session drifts.

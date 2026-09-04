@@ -1919,3 +1919,73 @@ def test_recon_does_not_resweep_a_map_it_has_already_visited():
     runner = LegRunner(rig, goal=2, consult=_consult("RETRY_SAME"), log=lambda *_: None)
     runner.run()
     assert rig.bag().count(64) == 1
+
+
+# ------------------------------------------------- the upstream observations journal
+
+
+def test_prior_observations_scopes_to_the_map(tmp_path):
+    """pokemon-kafka advances an upstream that already ships this journal; the expedition path
+    never read it, so every leg started blind to thousands of recorded alerts."""
+    p = tmp_path / "observations.md"
+    p.write_text(
+        "## 2026-09-01\n"
+        "- [important] Flink alert [IN_PLACE_WEDGE]: map=3 pos=(16,18) stuck_turns=5947 (session: flink)\n"
+        "- [important] Flink alert [DOOR_STALL]: map=99 pos=(1,1) action=a (session: flink)\n"
+        "- [important] Flink alert [POSITION_DEADLOCK]: map=3 pos=(19,18) (session: flink)\n"
+    )
+    got = supervisor.prior_observations(3, path=p)
+    assert len(got) == 2
+    assert all("map=3" in ln for ln in got)
+    assert got[0].endswith("(session: flink)")  # newest first
+    assert "POSITION_DEADLOCK" in got[0]
+
+
+def test_prior_observations_is_newest_first_and_bounded(tmp_path):
+    p = tmp_path / "observations.md"
+    p.write_text("".join(f"- [important] alert n={i}: map=5 pos=(1,1)\n" for i in range(20)))
+    got = supervisor.prior_observations(5, path=p, limit=3)
+    assert len(got) == 3
+    assert "n=19" in got[0] and "n=17" in got[2]
+
+
+def test_prior_observations_survives_a_missing_journal(tmp_path):
+    assert supervisor.prior_observations(3, path=tmp_path / "nope.md") == []
+
+
+def test_the_facts_carry_what_the_pipeline_already_knows(tmp_path):
+    """A seat should never re-derive a wedge the pipeline diagnosed runs ago."""
+    p = tmp_path / "observations.md"
+    p.write_text("- [important] Flink alert [IN_PLACE_WEDGE]: map=1 pos=(16,18) stuck_turns=5947\n")
+    rig = FakeRig(hops=[None])
+    import supervisor as sup
+
+    real = sup.prior_observations
+    sup.prior_observations = lambda mp, **kw: real(mp, path=p)
+    try:
+        facts = sup.describe(rig, 2, None, "no-path")
+    finally:
+        sup.prior_observations = real
+    assert "ALREADY OBSERVED HERE:" in facts
+    assert "IN_PLACE_WEDGE" in facts
+
+
+def test_the_expedition_stays_wired_to_the_upstream_journal():
+    """A guard against silently diverging from the pipeline this repo advances.
+
+    pokemon-kafka builds on pcc-labs/pokemon, which already ships pokedex/memory/observations.md
+    — written by observer.py and the Flink alerts-consumer, read by discovery.py. For a full day
+    the expedition path ignored it and grew a parallel memory (51 docs/learnings/*.md) that only
+    reached a future run when a human pasted it into a mission by hand, while thousands of
+    structured alerts went unread. If describe() ever stops surfacing the journal, that divergence
+    is starting again — and this test is how it gets caught in CI instead of a day later.
+    """
+    import inspect
+
+    import supervisor as sup
+
+    src = inspect.getsource(sup.describe)
+    assert "prior_observations" in src, "describe() no longer reads the upstream observations journal"
+    assert "ALREADY OBSERVED HERE" in src
+    # and the reader must still point at the upstream path, not a fork of it
+    assert "pokedex/memory/observations.md" in inspect.getsource(sup.prior_observations)
