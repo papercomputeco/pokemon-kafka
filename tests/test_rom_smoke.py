@@ -112,3 +112,18 @@ def test_item_balls_name_what_they_hold():
     assert balls(202)[(25, 2)] == "SILPH SCOPE"
     assert balls(202)[(10, 2)] == "LIFT KEY"
     assert balls(210)[(21, 16)] == "CARD KEY"
+
+
+def test_hms_are_never_item_balls_always_a_person():
+    """A rule the human supplied from real play (not this session's recall): HM items are never
+    dropped as a field item ball, always handed over by an NPC. Verified across all five HMs on
+    this cartridge, not assumed — this project has already lost time to exactly this shape of
+    question (the BIKE VOUCHER, HM04/STRENGTH) checked one HM at a time, ad hoc, per mission.
+    """
+    import rom_truth as rt
+
+    truth = rt.load_truth()
+    hm_ids = {k for k, v in truth["items"].items() if v.strip().startswith("HM")}
+    assert len(hm_ids) == 5  # HM01..HM05 — if this drops, the item table decode broke
+    ball_ids = {str(s["item"]) for m in truth["maps"].values() for s in (m.get("sprites") or []) if s["kind"] == "item"}
+    assert not (hm_ids & ball_ids), "an HM turned up as a field item ball — a person always gives it instead"
