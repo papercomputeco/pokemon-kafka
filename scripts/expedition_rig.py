@@ -88,6 +88,36 @@ def emit_event(run_id: str, event: str, fields: dict | None = None, *, root: Pat
     return record
 
 
+def engaged_near(map_id: int, sprite: tuple[int, int], radius: int = 1, root: Path | None = None) -> list[str]:
+    """Every distinct sentence recorded on ``map_id`` within ``radius`` tiles of ``sprite``.
+
+    Written after nearly reporting a false "never engaged" today: a discovery event's (x, y) is
+    where the PLAYER stood when it was said, not the sprite's own tile — you talk to a body from
+    beside it, never from on top of it. Matching a sprite's coordinates exactly against the sink
+    can never hit, and "no match" then reads as "never talked to" when the truth may be the
+    opposite. This is the fix, not just the note: search a radius, not a point.
+    """
+    bx, by = sprite
+    found: list[str] = []
+    seen: set[str] = set()
+    for path in sorted((root or TELEMETRY_DIR).glob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("map") != map_id:
+                continue
+            x, y = d.get("x"), d.get("y")
+            if x is None or y is None or abs(x - bx) > radius or abs(y - by) > radius:
+                continue
+            text = (d.get("said") or d.get("text") or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                found.append(text)
+    return found
+
+
 class Rig:
     """A loaded cartridge plus the road engine, recording and emitting as it plays."""
 

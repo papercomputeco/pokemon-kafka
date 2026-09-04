@@ -1477,3 +1477,57 @@ def test_an_empty_tag_still_produces_a_usable_filename():
     r.run_id = "runZ"
     r.telemetry_root = None
     assert r.screenshot_path("!!!").name == "screen.png"
+
+
+# ------------------------------------------------------------------ proximity-based engagement
+
+
+def _write_sink(tmp_path, name, rows):
+    p = tmp_path / f"{name}.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return p
+
+
+def test_engaged_near_matches_the_players_standing_tile_not_the_sprites(tmp_path):
+    """The bug pinned: a discovery event's (x, y) is where the PLAYER stood to talk, one tile
+    off the sprite it engaged. An exact-coordinate match against the sprite's own tile can
+    never hit, which is how a real conversation reads as 'never talked to'."""
+    _write_sink(
+        tmp_path,
+        "2026-09-03",
+        [
+            {"map": 91, "x": 0, "y": 6, "said": "There are evil people who will use POKeMON for..."},
+        ],
+    )
+    # the sprite itself sits at (0,5); the player stood at (0,6) to talk to it
+    assert rig.engaged_near(91, (0, 5), root=tmp_path) == ["There are evil people who will use POKeMON for..."]
+    assert rig.engaged_near(91, (0, 5), radius=0, root=tmp_path) == []  # exact match: the old, broken way
+
+
+def test_engaged_near_reads_every_dated_file_and_dedups(tmp_path):
+    _write_sink(tmp_path, "2026-09-01", [{"map": 5, "x": 4, "y": 14, "text": "Hi there!"}])
+    _write_sink(
+        tmp_path,
+        "2026-09-03",
+        [
+            {"map": 5, "x": 4, "y": 14, "text": "Hi there!"},
+            {"map": 5, "x": 5, "y": 14, "said": "May I help you?"},
+        ],
+    )
+    assert rig.engaged_near(5, (4, 14), root=tmp_path) == ["Hi there!", "May I help you?"]
+
+
+def test_engaged_near_ignores_other_maps_and_blank_lines(tmp_path):
+    p = tmp_path / "2026-09-03.jsonl"
+    p.write_text('{"map": 30, "x": 1, "y": 1, "said": "wrong map"}\n\n{"map": 5, "x": 9, "y": 9}\n')
+    assert rig.engaged_near(5, (9, 9), root=tmp_path) == []
+
+
+def test_engaged_near_skips_unparseable_lines(tmp_path):
+    p = tmp_path / "2026-09-03.jsonl"
+    p.write_text("not json at all\n" + json.dumps({"map": 5, "x": 9, "y": 9, "text": "ok"}) + "\n")
+    assert rig.engaged_near(5, (9, 9), root=tmp_path) == ["ok"]
+
+
+def test_engaged_near_reports_nothing_for_a_map_with_no_sink(tmp_path):
+    assert rig.engaged_near(999, (0, 0), root=tmp_path) == []
