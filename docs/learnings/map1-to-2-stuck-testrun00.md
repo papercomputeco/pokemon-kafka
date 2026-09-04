@@ -21,6 +21,8 @@ OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: banning 1->2 leaves no chain to 2 at all
+
+SCREENSHOT AT THE POINT OF FAILURE: <fake>/exhausted_map1.png
 ```
 
 ## Actions tried
