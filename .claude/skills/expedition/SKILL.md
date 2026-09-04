@@ -73,7 +73,12 @@ model think" but "what has the game said, and who here have we not asked".
 7. **Fix the engine, don't fork the scratchpad.** When `rig.drive()` or the road engine fails,
    the convergent move is to repair `scripts/` and merge it. A one-off scratchpad script solves
    this leg and teaches the repo nothing; six of them in a day is how a session drifts.
-   Scratchpad needs a stated reason, not a default.
+   Scratchpad needs a stated reason, not a default. **If the leg genuinely needs a one-off
+   emulator driver committed into `scripts/` (measurement evidence, a live probe), name it
+   `scripts/probe_<name>.py`** — `pyproject.toml` already omits that glob from the coverage gate
+   for exactly this. Four legs have now committed an untested driver under an ordinary name and
+   broken main's 100% requirement for whoever pushes next; each was a separate cleanup that
+   should never have been needed.
 8. **Exhaustion is written down.** When the ladder ends without a solution, write
    `docs/learnings/<leg>-stuck-<run_id>.md` with the measured facts and every action tried, and
    emit `supervisor.exhausted`. Then stop.
