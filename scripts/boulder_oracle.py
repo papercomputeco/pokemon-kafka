@@ -55,6 +55,20 @@ def candidate_pushes(truth, pairs, map_id: int, player, boulders) -> list[tuple[
     return out
 
 
+def parse_surf_test(spec: str | None) -> tuple[tuple[int, int], str] | None:
+    """``"15,7,down"`` -> ((15, 7), "down"): the shore cell to stand on and the way to face.
+
+    The objective on a current floor is not 'a boulder fell' but 'the water carries me somewhere
+    else now': after every configuration the driver surfs from this cell and records the landing.
+    """
+    if not spec:
+        return None
+    x, y, face = spec.split(",")
+    if face.strip() not in DIRS:
+        raise ValueError(f"unknown direction {face!r}")
+    return (int(x), int(y)), face.strip()
+
+
 def classify(before_map: int, after_map: int, before_boulders, after_boulders) -> str:
     """What a push did, from the map and the sprite table alone."""
     if after_map != before_map:
@@ -88,6 +102,10 @@ class Catalog:
         """Banked save states per configuration reached, so a later run resumes from them."""
         return self.data.setdefault(str(map_id), {}).setdefault("states", {})
 
+    def currents(self, map_id: int) -> dict[str, dict]:
+        """Where the water carried the surfer, per configuration (the surf-test results)."""
+        return self.data.setdefault(str(map_id), {}).setdefault("current", {})
+
     def add(self, map_id: int, record: dict) -> None:
         self.records(map_id).append(record)
         self.save()
@@ -103,6 +121,11 @@ class Catalog:
         for r in recs:
             by[r["outcome"]] = by.get(r["outcome"], 0) + 1
         lines = [f"map {map_id}: {len(recs)} pushes over {len(configs)} configurations; outcomes {by}"]
+        landings = {}
+        for key, c in self.currents(map_id).items():
+            landings.setdefault(str(c.get("landing")), []).append(key)
+        for land, keys in landings.items():
+            lines.append(f"  surf test lands at {land} for {len(keys)} configuration(s)")
         for r in recs:
             if r["outcome"] in ("fell", "player-fell"):
                 lines.append(
@@ -111,7 +134,9 @@ class Catalog:
         return "\n".join(lines)
 
 
-def run(state: str, map_id: int, max_pushes: int, log=print) -> int:  # pragma: no cover - drives the emulator
+def run(
+    state: str, map_id: int, max_pushes: int, log=print, surf_test=None
+) -> int:  # pragma: no cover - drives the emulator
     import io as _io
 
     import quartermaster as qm
@@ -162,9 +187,38 @@ def run(state: str, map_id: int, max_pushes: int, log=print) -> int:  # pragma: 
             frontier.append((key, Path(path).read_bytes()))
     seen = {k for k, _ in frontier}
     pushes = 0
-    while frontier and pushes < max_pushes:
+    while frontier:
         key, blob = frontier.pop(0)
         load(blob)
+        if surf_test and key not in cat.currents(map_id):
+            stand, face = surf_test
+            drain()
+            rig.walk(map_id, {stand}, battle=rig.battle)
+            drain()
+            if rig.pos()[1:] == tuple(stand):
+                rig.io.press(face, hold=4, release=8)
+                rig.ctl.wait(20)
+                armed = rig._arm_surf()
+                for _ in range(20):
+                    rig.ctl.wait(8)
+                    if rig.pos()[0] != map_id:
+                        break
+                drain()
+                landing = list(rig.pos())
+                cat.currents(map_id)[key] = {
+                    "stand": list(stand),
+                    "face": face,
+                    "armed": armed,
+                    "landing": landing,
+                    "run_id": rig.run_id,
+                }
+                cat.save()
+                log(f"  surf test from {stand} {face}: armed={armed} landing={landing}")
+            else:
+                log(f"  surf test: could not stand at {stand} (at {rig.pos()[1:]})")
+            load(blob)
+        if pushes >= max_pushes:
+            continue  # still surf-test every known configuration; just no new pushes
         boulders = rig.bodies()
         cands = cat.untried(map_id, key, candidate_pushes(truth, pairs, map_id, rig.pos()[1:], boulders))
         log(f"config {key}: {len(cands)} untried pushes")
@@ -241,13 +295,16 @@ def main(argv=None) -> int:
     r.add_argument("--state", required=True)
     r.add_argument("--map", type=int, required=True)
     r.add_argument("--max-pushes", type=int, default=40)
+    r.add_argument(
+        "--surf-test", default=None, help="shore cell and facing to surf from after every configuration, e.g. 15,7,down"
+    )
     s = sub.add_parser("show")
     s.add_argument("--map", type=int, required=True)
     a = ap.parse_args(argv)
     if a.cmd == "show":
         print(Catalog().summary(a.map))
         return 0
-    return run(a.state, a.map, a.max_pushes)  # pragma: no cover
+    return run(a.state, a.map, a.max_pushes, surf_test=parse_surf_test(a.surf_test))  # pragma: no cover
 
 
 if __name__ == "__main__":  # pragma: no cover

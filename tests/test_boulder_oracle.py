@@ -66,3 +66,22 @@ def test_show_prints_the_summary(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(bo, "CATALOG_PATH", tmp_path / "cat.json")
     assert bo.main(["show", "--map", "161"]) == 0
     assert "map 161: 0 pushes" in capsys.readouterr().out
+
+
+def test_surf_test_spec_is_parsed_and_validated():
+    import pytest
+
+    assert bo.parse_surf_test("15,7,down") == ((15, 7), "down")
+    assert bo.parse_surf_test(None) is None
+    with pytest.raises(ValueError):
+        bo.parse_surf_test("1,2,sideways")
+
+
+def test_catalog_summarises_where_the_water_carried_the_surfer(tmp_path):
+    cat = bo.Catalog(tmp_path / "cat.json")
+    cat.currents(161)["a"] = {"landing": [162, 20, 15]}
+    cat.currents(161)["b"] = {"landing": [162, 20, 15]}
+    cat.currents(161)["c"] = {"landing": [161, 25, 14]}
+    cat.save()
+    s = bo.Catalog(tmp_path / "cat.json").summary(161)
+    assert "lands at [162, 20, 15] for 2 configuration(s)" in s and "lands at [161, 25, 14] for 1" in s
