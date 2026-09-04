@@ -65,3 +65,10 @@ MEASURED LATER (after pressing 215's switch):
 - 214 from the (6,1) landing with (9,4) shut: 324 cells; warps touching it: [[5, 10, 165, 4], [7, 10, 215, 0], [6, 1, 215, 1]]. The step (8,4)->(9,4) is REFUSED after 215's switch: 215's switch shut (9,4), which was open before, so the (6,1) pocket and 215's (10,6) region form a closed loop until 215's switch is pressed again.
 - Untested: whether 215's switch group also includes 165's stairs door (20,17)/(21,17). It cannot be tested from inside the loop; the order of presses across floors is the puzzle.
 wrote 1
+
+CORRECTION (measured after the above): 214's door shut by 215's switch is TWO tall — (9,4) AND
+(9,5). With both shut the (6,1) pocket has no path to the (5,10) stair; you are in a closed
+214/215 loop until 215's switch is pressed again. Bank `mansion_215_pressed.state` is inside that
+loop (215 (10,6), switch pressed once). The press ORDER across the three reachable switches is
+the puzzle; catalog it as (165 presses, 214 presses, 215 presses) → door states, and remember
+that a switch pressed an even number of times is back where it started.
