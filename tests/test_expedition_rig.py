@@ -1707,3 +1707,27 @@ def test_a_booster_goes_to_the_lowest_level_standing_member():
     assert rig.booster_target([("Charizard", 100, 341), ("Gyarados", 20, 73), ("Hypno", 99, 341)]) == 1
     assert rig.booster_target([("Charizard", 100, 341), ("Gyarados", 20, 0)]) == 0  # fainted members are skipped
     assert rig.booster_target([]) is None
+
+
+def test_make_room_hands_the_booster_to_the_lowest_level_member(tmp_path):
+    r = _bag_rig([(74, 1), (40, 1)], items={"74": "LIFT KEY", "40": "HP UP"})
+    r.telemetry_root = tmp_path
+    seated, used = [], []
+
+    class Ctl:
+        def press(self, *a, **kw):
+            pass
+
+        def wait(self, *a, **kw):
+            pass
+
+    def use_item(name):
+        used.append(name)
+        r.mem[rig.ADDR_BAG_COUNT] -= 1
+        return True
+
+    r.use_item, r.ctl, r.emit = use_item, Ctl(), (lambda *a, **kw: None)
+    r.party = lambda: [("Charizard", 100, 341), ("Gyarados", 20, 73)]
+    r.cursor_to = lambda i: seated.append(i) or True
+    assert r.make_room() is True
+    assert used == ["HP UP"] and seated == [1]
