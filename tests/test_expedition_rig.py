@@ -1690,3 +1690,14 @@ def test_the_town_map_row_is_matched_without_the_to_prefix():
     assert rig.fly_row_names("ToFUCHSIA CITY", "FUCHSIA CITY")
     assert not rig.fly_row_names("ToSAFFRON CITY", "FUCHSIA CITY")
     assert not rig.fly_row_names("", "PALLET TOWN")
+
+
+def test_make_room_reaches_the_tm_fallback_under_its_full_name(tmp_path):
+    """room_plan sees 'TM28 DIG'; the id lookup must use the same name or TMs are never tossed."""
+    r = _bag_rig([(74, 1), (40, 1), (228, 1)], items={"74": "LIFT KEY", "40": "HP UP", "228": "TM28"})
+    r.truth["machines"] = {"TM28": "DIG"}
+    r.telemetry_root = tmp_path
+    tossed = []
+    r.toss_stack = lambda item: tossed.append(item) or True
+    assert r.make_room() is True  # no use_item on this rig: the use entries are skipped, the TM is tossed
+    assert tossed == [228]

@@ -426,9 +426,12 @@ class Rig:
         the game refuses (a key item), which is the backstop against lore about what is safe.
         """
         before = len(self.bag())
-        by_name = {self.item_name(i): i for i, _q in self.bag()}
+        # room_plan sees the FULL names ("TM28 DIG"); the id lookup must use the same names, or every
+        # TM/HM entry is skipped -- measured on the Safari leg: HP UP, CALCIUM, then nothing, twenty talks.
+        named = self.bag_named(full=True)
+        by_name = {name: item for (name, _q), (item, _q2) in zip(named, self.bag())}
         can_use = hasattr(self, "use_item") and hasattr(self, "ctl")
-        for action, name in room_plan(self.bag_named(full=True)):
+        for action, name in room_plan(named):
             if name not in by_name or (action == "use" and not can_use):
                 continue
             print(f"  bag full: {action} {name} to free a slot", flush=True)
