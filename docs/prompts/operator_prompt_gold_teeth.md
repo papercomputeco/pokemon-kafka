@@ -14,8 +14,9 @@ Both pieces are now located:
 
 1. **GOLD TEETH is an item ball at map 219, (19,7)** — inside the Safari Zone, ground we've
    walked past before without picking it up.
-2. **The Warden is one of two staff NPCs in map 156** — the Safari Zone's own gate/reception
-   building (entered from Fuchsia's map 156 warps toward 220). Neither has ever been talked to.
+2. **The Warden is the body at (2,3) in map 155** — the Fuchsia house behind the door at map 7
+   (27,27). Measured 2026-09-04 (`docs/learnings/gold-teeth-04dabd83e329.md`); map 156's two
+   staff only say the Safari intro lines.
 
 ## The job
 

@@ -72,7 +72,14 @@ def _step(io, direction: str) -> None:
 
 
 def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, int]]:
-    """Every cell reachable from ``start`` on this map, treating ``blocked`` cells as solid."""
+    """Every cell reachable from ``start`` on this map, treating ``blocked`` cells as solid.
+
+    One-way LEDGE hops count, the way ``rom_truth.path_on_map`` already counts them: a hop
+    lands two cells out over a tile the grid calls solid. Measured on Route 19 (map 30): the
+    beach a leg arrives on from Fuchsia is a six-cell strip whose only way down to the plaza
+    and the sea is three ledge rows, and a flood fill that cannot hop them reported the shore
+    as unreachable while the planner walked it in nine presses.
+    """
     from collections import deque
 
     import rom_truth as rt
@@ -80,6 +87,12 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
     m = truth["maps"][str(map_id)]
     w, h = m["width"], m["height"]
     blocked = set(blocked)
+    tiles = m.get("tiles")
+    ledges = rt.loaded_ledges(truth) if m.get("tileset") == 0 and tiles else set()
+
+    def tile(tx, ty):
+        return int(tiles[ty][2 * tx : 2 * tx + 2], 16)
+
     seen = {tuple(start)}
     queue = deque([tuple(start)])
     while queue:
@@ -91,6 +104,15 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
                 continue
             seen.add((nx, ny))
             queue.append((nx, ny))
+        if not ledges:
+            continue
+        for d, (dx, dy) in rt.LEDGE_DELTAS.items():
+            mx, my, lx, ly = x + dx, y + dy, x + 2 * dx, y + 2 * dy
+            if not (0 <= lx < w and 0 <= ly < h) or (lx, ly) in seen or (lx, ly) in blocked or (mx, my) in blocked:
+                continue
+            if (d, tile(x, y), tile(mx, my)) in ledges and m["grid"][ly][lx] == "1":
+                seen.add((lx, ly))
+                queue.append((lx, ly))
     return seen
 
 
@@ -534,15 +556,19 @@ def traverse_interior(io, truth, pairs, interior: int, *, battle=_default_battle
     if not exclude_entry and sides[entry]:
         order.append(entry)
     for side in order:
-        r = walk(io, truth, pairs, interior, set(sides[side]), cap=80, battle=battle)
-        if r == "map-change":
-            io.wait(60)
-            return True
-        if r is True:
-            _step(io, _OUTWARD[side])
-            io.wait(60)
-            if read_pos(io)[0] != interior:
+        # Door by door, not the side as one target set: a gate can carry two corridors on one
+        # side (Route 16's 186 has west doors on rows 2-3 and 8-9), and a walk aimed at the set
+        # settles for whichever is nearest - the one that lands back where the leg already was.
+        for door in sides[side]:
+            r = walk(io, truth, pairs, interior, {door}, cap=80, battle=battle)
+            if r == "map-change":
+                io.wait(60)
                 return True
+            if r is True:
+                _step(io, _OUTWARD[side])
+                io.wait(60)
+                if read_pos(io)[0] != interior:
+                    return True
     return "interior-stuck"
 
 
@@ -647,6 +673,53 @@ def _water_reach(m, sx: int, sy: int, blocked: set) -> dict:
                 prev[(nx, ny)] = (x, y)
                 queue.append((nx, ny))
     return prev
+
+
+def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tuple[int, int], str] | None:
+    """Where to stand, and which way to face, to arm SURF for the ``cur`` -> ``nxt`` crossing.
+
+    Measured 2026-09-04 on Route 19 (map 30): the leg arrived from Fuchsia at (9,0) on the land
+    strip, stepped west along it until the fence refused it, and armed SURF facing that fence.
+    The game answered "There's no place to get off!" three times and the ladder wrote the
+    crossing off - while the water the crossing needs began thirty rows south. SURF animates
+    the player onto the tile they face, so the arm belongs on a land cell that touches water
+    whose component actually reaches the far edge. This finds the nearest such cell by walk,
+    or None when we already stand beside such water (nothing to do) or the map has no tile
+    model to ask (the fakes in tests, where the io's refusals are the authority).
+    """
+    m = truth["maps"][str(cur)]
+    if not m.get("tiles"):
+        return None
+    _cells, d = edge_cells(truth, cur, nxt)
+    w, h = m["width"], m["height"]
+
+    def far_edge(c):
+        return {"left": c[0] == 0, "right": c[0] == w - 1, "up": c[1] == 0, "down": c[1] == h - 1}[d]
+
+    good: set = set()  # water cells in a component that touches the far edge
+    seen: set = set()
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in seen or not _water_model(m, x, y):
+                continue
+            comp = _water_reach(m, x, y, set())
+            seen |= set(comp)
+            if any(far_edge(c) for c in comp):
+                good |= set(comp)
+    if not good:
+        return None
+    faces = ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left"))
+    sx, sy = start
+    if any((sx + dx, sy + dy) in good for dx, dy, _f in faces):
+        return None  # already on the shore
+    best = None
+    for x, y in walkable(truth, pairs, cur, (sx, sy), bodies):
+        for dx, dy, face in faces:
+            if (x + dx, y + dy) in good:
+                dist = abs(x - sx) + abs(y - sy)
+                if best is None or dist < best[0]:
+                    best = (dist, (x, y), face)
+    return (best[1], best[2]) if best else None
 
 
 def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | None:
@@ -774,6 +847,21 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
     _, d = edge_cells(truth, cur, nxt)
     left = SURF_MAX_STEPS
     armed = False
+    stand = shore_stand(truth, pairs, cur, nxt, read_pos(io)[1:])
+    if stand is not None:
+        # Not beside the water this crossing needs: go to the nearest shore cell that is, face
+        # the water and arm there, before any straight-line step can carry us along the land.
+        cell, face = stand
+        walk(io, truth, pairs, cur, {cell}, battle=battle)
+        io.press(face, hold=8, release=8)
+        io.wait(30)
+        armed = arm_surf()
+        for _ in range(3):
+            io.press("a")
+            io.wait(40)
+        if not armed:
+            r = _water_cross(io, truth, cur, nxt, d, battle)
+            return "surfmoved-failed" if r is None else r
     while left > 0:
         left -= 1
         if io.read(ADDR_IN_BATTLE) and battle:

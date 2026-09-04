@@ -8,6 +8,7 @@ badge check watches the byte change rather than a remembered bit.
 """
 
 import json
+from collections import Counter
 
 import pytest
 import rom_truth as rt
@@ -1989,3 +1990,320 @@ def test_the_expedition_stays_wired_to_the_upstream_journal():
     assert "ALREADY OBSERVED HERE" in src
     # and the reader must still point at the upstream path, not a fork of it
     assert "pokedex/memory/observations.md" in inspect.getsource(sup.prior_observations)
+
+
+# --------------------------------------------------------------------------- hunting a handed-over item
+
+
+def test_hunt_item_ends_the_leg_when_a_body_hands_it_over():
+    """The Warden shape: the leg is judged on the bag holding the item, not on a badge or a ball."""
+    rig = FakeRig(start=(2, 3, 3), bodies={(4, 3)})
+    original_talk = rig.talk
+
+    def talk(face):
+        rig._bag.append((48, 1))  # the body hands over the CARD KEY
+        return original_talk(face)
+
+    rig.talk = talk
+    result = LegRunner(rig, goal=2, hunt="CARD KEY", consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["ok"] and result["outcome"] == "item-found"
+
+
+def test_hunt_item_that_nobody_hands_over_rules_the_door_out():
+    rig = FakeRig(start=(2, 3, 3), bodies={(4, 3)})
+    result = LegRunner(rig, goal=2, hunt="CARD KEY", consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["outcome"] == "engaged-no-item" and not result["ok"]
+    assert ("talk", "right") in rig.calls  # the body was met before the door was ruled out
+
+
+def test_hunt_item_already_in_the_bag_is_found_without_talking():
+    rig = FakeRig(start=(2, 3, 3), bodies={(4, 3)})
+    rig._bag.append((48, 1))
+    result = LegRunner(rig, goal=2, hunt="CARD KEY", consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert result["outcome"] == "item-found" and not any(c[0] == "talk" for c in rig.calls)
+
+
+# --------------------------------------------------------------------------- a sleeping blocker
+
+
+class SleeperRig(BlockedRig):
+    """Route 16 in miniature: the body says it is asleep; talking never moves it, the flute does."""
+
+    def __init__(self, flute=True, plays=True, **kw):
+        super().__init__(**kw)
+        if flute:
+            self._bag.append((49, 1))
+        self.plays = plays
+
+    def item_name(self, item_id):
+        return {49: "POKe FLUTE"}.get(item_id, f"#{item_id}")
+
+    def talk(self, face):
+        self.calls.append(("talk", face))
+        return "A sleeping POKéMON blocks the way!"
+
+    def use_item(self, name, face=None):
+        self.calls.append(("use_item", name, face))
+        if not self.plays:
+            return False
+        self._bodies.discard(self.blocker)  # woken, fought, gone
+        return True
+
+
+def test_a_sleeping_blocker_is_woken_with_the_flute_in_the_bag(tmp_path):
+    rig = SleeperRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert any(c[:2] == ("use_item", "POKe FLUTE") for c in rig.calls)
+    assert any(e["event"] == "supervisor.sleeper_woken" for e in rig.events)
+
+
+def test_a_sleeping_blocker_without_a_flute_is_reported_not_retried(tmp_path):
+    rig = SleeperRig(flute=False)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert not any(c[0] == "use_item" for c in rig.calls)
+    assert any("no flute" in n for n in runner.notes)
+
+
+def test_a_flute_that_will_not_play_is_reported(tmp_path):
+    rig = SleeperRig(plays=False)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("could not play" in n for n in runner.notes)
+
+
+# --------------------------------------------------------------------------- a warp hop behind a gate
+
+
+def _warp_truth():
+    """Map 1 holds the door to map 2 at (6,6); nothing else leads there."""
+    truth = _truth()
+    truth["maps"]["1"]["warps"] = [[6, 6, 2, 0]]
+    truth["maps"]["1"]["connections"] = {}
+    truth["maps"]["2"] = {**truth["maps"]["2"], "connections": {}, "warps": [[0, 0, 1, 0]]}
+    return truth
+
+
+class GatedWarpRig(FakeRig):
+    """The door is no-path until the gate building has been passed; then the warp lands."""
+
+    def __init__(self, **kw):
+        kw.setdefault("truth", _warp_truth())
+        super().__init__(**kw)
+        self.passed = False
+
+    def warp(self, mp, x, y, **kw):
+        self.calls.append(("warp", (x, y)))
+        if not self.passed:
+            return "no-path"
+        self._pos = (2, 1, 1)
+        return True
+
+    def gate(self, cur, cells, **kw):
+        self.calls.append(("gate", cur, sorted(cells)))
+        self.passed = True
+        return True
+
+
+def test_a_warp_hop_severed_by_its_own_gate_building_goes_through_the_gate(tmp_path):
+    rig = GatedWarpRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert ("gate", 1, [(6, 6)]) in rig.calls  # the door tile is the goal the gate pass validates
+    assert (1, 2) in runner.gated
+
+
+# --------------------------------------------------------------------------- a cuttable growth
+
+
+def _bush_truth():
+    """Route 16 in miniature: the road on row 0, a tree row with one 0x3D bush at (2,1), the
+    strip with the door on row 2. The grid calls the whole tree row solid."""
+    truth = _truth()
+    m = truth["maps"]["1"]
+    m.update(width=5, height=3, grid=["11111", "00000", "11111"], warps=[[4, 2, 2, 0]], connections={})
+    m["tiles"] = ["0303030303", "0a0a" + "3d" + "0a0a", "0303030303"]  # 0x0a: plain rock, not cuttable
+    truth["maps"]["2"] = {**truth["maps"]["2"], "connections": {}, "warps": [[0, 0, 1, 0]]}
+    return truth
+
+
+class BushRig(FakeRig):
+    def __init__(self, knows_cut=True, **kw):
+        kw.setdefault("truth", _bush_truth())
+        kw.setdefault("start", (1, 0, 0))
+        super().__init__(**kw)
+        self.knows_cut = knows_cut
+
+    def knows_move(self, name, species=None):
+        return 0 if (name == "CUT" and self.knows_cut) else None
+
+    def _open(self):
+        return self.truth["maps"]["1"]["grid"][1][2] == "1"
+
+    def approach(self, cells):
+        # The strip beyond the bush is out of reach until the bush is gone; the fake's default
+        # approach teleports anywhere, which would let the leg "arrive" without cutting.
+        self.calls.append(("approach", sorted(cells)))
+        cells = {c for c in cells if c[1] == 0 or self._open()}
+        if not cells:
+            return False
+        self._pos = (1, *sorted(cells)[0])
+        return True
+
+    def warp(self, mp, x, y, **kw):
+        self.calls.append(("warp", (x, y)))
+        if not self._open():
+            return "no-path"
+        self._pos = (2, 1, 1)
+        return True
+
+    def cut(self, face):
+        self.calls.append(("cut", face))
+        rows = self.truth["maps"]["1"]["grid"]
+        rows[1] = "00100"
+        return True
+
+
+def test_a_cuttable_growth_sealing_a_hop_is_cut_from_the_nearest_cell(tmp_path):
+    rig = BushRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert ("cut", "down") in rig.calls and ("approach", [(2, 0)]) in rig.calls
+    assert any(e["event"] == "supervisor.growth_cut" for e in rig.events)
+
+
+def test_no_cut_is_attempted_without_the_move_or_without_a_growth(tmp_path):
+    rig = BushRig(knows_cut=False)
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).run()
+    assert not any(c[0] == "cut" for c in rig.calls)
+    plain = BushRig()
+    plain.truth["maps"]["1"]["tiles"][1] = "0a0a0a0a0a"  # rock only: nothing the flow opens
+    LegRunner(plain, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).run()
+    assert not any(c[0] == "cut" for c in plain.calls)
+
+
+def test_a_cut_that_does_not_open_is_reported(tmp_path):
+    rig = BushRig()
+    rig.cut = lambda face: rig.calls.append(("cut", face)) or False
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("did not open" in n for n in runner.notes)
+    assert any(e["event"] == "supervisor.cut_refused" for e in rig.events)
+
+
+def test_cut_search_skips_growth_with_nothing_beyond_and_needs_a_tile_model(tmp_path):
+    rig = BushRig()
+    m = rig.truth["maps"]["1"]
+    m["tiles"][1] = "3d0a3d0a0a"  # a second bush at (0,1) ...
+    m["grid"] = ["11111", "00000", "01111"]  # ... with solid ground behind it: not a way through
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.run()["ok"]
+    assert ("approach", [(2, 0)]) in rig.calls  # the bush at (2,1) was the one cut, not (0,1)
+    bare = BushRig()
+    del bare.truth["maps"]["1"]["tiles"]
+    LegRunner(bare, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).run()
+    assert not any(c[0] == "cut" for c in bare.calls)
+
+
+def test_cut_search_on_an_edge_hop_stands_down_when_the_edge_is_already_reachable(tmp_path):
+    rig = BushRig()
+    m = rig.truth["maps"]["1"]
+    m["warps"], m["connections"] = [], {"east": 2}
+    rig.truth["maps"]["2"]["connections"] = {"west": 1}
+    rig.cross = lambda cur, nxt, **kw: rig.calls.append(("cross", nxt)) or "no-path"
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).run()
+    assert not any(c[0] == "cut" for c in rig.calls)  # (4,0) is an edge cell and already ours
+
+
+def test_a_stand_the_walk_cannot_reach_is_reported(tmp_path):
+    rig = BushRig()
+    rig.approach = lambda cells: rig.calls.append(("approach", sorted(cells))) or False
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any("could not reach" in n and "cut the growth" in n for n in runner.notes)
+
+
+# --------------------------------------------------------------------------- several doors, one destination
+
+
+def _two_door_truth():
+    """A gate room with two doors out to map 2: the routed one at (0,8) and another at (7,8)."""
+    truth = _truth()
+    m = truth["maps"]["1"]
+    m.update(warps=[[0, 8, 2, 0], [7, 8, 255, 2]], connections={})  # 255: LAST_MAP, as gate doors are stored
+    truth["maps"]["2"] = {**truth["maps"]["2"], "connections": {}, "warps": [[0, 0, 1, 0]]}
+    return truth
+
+
+class GuardedDoorRig(FakeRig):
+    """The west door's walk hits the cap (a guard stops it); the east door lands."""
+
+    def __init__(self, **kw):
+        kw.setdefault("truth", _two_door_truth())
+        kw.setdefault("start", (1, 7, 7))
+        super().__init__(**kw)
+
+    def warp(self, mp, x, y, **kw):
+        self.calls.append(("warp", (x, y)))
+        if (x, y) == (0, 8):
+            return "cap"
+        self._pos = (2, 1, 1)
+        return True
+
+
+def test_a_capped_door_is_not_the_only_door_to_that_map(tmp_path):
+    rig = GuardedDoorRig()
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    result = runner.run()
+    assert result["ok"], result["reason"]
+    assert ("warp", (7, 8)) in rig.calls  # the other door to the same map was tried
+    assert runner.attempts == Counter()  # and no wall was charged for it
+
+
+def test_an_alternate_door_that_lands_elsewhere_hands_over_to_the_interior_logic(tmp_path):
+    rig = GuardedDoorRig()
+
+    def warp(mp, x, y, **kw):
+        rig.calls.append(("warp", (x, y)))
+        if (x, y) == (0, 8):
+            return "cap"
+        rig._pos = (9, 0, 0)  # the other door opens on a house, not map 2
+        return True
+
+    rig.warp = warp
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert ("warp", (7, 8)) in rig.calls and ("traverse", 9) in rig.calls
+
+
+def test_every_door_to_the_map_failing_is_written_down(tmp_path):
+    rig = GuardedDoorRig()
+    rig.warp = lambda mp, x, y, **kw: rig.calls.append(("warp", (x, y))) or "cap"
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert any(t.startswith("door (7,8) to 2: cap") for t in runner.tried)
+
+
+def test_a_failed_gate_pass_that_ends_inside_the_building_retreats_first(tmp_path):
+    rig = GatedWarpRig()
+    rig.truth["maps"]["9"] = {**rig.truth["maps"]["1"], "warps": [[0, 0, 1, 0]], "connections": {}}
+
+    def gate(cur, cells, **kw):
+        rig.calls.append(("gate", cur, sorted(cells)))
+        rig._pos = (9, 0, 0)  # pass_gate gave up while standing in the gate room
+        return False
+
+    def traverse(interior, **kw):
+        rig.calls.append(("traverse", interior, kw.get("exclude_entry")))
+        rig._pos = (1, 6, 5)  # back out the way we came
+        return True
+
+    rig.gate, rig.traverse = gate, traverse
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.run()
+    assert ("traverse", 9, False) in rig.calls
+    assert all(w.startswith("1->") for w in runner.attempts)  # every wall charged is about map 1

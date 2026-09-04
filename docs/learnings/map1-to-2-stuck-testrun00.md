@@ -15,8 +15,15 @@ OPEN EDGE CELLS toward 2 (step right): [(7, 0), (7, 1), (7, 2), (7, 3), (7, 4), 
 LIVE BODIES (sprites on screen right now): []
 Bodies are not walls — wanderers move if you wait, but trainers never move.
 PARTY: [('CHARIZARD', 99, 337)]   BADGES byte: 0b00011111
-TEXT ON SCREEN: 'Hello!'
-HEARD from the body at (5, 6): 'Hello!'
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(29,28) action=left (count=9) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(26,28) action=left (count=9) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(26,28) action=left (count=29) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(29,28) action=left (count=29) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [GAME_STUCK_LOOP]: map=1 streak=5 (count=66) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(18,6) action=up (count=27) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(17,6) action=up (count=15) (session: flink)
+ALREADY OBSERVED HERE: - [important] Flink alert [GAME_STUCK_LOOP]: map=1 streak=2 (count=20) (session: flink)
+OBSERVED: collected [64] from map 1's item balls
 OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: both seats explain 1->2 the same way: scripted

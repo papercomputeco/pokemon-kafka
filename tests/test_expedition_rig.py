@@ -1531,3 +1531,53 @@ def test_engaged_near_skips_unparseable_lines(tmp_path):
 
 def test_engaged_near_reports_nothing_for_a_map_with_no_sink(tmp_path):
     assert rig.engaged_near(999, (0, 0), root=tmp_path) == []
+
+
+def test_menu_key_folds_the_screen_accent_onto_the_decoder_stand_in():
+    from expedition_rig import _menu_key
+
+    assert _menu_key("POKé FLUTE") == _menu_key("POKe FLUTE") == "POKEFLUTE"
+    assert _menu_key("HM04     YES") == "HM04YES"
+
+
+def test_cursor_to_ignores_the_stale_scroll_a_banked_bag_walk_left_behind():
+    """The party roster draws every entry at once, so the scroll register must not count.
+
+    Measured on strength_taught.state: a baton banked after walking the bag still carries that
+    walk's scroll offset (16). menu_cursor_to adds it, so the roster, its STATS/SWITCH/CANCEL
+    submenu and the TM roster all reported "failed to reach" an entry three presses away — which
+    is how STRENGTH was nearly taught to the wrong member.
+    """
+    menu = _MenuRig({}, cursor=0)
+    menu.mem[rig.ADDR_LIST_SCROLL] = 16  # the bag's leftovers; a non-scrolling menu must ignore it
+    assert rig.Rig.cursor_to(menu, 3) is True
+    assert menu.mem[rig.qm.ADDR_MENU_CUR] == 3
+    assert menu.presses == ["down"] * 3
+
+
+def test_cursor_to_walks_back_up_and_stops_on_arrival():
+    menu = _MenuRig({}, cursor=4)
+    assert rig.Rig.cursor_to(menu, 1) is True
+    assert menu.presses == ["up"] * 3
+
+
+def test_cursor_to_is_a_no_op_when_already_there():
+    menu = _MenuRig({}, cursor=2)
+    assert rig.Rig.cursor_to(menu, 2) is True
+    assert menu.presses == []
+
+
+def test_cursor_to_gives_up_rather_than_pressing_forever():
+    """A menu that will not move must report failure, not spin."""
+    menu = _MenuRig({}, cursor=0)
+
+    class Stuck:
+        def press(self, *a, **kw):
+            menu.presses.append("down")
+
+        def wait(self, frames=30):
+            pass
+
+    menu.ctl = Stuck()
+    assert rig.Rig.cursor_to(menu, 5, presses=4) is False
+    assert len(menu.presses) == 4

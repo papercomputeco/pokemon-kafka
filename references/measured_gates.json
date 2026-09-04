@@ -6,6 +6,12 @@
     "37,14,up": "AAAAAAA got 500 for winning!",
     "38,14,up": "AAAAAAA got 500 for winning!"
   },
+  "156": {
+    "4,0,down": "Leaving early"
+  },
+  "186": {
+    "4,7,left": "Excuse me! Wait up please"
+  },
   "207": {
     "20,13,down": "",
     "21,13,down": "It's off limits here! Go home!",

@@ -217,6 +217,9 @@ LEARNINGS_DIR = WORKSPACE / "docs" / "learnings"
 NAV_ATTEMPTS = 2  # attempts 1..2 are navigation-class; past that the wall is a puzzle
 LADDER_ATTEMPTS = 4  # 2 navigation + 2 puzzle, then the ladder is written down and stops
 BODY_WAIT_FRAMES = 240  # wanderers clear; a trainer in a corridor never will (PR #113)
+# The two growth classes the field-Cut flow has been measured to open (road.py): 0x3D bushes
+# (the Vermilion yard, Celadon's hedges, Route 16's (34,9)) and 0x50 trees (Erika's garden).
+CUT_TILES = {0x3D, 0x50}
 DEFAULT_MAX_HOPS = 80
 DEFAULT_ENGAGE_ROUNDS = 14
 
@@ -445,6 +448,7 @@ class LegRunner:
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
         want: str | None = None,
+        hunt: str | None = None,
     ) -> None:
         self.rig = rig
         self.goal = goal
@@ -459,6 +463,12 @@ class LegRunner:
         self.clear_floor = clear_floor
         self.engage_rounds = engage_rounds
         self.want = want  # item name this leg came for; its ball is opened before any other
+        # An item a BODY hands over, not a ball: the leg is judged on the bag holding it. This
+        # is the Warden shape -- GOLD TEETH in the bag, HM04 behind whichever of Fuchsia's eight
+        # never-entered doors he is behind -- and it is the third observed way a story item
+        # arrives (Mr Fuji's POKe FLUTE). Ten hand-tapped probe scripts were written for that
+        # hunt in one night because the supervisor could only judge a leg on a badge or a ball.
+        self.hunt = hunt
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
         self.tried: list[str] = []  # every action executed, for the exhaustion record
@@ -480,17 +490,48 @@ class LegRunner:
 
         cur = self.rig.pos()[0]
         result = self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
-        if result == "no-path" and hop["via"] == "edge" and (cur, hop["to"]) not in self.gated:
+        if result == "no-path" and (cur, hop["to"]) not in self.gated:
             # A severed route is usually its own gate building (Route 11's Diglett house taught
             # that the nearest door is not the gate). Determinism gets this before the crew does.
+            # A WARP hop is severed the same way: Route 16's Fly house door (7,5) sits on a strip
+            # that only the gate's upper corridor opens onto, and a leg on the lower road spent
+            # its whole ladder on "no-path" with the gate three tiles away (measured 2026-09-04).
             self.gated.add((cur, hop["to"]))
             self.log(f"  no-path: trying {cur}'s gate building")
-            cells, _direction = road.edge_cells(self.rig.truth, cur, hop["to"])
+            if hop["via"] == "edge":
+                cells, _direction = road.edge_cells(self.rig.truth, cur, hop["to"])
+            else:
+                cells = {(hop["x"], hop["y"])}
             if self.rig.gate(cur, cells):
-                result = self.rig.cross(cur, hop["to"])
+                result = (
+                    self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
+                )
+            elif self.rig.pos()[0] != cur:
+                # A failed gate pass can end INSIDE a building whose far side would not open.
+                # Route 16's gate did exactly that twenty times in a row: every verdict after it
+                # (blocker, growth, reroute) was then computed on the gate's map, and the ban
+                # landed on a pair that does not exist. Come back out the way we went in, so the
+                # rest of this hop's reasoning is about ``cur``.
+                inside = self.rig.pos()[0]
+                self.log(f"  the gate pass ended inside {inside}; retreating to {cur}")
+                self.rig.traverse(inside, exclude_entry=False)
         now = self.rig.pos()[0]
         if now == hop["to"]:
             return None
+        if now == cur and hop["via"] != "edge" and str(result) in ("no-path", "refused", "cap", "warp-dead"):
+            # The routed door is one of possibly several to the same map. Route 16's gate (186)
+            # has four doors back out to map 27, and the router named the west one -- behind the
+            # guard who stops every walk at (4,7) ("Excuse me! Wait up please") -- so three
+            # attempts hit the walk cap on it while the east door stood open four tiles away.
+            for ax, ay in self._other_doors_to(cur, hop):
+                self.log(f"  the door at ({hop['x']},{hop['y']}) is {result}; trying ({ax},{ay}) to {hop['to']}")
+                alt = self.rig.warp(cur, ax, ay)
+                if self.rig.pos()[0] == hop["to"]:
+                    return None
+                if self.rig.pos()[0] != cur:
+                    break  # somewhere else entirely: let the interior logic below read it
+                self.tried.append(f"door ({ax},{ay}) to {hop['to']}: {alt}")
+            now = self.rig.pos()[0]
         if now == cur and hop["via"] != "edge" and str(result) in ("no-path", "refused", "cap"):
             # The door is on this map but no walk reaches it. That is a ride, not a wall — the
             # rule already applied to bodies and item balls, and the hop is the third place that
@@ -508,6 +549,18 @@ class LegRunner:
                 return None
             return f"interior-{inner}"
         return str(result)
+
+    def _other_doors_to(self, cur: int, hop: dict) -> list[tuple[int, int]]:
+        """Every other warp on this map that leads where the routed one does, nearest first."""
+        _mp, x, y = self.rig.pos()
+        # 255 is the cartridge's LAST_MAP: an interior's doors say "back where you came from",
+        # and the router already resolved the routed one to ``hop["to"]`` -- so do its siblings.
+        doors = [
+            (wx, wy)
+            for wx, wy, dest, _wid in self.rig.truth["maps"].get(str(cur), {}).get("warps", [])
+            if dest in (hop["to"], 255) and (wx, wy) != (hop["x"], hop["y"])
+        ]
+        return sorted(doors, key=lambda d: abs(d[0] - x) + abs(d[1] - y))
 
     def _clear_blocker(self, hop: dict) -> bool:
         """Go meet the one body that severs this hop. Deterministic: there is nothing to choose.
@@ -543,9 +596,13 @@ class LegRunner:
 
         mp_now, hx, hy = self.rig.pos()
         before_region = len(_road.reachable(self.rig.truth, self.rig.pairs, mp_now, (hx, hy), self.rig.bodies()))
-        said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
+        face = "right" if bx > x else "left" if bx < x else "down" if by > y else "up"
+        said = self.rig.talk(face)
         mp_now, hx, hy = self.rig.pos()
         after_region = len(_road.reachable(self.rig.truth, self.rig.pairs, mp_now, (hx, hy), self.rig.bodies()))
+        if after_region <= before_region and self._wake_sleeper(culprit, said, face):
+            mp_now, hx, hy = self.rig.pos()
+            after_region = len(_road.reachable(self.rig.truth, self.rig.pairs, mp_now, (hx, hy), self.rig.bodies()))
         if after_region <= before_region:
             # Engaging is not clearing. A beaten Gen 1 trainer still stands on its tile, so a
             # blocker that is a trainer stays a wall however the fight goes — measured on Silph
@@ -563,6 +620,97 @@ class LegRunner:
         self.notes.append(f"the body at {culprit} (which alone severs this hop) says: {said[:300]}")
         self.log(f"  it says: {said[:160]}")
         self.rig.emit("supervisor.blocker_engaged", body=[bx, by], said=said[:300])
+        return True
+
+    def _wake_sleeper(self, culprit: tuple[int, int], said: str, face: str) -> bool:
+        """A blocker the game calls a sleeping POKeMON is woken with the flute from the bag.
+
+        Route 16 (map 27), measured 2026-09-04: the body at (26,10) says "A sleeping POKeMON
+        blocks the way!" and holds the 13 cells around the Fly house's door, while the POKe
+        FLUTE had sat in the bag since Mr Fuji handed it over. The sentence names the gate and
+        the bag names the key -- nothing here is recalled. The woken body attacks; the rig's own
+        settle-then-battle closer resolves that, and the region is measured again afterwards.
+        """
+        if "SLEEPING" not in (said or "").upper():
+            return False
+        flute = next(
+            (self.rig.item_name(i) for i, _q in self.rig.bag() if "FLUTE" in self.rig.item_name(i).upper()), None
+        )
+        if flute is None:
+            self.notes.append(f"the body at {culprit} is asleep and the bag holds no flute to wake it")
+            return False
+        if not hasattr(self.rig, "use_item") or not self.rig.use_item(flute, face=face):
+            self.notes.append(f"could not play the {flute} at the sleeping body {culprit}")
+            return False
+        if hasattr(self.rig, "settle"):
+            self.rig.settle()  # the wake-up pages, then the fight the woken body starts
+        self.log(f"  played the {flute} at {culprit}")
+        self.tried.append(f"played the {flute} at the sleeping body {culprit}")
+        self.rig.emit("supervisor.sleeper_woken", body=list(culprit), item=flute)
+        return True
+
+    def _cut_through(self, hop: dict) -> bool:
+        """Cut the one growth that seals this hop, when the party can and the tile model shows it.
+
+        Route 16, measured 2026-09-04: the Fly house's strip is the whole upper level of the
+        map, entered from the lower road only by cutting the 0x3D bush at (34,9) in the tree
+        row -- the gate's upper corridor is sealed from its lower one (survey: the guard at
+        (4,7) and solid counter rows), and two crew ladders ended on "no-path" while Charizard
+        held CUT. A growth is found like a blocking body is: a cuttable tile touching our
+        region whose far side reaches the target. Nearest first, and the step is the proof.
+        """
+        import road
+
+        knows = getattr(self.rig, "knows_move", None)
+        if knows is None or knows("CUT") is None:
+            return False
+        mp, x, y = self.rig.pos()
+        m = self.rig.truth["maps"].get(str(mp), {})
+        tiles = m.get("tiles")
+        if not tiles:
+            return False
+        if hop["via"] == "edge":
+            targets, _direction = road.edge_cells(self.rig.truth, mp, hop["to"])
+        else:
+            targets = {(hop["x"], hop["y"])}
+        targets = set(targets)
+        bodies = self.rig.bodies()
+        region = road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), bodies)
+        if region & targets:
+            return False
+        w, h = m["width"], m["height"]
+
+        def tile(cx: int, cy: int) -> int:
+            return int(tiles[cy][2 * cx : 2 * cx + 2], 16)
+
+        faces = {(0, 1): "down", (0, -1): "up", (1, 0): "right", (-1, 0): "left"}
+        found: list[tuple[int, tuple[int, int], str, tuple[int, int]]] = []
+        for rx, ry in region:
+            for (dx, dy), face in faces.items():
+                cx, cy = rx + dx, ry + dy
+                if not (0 <= cx < w and 0 <= cy < h) or (cx, cy) in region or tile(cx, cy) not in CUT_TILES:
+                    continue
+                fx, fy = cx + dx, cy + dy  # the cell beyond the growth
+                if not (0 <= fx < w and 0 <= fy < h) or m["grid"][fy][fx] != "1" or (fx, fy) in bodies:
+                    continue
+                if road.reachable(self.rig.truth, self.rig.pairs, mp, (fx, fy), bodies) & targets:
+                    found.append((abs(rx - x) + abs(ry - y), (rx, ry), face, (cx, cy)))
+        if not found:
+            return False
+        _dist, stand, face, growth = min(found)
+        self.log(f"  a cuttable growth at {growth} seals this hop -- going to cut it from {stand}")
+        if not self.rig.approach({stand}):
+            self.notes.append(f"could not reach {stand} to cut the growth at {growth}")
+            return False
+        if not self.rig.cut(face):
+            self.notes.append(f"CUT at {growth} did not open it")
+            self.rig.emit("supervisor.cut_refused", map=mp, growth=list(growth))
+            return False
+        self.tried.append(f"cut the growth at {growth}")
+        self.notes.append(f"cut the growth at {growth}; the hop's region changed")
+        self.rig.emit("supervisor.growth_cut", map=mp, growth=list(growth), stand=list(stand))
+        self.gated.discard((mp, hop["to"]))
+        self.banned.discard((mp, hop["to"]))
         return True
 
     def read_refusal(self, hop: dict | None) -> str:
@@ -1034,16 +1182,38 @@ class LegRunner:
         walk can never see past a pad.
         """
         before = self.rig.badges()
+        return self._engage_until(lambda: self.rig.badges() != before)
+
+    def bag_holds(self, item: str) -> bool:
+        """Whether the bag holds ``item`` -- by the cartridge's own name for what is in it."""
+        want = item.upper()
+        return any(self.rig.item_name(item_id).upper().startswith(want) for item_id, _qty in self.rig.bag())
+
+    def _engage_until_item(self, item: str) -> bool:
+        """On the goal map, talk to bodies until the bag holds ``item``.
+
+        The same loop as the badge hunt with the bag as the judge -- the mission's own success
+        condition for a handed-over HM ("confirm HM04 is actually in the bag; don't trust the
+        dialogue"). A map whose bodies were all met without the item is not a failure of the
+        leg, it is one door ruled out; the chain in ``cmd_run`` moves to the next.
+        """
+        if self.bag_holds(item):
+            self.notes.append(f"the bag already holds {item}")
+            return True
+        return self._engage_until(lambda: self.bag_holds(item))
+
+    def _engage_until(self, done) -> bool:
+        """Meet every live body on this map, nearest-first then round-robin, until ``done()``."""
         spoken: set[tuple[int, int]] = set()
         order: list[tuple[int, int]] = []  # stable roster, for the retry phase
         cursor = 0
         for _ in range(self.engage_rounds):
-            if self.rig.badges() != before:
+            if done():
                 return True
             mp, _x, _y = self.rig.pos()
             all_bodies = list(self.rig.bodies())
             if not all_bodies:
-                return self.rig.badges() != before
+                return done()
             # Keep a stable order for the retry phase: which bodies reappear is decided by the
             # roster, not by whatever happens to be standing nearest.
             order = [b for b in order if b in all_bodies] + [b for b in sorted(all_bodies) if b not in order]
@@ -1066,7 +1236,7 @@ class LegRunner:
                 # record reads as a route the next leg can take instead of a wall.
                 self.name_the_ride((bx, by))
                 self.log(f"  could not reach the body at {(bx, by)} on map {mp}")
-        return self.rig.badges() != before
+        return done()
 
     # ---- the exhaustion record ---------------------------------------------------------------
 
@@ -1127,6 +1297,12 @@ class LegRunner:
                     )
                 if self.engage and not self._engage_until_badge():
                     return self._finish("engaged-no-badge", "arrived, engaged every body, badge byte unchanged")
+                if self.hunt is not None:
+                    if self._engage_until_item(self.hunt):
+                        return self._finish("item-found", f"a body on map {self.goal} handed over {self.hunt}")
+                    return self._finish(
+                        "engaged-no-item", f"arrived on map {self.goal}, engaged every body, {self.hunt} not in the bag"
+                    )
                 return self._finish("arrived", f"reached map {self.goal}")
             chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
             hop = chain[0] if chain else None
@@ -1153,6 +1329,10 @@ class LegRunner:
             #    the graph — ban it and take another chain rather than spending a crew ladder on
             #    a road the world does not have.
             if hop is not None and failure in ("no-path", "body-blocked") and self._clear_blocker(hop):
+                continue
+            #    A growth the party can cut is the same shape as a body: one cell, and lifting it
+            #    reconnects the target. It is measured off the tile model and proved by the step.
+            if hop is not None and failure == "no-path" and self._cut_through(hop):
                 continue
             # 3. A door that will not open is as structural as a severed grid. Silph 1F's
             #    (16,10) pad is dead, and the floor has two other ways up — (26,0) and (20,0).
@@ -1206,7 +1386,7 @@ class LegRunner:
     def _finish(self, outcome: str, reason: str) -> dict:
         mp, x, y = self.rig.settled_pos()
         result = {
-            "ok": outcome == "arrived",
+            "ok": outcome in ("arrived", "item-found"),
             "outcome": outcome,
             "reason": reason,
             "goal": self.goal,
@@ -1493,6 +1673,9 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
             # floor clear is worth doing on every goal in the chain: the thing a story floor
             # yields is usually carried by one of its trainers.
             clear_floor=args.clear_floor,
+            # A hunt is judged on the bag at EVERY goal: the chain is the list of doors the
+            # item might be behind, and the first one that yields it ends the chain.
+            hunt=args.hunt_item,
             consult=consult,
         )
         try:
@@ -1502,8 +1685,22 @@ def cmd_run(args) -> int:  # pragma: no cover - drives the emulator; verified li
         results.append({k: v for k, v in result.items() if k != "consults"})
         if args.bank:
             rig.bank(args.bank if len(goals) == 1 else f"{args.bank}-{goal}")
+        if result.get("outcome") == "item-found":
+            print(f"{args.hunt_item} is in the bag: {rig.bag_named()}", flush=True)
+            break
+        if result.get("outcome") == "engaged-no-item":
+            continue  # one door ruled out; the next goal is the next door
         if not result.get("ok"):
             break
+    if args.hunt_item:
+        found = any(r.get("outcome") == "item-found" for r in results)
+        if args.bank and found:
+            rig.bank(args.bank)
+        verdict = f"{args.hunt_item} won" if found else f"{args.hunt_item} not found"
+        rig.finish(outcome=f"hunt: {verdict}", goals=str(goals))
+        report = {"legs": results, "found": found, "bag": rig.bag_named(), "pos": list(rig.pos()), "run_id": rig.run_id}
+        print(json.dumps(report))
+        return 0 if found else 1
     if args.bank and results and results[-1].get("ok"):
         rig.bank(args.bank)
     rig.finish(outcome=results[-1]["outcome"] if results else "no-legs", goals=str(goals))
@@ -1533,6 +1730,11 @@ def main(argv: list[str] | None = None) -> int:
         "--clear-floor", action="store_true", help="on the last goal, fight every trainer the cartridge lists there"
     )
     rn.add_argument("--want", help="item name this leg came for; its ball is opened first")
+    rn.add_argument(
+        "--hunt-item",
+        default=None,
+        help="on EVERY goal, engage bodies until the bag holds this item; the chain is the doors it might be behind",
+    )
     ht = sub.add_parser("hunt", help="travel to a map and come back with a species in the party")
     ht.add_argument("--state", required=True)
     ht.add_argument("--species", required=True, help="e.g. Nidoran-M, or a raw internal id")

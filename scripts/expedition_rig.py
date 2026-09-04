@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,20 @@ ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS, PARTY_STRUCT_SIZE = 0xD163, 0xD16B, 44
 # table, SURF sits in Gyarados' party struct at offset 11 and CUT in Charizard's at 8, and in no
 # other struct of the six -- two independently known moves landing inside one four-byte window.
 MOVE_SLOTS = range(8, 12)
+
+
+def _menu_key(text: str) -> str:
+    """Letters and digits only, accents folded, for matching a name against a rendered row.
+
+    Measured on Route 16: the bag draws "POKé FLUTE" and the item table names it "POKe FLUTE";
+    upper-casing the two gives POKÉFLUTE and POKEFLUTE, and the flute was reported "not in the
+    bag" with the sleeping body still on the road. The decoder's stand-in letter and the screen's
+    accented one must land on the same key.
+    """
+    folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Z0-9]", "", folded.upper())
+
+
 ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E  # quartermaster's, verified live in the mart probe
 BAG_SLOTS = 20  # a full bag refuses pickups silently (measured in the Rocket Hideout)
 ADDR_LIST_SCROLL = 0xCC36  # item-list scroll offset; 0xCC26 is the cursor WITHIN the 3-row window
@@ -1339,7 +1354,11 @@ class Rig:
         if not self.menu_choose("MON"):
             return bail()
         self.ctl.wait(60)
-        if not self.menu_cursor_to(index):
+        # The roster draws all six members, so it is the raw cursor that moves. `list_index`
+        # adds the scroll register, and a baton banked after a bag walk still carries the bag's
+        # offset there — measured on strength_taught.state, where the swap "could not reach"
+        # slot 5 of a six-row list that had never scrolled.
+        if not self.cursor_to(index):
             return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
@@ -1358,11 +1377,11 @@ class Rig:
         want = next(((i - base) // 2 for i, t in rows if "SWITCH" in t.upper() and (i - base) % 2 == 0), None)
         if want is None:
             return bail()
-        if not self.menu_cursor_to(want, presses=8):
+        if not self.cursor_to(want):  # the submenu draws whole, like the roster
             return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
-        if not self.menu_cursor_to(0, presses=8):
+        if not self.cursor_to(0):
             return bail()
         self.ctl.press("a")
         self.ctl.wait(70)
@@ -1410,12 +1429,12 @@ class Rig:
         self.ctl.press("a")
         self.ctl.wait(60)
         self.ctl.wait(50)
-        target = name.strip().upper().replace(" ", "")
+        target = _menu_key(name)
         # The bag renders entries on rows 4/6/8/10 with their quantities interleaved, the cursor
         # caps at 2, and the list scrolls under it — so the highlighted row is 4 + 2*cursor and
         # the walk needs one step per item, not a fixed count.
         for _ in range(len(self.bag()) + 4):
-            row = self.window_row(4 + 2 * self.mem[qm.ADDR_MENU_CUR]).upper().replace(" ", "")
+            row = _menu_key(self.window_row(4 + 2 * self.mem[qm.ADDR_MENU_CUR]))
             if target and target in row:
                 self.ctl.press("a")
                 self.ctl.wait(55)
@@ -1427,6 +1446,106 @@ class Rig:
             self.ctl.press("b")
             self.ctl.wait(30)
         return False
+
+    def teach(
+        self, machine: str, species: str | None = None
+    ) -> int | None:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+        """Teach a TM/HM from the bag to a party member. Proved by the move id landing in RAM.
+
+        The whole flow was measured on ``strength_won.state`` with HM04 (2026-09-04): USE ->
+        "Booted up an HM!" -> "It contained STRENGTH!" -> "Teach STRENGTH to a POKeMON?" with
+        YES highlighted -> a roster where every member is captioned ABLE / NOT ABLE (fainted
+        members are drawn here, unlike the field-move roster) -> "GYARADOS learned STRENGTH!".
+        Nothing is a remembered row: the pages are advanced until the roster's captions render,
+        the member is chosen by party index against the captions, and success is the move id
+        (from this cartridge's own move table) appearing in that member's struct.
+
+        ``species`` names the member; otherwise the first ABLE member, standing ones first. A
+        member holding four moves already gets the game's replace-a-move prompt; that branch is
+        handled by text but was not exercised on this baton, so it is best-effort.
+        """
+        move = (self.truth.get("machines") or {}).get(machine.strip().upper())
+        want = self._move_ids().get(move or "")
+        if want is None:
+            print(f"  the cartridge does not say what {machine} teaches", flush=True)
+            return None
+        roster = self.party()
+
+        def knows(i: int) -> bool:
+            base = ADDR_PARTY_STRUCTS + PARTY_STRUCT_SIZE * i
+            return want in (self.mem[base + off] for off in MOVE_SLOTS)
+
+        def bail(why: str) -> None:
+            print(f"  teach {machine}: {why}", flush=True)
+            for _ in range(8):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return None
+
+        already = next((i for i in range(len(roster)) if knows(i)), None)
+        if already is not None and (species is None or roster[already][0].upper() == species.upper()):
+            print(f"  {roster[already][0]} already knows {move}", flush=True)
+            return already
+        if not self.use_item(machine):
+            return bail("not in the bag")
+        if not self.advance_text("TEACH", tries=6):
+            return bail("the teach prompt never rendered")
+        if not self.menu_shows("YES"):
+            # Measured: "Teach STRENGTH" lands on screen while the typewriter is still mid-line,
+            # and the YES / NO choice only draws once the question has finished printing.
+            self.ctl.press("a")
+            self.ctl.wait(80)
+            if not self.menu_shows("YES"):
+                return bail("the YES / NO prompt never rendered")
+        self.ctl.press("a")  # YES is highlighted when the prompt opens (measured)
+        self.ctl.wait(80)
+        if not self.menu_shows("ABLE"):
+            return bail("the ABLE / NOT ABLE roster never rendered")
+        captions = {i: t for i, t in self.menu_rows(0, 12)}
+        able = [i for i in range(len(roster)) if captions.get(2 * i + 1, "").strip().upper() == "ABLE"]
+        if species is not None:
+            pick = next((i for i in able if roster[i][0].strip().upper() == species.strip().upper()), None)
+        else:
+            pick = next((i for i in able if roster[i][2] > 0), able[0] if able else None)
+        if pick is None:
+            return bail(f"no ABLE member for {species or 'anyone'}; able={[roster[i][0] for i in able]}")
+        # The roster draws all six members at once, so it is the raw cursor that moves here;
+        # ``list_index`` adds the scroll register, which still holds the bag list's offset
+        # (measured: the walk to HM04 at the end of the bag left it there and the cursor never
+        # "reached" slot 0).
+        if not self.cursor_to(pick):
+            return bail("could not put the cursor on the member")
+        self.ctl.press("a")
+        self.ctl.wait(90)
+        hms = {v for k, v in (self.truth.get("machines") or {}).items() if k.startswith("HM")}
+        for _ in range(8):
+            if knows(pick):
+                break
+            text = " ".join(t for _i, t in self.menu_rows()).upper()
+            if "FORGOTTEN" in text or "WHICH MOVE" in text:
+                # The replace prompt: give up the first listed move that is not an HM move.
+                victim = next(
+                    (
+                        t
+                        for _i, t in self.menu_rows()
+                        if t.strip().upper() in self._move_ids() and t.strip().upper() not in hms
+                    ),
+                    None,
+                )
+                if victim is None or not self.menu_choose(victim):
+                    return bail("the replace prompt offered nothing this could forget")
+            else:
+                self.ctl.press("a")
+            self.ctl.wait(80)
+        for _ in range(8):
+            self.ctl.press("b")
+            self.ctl.wait(25)
+        if not knows(pick):
+            print(f"  {roster[pick][0]} did not learn {move}", flush=True)
+            return None
+        print(f"  {roster[pick][0]} learned {move} ({machine})", flush=True)
+        self.emit("taught", machine=machine, move=move, member=pick, species=roster[pick][0])
+        return pick
 
     def fish(self, rod: str, face: str) -> bool:  # pragma: no cover - drives the emulator
         """Cast ``rod`` while facing ``face``. A bite is a battle; that is the only proof."""
@@ -1462,6 +1581,10 @@ class Rig:
         self.io.press(face, hold=8, release=8)
         self.io.wait(45)
         return self.pos() != before
+
+    def cut(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+        """Cut the growth we face and prove it by stepping through it (``road.cut_until_open``)."""
+        return road.cut_until_open(self.io, self.truth, self.pairs, face)
 
     def strength_push(
         self, face: str
@@ -1781,6 +1904,23 @@ class Rig:
         for anything past the third slot.
         """
         return self.mem[qm.ADDR_MENU_CUR] + self.mem[ADDR_LIST_SCROLL]
+
+    def cursor_to(self, index: int, presses: int = 12) -> bool:
+        """Put a NON-scrolling menu's highlight on ``index`` by the raw cursor register.
+
+        `menu_cursor_to` adds the scroll register, which is right for the bag and the PC box and
+        wrong for every menu that draws all its entries at once: a baton banked after a bag walk
+        still carries the bag's scroll offset (16, measured on strength_taught.state), and the
+        party roster, its STATS/SWITCH/CANCEL submenu and the TM roster all "failed to reach" an
+        entry that was three presses away.
+        """
+        for _ in range(presses):
+            at = self.mem[qm.ADDR_MENU_CUR]
+            if at == index:
+                return True
+            self.ctl.press("down" if at < index else "up")
+            self.ctl.wait(20)
+        return self.mem[qm.ADDR_MENU_CUR] == index
 
     def menu_cursor_to(self, index: int, presses: int = 16) -> bool:
         """Walk a scrolling list's highlight to ``index``, judged by cursor + scroll."""

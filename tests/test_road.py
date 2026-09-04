@@ -1239,3 +1239,126 @@ def test_every_counter_stand_faces_back_at_the_body():
         dx, dy = step[face]
         # walking COUNTER_SPAN steps in the facing direction arrives at the body
         assert (cx + dx * road.COUNTER_SPAN, cy + dy * road.COUNTER_SPAN) == body
+
+
+# --------------------------------------------------------------------------- shore_stand
+
+
+def _tiled(grid, tiles, **kw):
+    """A map whose tile model is spelled out: 'w' water (0x14), anything else land (0x03)."""
+    m = _map(grid, **kw)
+    m["tiles"] = ["".join("14" if c == "w" else "03" for c in row) for row in tiles]
+    return m
+
+
+def _strip_truth():
+    # Route 19's shape in miniature: a land strip on row 0 that the walker can pace west along
+    # (its west end is a fence, x=0 solid), and open water on rows 1..2 that reaches the west
+    # edge. Standing at (3,0) there is no water beside us; (1,0)..(3,0) all touch it below.
+    grid = ["0111", "0111", "1111", "1111"]
+    tiles = ["....", "....", "wwww", "wwww"]
+    return {"maps": {"1": _tiled(grid, tiles, connections={"west": 2}), "2": _map(["1"] * 4, connections={"east": 1})}}
+
+
+def test_shore_stand_names_the_nearest_land_cell_that_touches_edge_reaching_water():
+    truth = _strip_truth()
+    assert road.shore_stand(truth, PAIRS, 1, 2, (3, 0)) == ((3, 1), "down")
+    assert road.shore_stand(truth, PAIRS, 1, 2, (3, 1)) is None  # already beside the water
+
+
+def test_shore_stand_is_none_without_a_tile_model_or_without_edge_water():
+    assert road.shore_stand(_surf_truth(1), PAIRS, 1, 2, (1, 0)) is None
+    landlocked = {"maps": {"1": _tiled(["111", "111"], ["...", ".w."], connections={"west": 2}), "2": _map(["1"] * 2)}}
+    assert road.shore_stand(landlocked, PAIRS, 1, 2, (2, 0)) is None
+
+
+class StripIO(RoadIO):
+    """Route 19 in miniature: the d-pad walks the land strip, water refuses until SURF is armed
+    (which lands the player on the water cell they face), and only x=0 on a water row crosses."""
+
+    def __init__(self, truth):
+        super().__init__(truth, (1, 3, 0))
+        self.arms = 0
+        self.arm_at = None
+        self.armed = False
+
+    def press(self, btn, hold=8, release=8):
+        self.pressed.append(btn)
+        mp, x, y = qm.read_pos(self)
+        if btn not in ("up", "down", "left", "right"):
+            return
+        dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[btn]
+        nx, ny = x + dx, y + dy
+        self.face = btn
+        if btn == "left" and x == 0 and y > 1:
+            self._tp((2, 0, y))
+            return
+        m = self.truth["maps"]["1"]
+        if not (0 <= nx < m["width"] and 0 <= ny < m["height"]) or m["grid"][ny][nx] != "1":
+            return
+        if ny > 1 and not self.armed:
+            return  # water refuses a walker
+        self._tp((1, nx, ny))
+
+    def arm(self):
+        self.arms += 1
+        self.arm_at = qm.read_pos(self)[1:]
+        self.arm_face = self.face
+        if self.face != "down":
+            return False  # "There's no place to get off!" -- not facing water
+        self.armed = True
+        self._tp((1, self.mem[qm.ADDR_X], 2))  # SURF animates onto the tile faced
+        return True
+
+
+def test_surf_cross_walks_to_the_shore_and_arms_facing_the_water():
+    io = StripIO(_strip_truth())
+    assert road.surf_cross(io, io.truth, PAIRS, 1, 2, arm_surf=io.arm) is True
+    assert io.arms == 1 and io.arm_at == (3, 1) and io.arm_face == "down"
+    assert qm.read_pos(io)[0] == 2
+
+
+# --------------------------------------------------------------------------- reachable hops ledges
+
+
+def _ledge_truth(tileset=0):
+    # Route 19's beach in miniature: row 0 is land (tile 0x39), row 1 is a ledge (0x37, solid
+    # in the grid), row 2 is land again. The only way down is the hop the ROM's LedgeTiles allow.
+    m = _map(["111", "000", "111"])
+    m["tileset"] = tileset
+    m["tiles"] = ["393939", "373737", "393939"]
+    return {"maps": {"1": m}, "ledges": [["down", 0x39, 0x37]]}
+
+
+def test_reachable_hops_a_ledge_down_but_never_up():
+    below = road.reachable(_ledge_truth(), PAIRS, 1, (1, 0))
+    assert (1, 2) in below and (1, 1) not in below  # landed past the ledge; never stood on it
+    assert road.reachable(_ledge_truth(), PAIRS, 1, (1, 2)) == {(0, 2), (1, 2), (2, 2)}  # no way back up
+
+
+def test_reachable_hops_only_on_the_overworld_tileset():
+    assert road.reachable(_ledge_truth(tileset=3), PAIRS, 1, (1, 0)) == {(0, 0), (1, 0), (2, 0)}
+
+
+def test_reachable_does_not_hop_over_a_blocked_ledge_or_onto_a_blocked_landing():
+    ledge_row = {(0, 1), (1, 1), (2, 1)}
+    landing_row = {(0, 2), (1, 2), (2, 2)}
+    assert (1, 2) not in road.reachable(_ledge_truth(), PAIRS, 1, (1, 0), blocked=ledge_row)
+    assert (1, 2) not in road.reachable(_ledge_truth(), PAIRS, 1, (1, 0), blocked=landing_row)
+
+
+def test_surf_cross_walks_to_the_shore_before_arming_and_reports_when_it_cannot_arm():
+    """Arming where the straight line stopped answers "There's no place to get off!".
+
+    Route 19's beach is the measured case: standing on the land strip with no water beside us,
+    the outward key carries us *along* the land, so SURF is armed facing dry ground. shore_stand
+    names the nearest cell that actually touches edge-reaching water; only there is arming
+    meaningful. When the party still cannot surf from that cell, the leg says so rather than
+    pacing the strip until its step budget runs out.
+    """
+    truth = _strip_truth()
+    io = SurfIO(1, (2, 0, 0))
+    io.mem[qm.ADDR_X], io.mem[qm.ADDR_Y] = 3, 0  # on the strip, no water adjacent
+    assert road.shore_stand(truth, PAIRS, 1, 2, (3, 0)) is not None  # the branch under test
+    assert road.surf_cross(io, truth, PAIRS, 1, 2, arm_surf=lambda: False) == "surfmoved-failed"
+    assert io.mem[qm.ADDR_MAP] == 1  # never left our side
