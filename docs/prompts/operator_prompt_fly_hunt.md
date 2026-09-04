@@ -20,9 +20,14 @@ project. The ones far from the entry point are the likely candidates:
    If it can't reach one, note which and why, but keep going to the rest first.
 3. **The moment anyone mentions FLY, a secret retreat, or hands over an item, stop and read the
    full text.** That's the find.
-4. If none of the ten say anything about Fly, fall back to **Route 16** (map 28) — walk it and
-   enter every building you find. The extracted map data shows zero warps on map 28, so there may
-   be no building there at all; if so, say that plainly rather than searching longer.
+4. If none of the ten say anything about Fly, fall back to **Route 16** (map 28), reached from
+   **Vermilion (map 5)**: `5 -> 17 -> 10 -> 18 -> 6 -> 27 -> 28`. This is a real, modeled route
+   and it never touches the Cerulean/map-15 pocket two legs called sealed today — an independent
+   path, confirmed from the connection graph. **Somewhere on this path is a shrub you need CUT to
+   clear** — the connection graph can't show exactly where, that's a tile-level detail, so expect
+   a refusal and read what it says rather than assuming a dead hop. Charizard already knows CUT.
+   The extracted map data shows zero recorded warps on map 28 itself, so a building there may not
+   register as a normal door — walk the route and look, don't just trust the warp list.
 
 ## Discipline
 
