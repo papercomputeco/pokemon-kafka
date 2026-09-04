@@ -4,7 +4,17 @@ run_id 042a4c8 · baton `data/local_runs/roster-bench/bike_vermilion.state` · m
 
 ## The question
 
-Mission: enter **map 92** — "a building never entered in Vermilion City; warp at map 5 (12,19)" — engage all 5 bodies (4 trainers + 1 NPC), grab **HM04 FLY**. Fallback: Route 16 (map 28) via `5→17→10→18→6→27→28`, with CUT.
+Mission: enter **map 92** — "a building never entered in Vermilion City; warp at map 5 (12,19)" — engage all 5 bodies (4 trainers + 1 NPC), grab **FLY** (the mission label said "HM04 FLY"; in this ROM **FLY is HM02** — `fly_hunt` cites the cartridge: "received HM02! HM02 is FLY!" — while **HM04 is STRENGTH**, the Warden/Safari item. The *location* (map 92, door at map 5 (12,19)) matches the mission exactly; only the HM index was mis-stated.). Fallback: Route 16 (map 28) via `5→17→10→18→6→27→28`, with CUT.
+
+## Numbering, so nobody re-trips on it (2026-09-03)
+
+In this Red/Blue ROM the HMs are the official Gen 1 set: **HM01 CUT, HM02 FLY, HM03 SURF, HM04 STRENGTH.** FLY = HM02. If a later leg reports "HM04 FLY" it is mislabelled STRENGTH-as-FLY; check `Rig.bag_named()` for the actual item name before acting. The project's own `operator_prompt_fly_hunt.md` (the authoritative, cartridge-text-backed brief) names the FLY giver as the **"secret retreat ... over the water"** — which is exactly the SURF-island layout found here, and lists `Route 16 (map 28)` as the alternate, with **"a shrub you need CUT to clear."**
+
+## Other FLY leads this project has (for routing, not verified as the same item)
+
+- **Map 30, our own island** — `fly_hunt`: ten never-engaged trainer sprites; the "secret retreat" FLY text cluster. Baton `b8_BATON_island_gyarados_safe.state`.
+- **Map 93 (5,2)** — `bike-sweep2` discovery 2026-09-02: *"I getting my PIDGEY to fly a letter to SAFFRON in the north!"* — a FLY/Pidgey clue in the same Vermilion cluster as map 92.
+- **Route 16 (map 28)** — the designated fallback; the previous `fly-vermilion` run walked `5→17` and was **refused at the 17→10 cross** (a CUT shrub per `fly_hunt`), then called it **`fly_not_found`**.
 
 ## The verdict (measured, not recalled)
 
@@ -70,4 +80,10 @@ m['grid'][19][12]                     # '1'  (walkable door into map 92)
 
 ## Bottom line
 
-Not a failure to retry this baton — it lacks the one thing the door needs. The gate is real and measured (sealed grid + only-water ring + single ROM entrance + no SURF in party). The move that finishes the mission is a **surfer-capable baton onto the `0x14` west/south of the (12,19) island**, or a mission-level decision to source FLY from the Route 16 fallback instead.
+Not a failure to retry this baton — it lacks the one thing the door needs. The gate is real and measured (sealed grid + only-water ring + single ROM entrance + no SURF in party). The previous `fly-vermilion` run hit the same wall: it was refused at the map 92 door *and* refused at the Route 16 `17→10` cross, then finished **`fly_not_found`**.
+
+The move that finishes the mission is one of:
+
+1. **A surfer-capable baton** (e.g. the `b8_BATON_island_gyarados_safe.state` Gyarados line, or any baton holding an awake Gyarados) brought to the `0x14` water west/south of the (12,19) island, SURF onto the `0x39` land, then step on the door → map 92 → engage the 5 bodies and read FLY.
+2. **Route 16 fallback, correctly played**: the `17→10` refusal is a **CUT shrub**, not a dead hop (`fly_hunt` says this explicitly; Charizard already knows CUT). Approach it facing the shrub, `use_field_move("CUT")`, read the follow-up text, then continue `10→18→6→27→28` and look for the FLY — the warp list shows zero doors on map 28, so the FLY there (if it is there) is an unregistered building or a body, per `fly_hunt`.
+3. **Mission-level**: if the FLY giver is actually the map 30 island retreat or the map 93 Pidgey (same FLY, different shore), switch batons to the one already on that ground rather than hauling this party across the map.
