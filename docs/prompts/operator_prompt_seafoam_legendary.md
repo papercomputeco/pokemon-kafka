@@ -1,3 +1,8 @@
+> **SOLVED 2026-09-04.** Articuno (L50) caught on the main 7-badge baton; bank `seafoam_legend_caught.state`
+> (in BILL's PC). The measured route and catch sequence are in the journal (`grep ARTICUNO`) and the drivers
+> `probe_seafoam_west_entry.py` -> `probe_seafoam_holes_main.py` -> `probe_catch_legend.py`. The brief below is
+> kept as the record of the puzzle as it was posed.
+
 # Mission: stop Seafoam B4's current with STRENGTH, cross to the platform, catch the legendary
 
 You are the Extractor (puzzle seat). `uv run ...` for all Python. Print `date` at start and before any
