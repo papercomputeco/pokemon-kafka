@@ -48,3 +48,23 @@ and before any summary. Screenshot every refusal (`Rig.screenshot(tag)`) and loo
 `cinnabar.state` banked on map 8, or the journal holding, per boulder, what happened when it was
 pushed and what the current did afterwards -- with screenshots. That record is the deliverable if
 the crossing is not.
+
+## Measured since this brief was written (2026-09-04, later) — start from these
+
+- **Activate first, every boot.** `rig.use_field_move("STRENGTH", species="Gyarados")` →
+  "GYARADOS used STRENGTH." → "GYARADOS can move boulders." A push before that is answered
+  "This requires STRENGTH to move!" — that was the refusal on the first attempt at (5,15).
+- **Press length is the mechanic.** An 8-frame press never moves a boulder; a 16-frame hold does.
+  `Rig.strength_push(face)` now does this and judges by the **sprite table** (`rig.bodies()`),
+  not your position. Drain any page (B until `rig.textbox()` is empty) before every press.
+- **Geometry (ROM tiles, map 161):** boulders at (5,14) (3,15) (8,14) (9,14); `0x12` HOLE tiles
+  at (7,14) (4,15) (4,16) (9,16) — the dark squares in `push_9_14_left_40.png`. The row above
+  (5,14) is solid `0x10`. Rows 12–13 at x=8..9 are a 2×2 pocket you cannot enter.
+- **Two measured pushes:** (9,14) pushed UP from (9,15) moved → sprite at (9,13), i.e. into the
+  pocket — a dead end, do not repeat. (8,14) pushed LEFT from (9,14) *toward the hole* at (7,14)
+  was **refused** at 16 and 40 frames. That contradiction is the puzzle: find out what a boulder
+  needs to enter a hole (approach direction? a specific boulder? a different hole?) by pushing
+  and screenshotting, one press at a time. Boulders reset when you leave and re-enter the floor
+  (`seafoam_loop_stuck_3.state` is the clean floor).
+- Batons: `b3_push_9_15_up.state` (after the pocket push, for contrast).
+- Write every push's outcome to the journal as you go, as instructed above.

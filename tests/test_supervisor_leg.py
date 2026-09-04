@@ -2307,3 +2307,38 @@ def test_a_failed_gate_pass_that_ends_inside_the_building_retreats_first(tmp_pat
     runner.run()
     assert ("traverse", 9, False) in rig.calls
     assert all(w.startswith("1->") for w in runner.attempts)  # every wall charged is about map 1
+
+
+def test_exhaustion_lands_in_the_upstream_journal_for_the_next_leg(tmp_path):
+    """A wall found once must reach the next leg on that map without a human pasting it."""
+    rig = FakeRig(hops=[None] * 12)
+    mem = tmp_path / "memory"
+    runner = LegRunner(
+        rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path, memory_dir=mem
+    )
+    runner.run()
+    text = (mem / "observations.md").read_text()
+    assert "[important] map=1 exhausted" in text
+    assert "reaching goal 2" in text
+    assert "(session: supervis" in text
+    # and the reader that feeds describe() finds it by map
+    assert any("exhausted" in ln for ln in supervisor.prior_observations(1, path=mem / "observations.md"))
+
+
+def test_a_failed_journal_write_never_fails_the_leg(tmp_path, monkeypatch):
+    rig = FakeRig(hops=[None] * 12)
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner.memory_dir = tmp_path / "not-a-dir.md"
+    (tmp_path / "not-a-dir.md").write_text("a file where a directory is expected")
+    assert runner.run()["outcome"] == "gave-up"
+
+
+def test_a_full_bag_is_freed_before_a_body_is_talked_to(tmp_path):
+    """The hand-over fails silently at 20 stacks; the guard sits in front of the talk, not after the leg."""
+    rig = FakeRig(hops=[None])
+    calls = []
+    rig.bag_full = lambda: True
+    rig.make_room = lambda: calls.append("make_room") or True
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._go_and_talk((1, 1))
+    assert calls == ["make_room"]

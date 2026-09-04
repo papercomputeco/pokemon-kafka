@@ -18,6 +18,8 @@ HOPS = [  # (map, stair cell to step onto, map it leads to)
     (159, (13, 7), 160),
     (160, (5, 13), 161),
     (161, (25, 14), 160),
+    (162, (25, 4), 161),  # the current's drop point is B4's east water; its stair leads to B3's east region
+    (161, (25, 3), 160),
     (160, (25, 11), 159),
     (159, (23, 15), 192),
     (192, (26, 17), 31),
@@ -25,7 +27,9 @@ HOPS = [  # (map, stair cell to step onto, map it leads to)
 STATE = sys.argv[1] if len(sys.argv) > 1 else "data/local_runs/roster-bench/seafoam_west_door.state"
 rig = Rig(STATE, settle_on_boot=True)
 truth = json.load(open("references/rom_truth.json"))
-pairs = rt.loaded_pairs(truth)
+# Measured on 160 (25,4)->(25,7): the tileset-17 pair rule over-blocks the stair corridor, so the
+# planner walks the grid alone and lets the game refuse; pairs are a hypothesis on this tileset.
+pairs = set()
 print("start", rig.pos(), "| surf:", rig.knows_move("SURF"), "str:", rig.knows_move("STRENGTH"), flush=True)
 
 
