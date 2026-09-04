@@ -200,6 +200,17 @@ def fly_row_names(row_text: str, town: str) -> bool:
     return t == town.strip().upper()
 
 
+def booster_target(party) -> int | None:
+    """Which member a stat booster should go to: the lowest-level standing one.
+
+    Measured 2026-09-04: HP UP and CALCIUM 'used' on member 0 (a L100) consumed nothing -- the game
+    declines a booster that can do nothing, and the count never dropped. The member with the most
+    room to grow is the cheapest place to spend one; the verdict stays the stack count.
+    """
+    standing = [(lvl, i) for i, (_n, lvl, hp) in enumerate(party) if hp > 0]
+    return min(standing)[1] if standing else None
+
+
 class Rig:
     """A loaded cartridge plus the road engine, recording and emitting as it plays."""
 
@@ -437,7 +448,14 @@ class Rig:
             print(f"  bag full: {action} {name} to free a slot", flush=True)
             if action == "use":
                 if self.use_item(name):
-                    for _ in range(6):  # the member prompt and the "went up" pages
+                    try:
+                        target = booster_target(self.party())
+                    except (KeyError, AttributeError, TypeError):  # a rig without a party table
+                        target = None
+                    if target is not None and hasattr(self, "cursor_to"):
+                        self.ctl.wait(40)  # the party roster draws; put the highlight on the member
+                        self.cursor_to(target)
+                    for _ in range(6):  # pick the member, then the "went up" pages
                         self.ctl.press("a")
                         self.ctl.wait(40)
                 for _ in range(6):  # and back out of a refusal

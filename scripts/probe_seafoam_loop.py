@@ -53,6 +53,9 @@ def plan(mid, start, goal):
     m = M(mid)
     w, h = m["width"], m["height"]
     solid = {(s["x"], s["y"]) for s in m["sprites"] if s.get("pic") == 63}
+    # every stair but the one we want is a trap: walking over (25,3) on the way to (25,11) warped
+    # straight back down a floor (measured on 160)
+    solid |= {(w[0], w[1]) for w in m["warps"]} - {goal}
     prev = {start: None}
     q = deque([start])
     while q:
@@ -119,7 +122,12 @@ def follow(mid, goal):
     return "cap"
 
 
-start_i = next(i for i, (mp, _c, _n) in enumerate(HOPS) if mp == rig.pos()[0])
+# The same map appears twice in the loop (both stair regions); start from the hop whose stair is
+# actually reachable from here, preferring the later one -- measured: booting on B2 at (25,2) and
+# starting at the (5,13) hop walked nowhere and banked a "stuck" that was only a wrong index.
+_here = rig.pos()
+_cands = [i for i, (mp, cell, _n) in enumerate(HOPS) if mp == _here[0] and plan(mp, _here[1:], cell)]
+start_i = _cands[-1] if _cands else next(i for i, (mp, _c, _n) in enumerate(HOPS) if mp == _here[0])
 if rig.pos()[0] == 31:
     rig.io.press("up", hold=8, release=8)
     rig.ctl.wait(40)

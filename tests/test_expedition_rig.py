@@ -1701,3 +1701,9 @@ def test_make_room_reaches_the_tm_fallback_under_its_full_name(tmp_path):
     r.toss_stack = lambda item: tossed.append(item) or True
     assert r.make_room() is True  # no use_item on this rig: the use entries are skipped, the TM is tossed
     assert tossed == [228]
+
+
+def test_a_booster_goes_to_the_lowest_level_standing_member():
+    assert rig.booster_target([("Charizard", 100, 341), ("Gyarados", 20, 73), ("Hypno", 99, 341)]) == 1
+    assert rig.booster_target([("Charizard", 100, 341), ("Gyarados", 20, 0)]) == 0  # fainted members are skipped
+    assert rig.booster_target([]) is None
