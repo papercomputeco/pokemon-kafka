@@ -314,6 +314,8 @@ class _Mem(dict):
             return self._menu.cursor
         if key == 0xCC28:
             return len(self._menu.entries) - 1
+        if key == rig.qm.ADDR_IN_BATTLE:
+            return 0  # these menus open on a quiet field screen; use_field_move refuses to open START mid-battle
         return super().__getitem__(key)
 
 
