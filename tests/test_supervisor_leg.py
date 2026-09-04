@@ -2331,3 +2331,14 @@ def test_a_failed_journal_write_never_fails_the_leg(tmp_path, monkeypatch):
     runner.memory_dir = tmp_path / "not-a-dir.md"
     (tmp_path / "not-a-dir.md").write_text("a file where a directory is expected")
     assert runner.run()["outcome"] == "gave-up"
+
+
+def test_a_full_bag_is_freed_before_a_body_is_talked_to(tmp_path):
+    """The hand-over fails silently at 20 stacks; the guard sits in front of the talk, not after the leg."""
+    rig = FakeRig(hops=[None])
+    calls = []
+    rig.bag_full = lambda: True
+    rig.make_room = lambda: calls.append("make_room") or True
+    runner = LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    runner._go_and_talk((1, 1))
+    assert calls == ["make_room"]

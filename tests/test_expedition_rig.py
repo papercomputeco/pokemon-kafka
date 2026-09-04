@@ -1609,3 +1609,33 @@ def test_forget_pick_refuses_when_every_move_is_one_to_keep():
 
 def test_forget_pick_refuses_when_no_move_is_on_screen():
     assert rig.forget_pick([(0, "AAAAAAAAAA100"), (1, "NOT ABLE")], MOVES, set()) is None
+
+
+# ------------------------------------------------- freeing a bag slot
+
+
+def test_room_plan_uses_what_only_helps_before_tossing_anything():
+    bag = [
+        ("NUGGET", 1),
+        ("HM01", 1),
+        ("TM28", 1),
+        ("HP UP", 1),
+        ("HYPER POTION", 1),
+        ("CALCIUM", 1),
+        ("POKe FLUTE", 1),
+    ]
+    plan = rig.room_plan(bag)
+    assert plan[:2] == [("use", "HP UP"), ("use", "CALCIUM")]
+    assert plan[2] == ("toss", "NUGGET")
+    assert ("toss", "HYPER POTION") in plan and plan.index(("toss", "HYPER POTION")) < plan.index(("toss", "TM28"))
+    assert not any(n in ("HM01", "POKe FLUTE") for _a, n in plan)  # HMs and unlisted items are never touched
+
+
+def test_room_plan_tosses_the_largest_multi_stack_before_singles():
+    plan = rig.room_plan([("POKe BALL", 7), ("ULTRA BALL", 3), ("TM10", 1)])
+    assert plan[0] == ("toss", "POKe BALL")
+    assert plan[-1] == ("toss", "TM10")
+
+
+def test_room_plan_is_empty_when_nothing_is_expendable():
+    assert rig.room_plan([("HM04", 1), ("CARD KEY", 1)]) == []

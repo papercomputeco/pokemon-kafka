@@ -1150,6 +1150,11 @@ class LegRunner:
             mp, x, y = self.rig.pos()
             if (x, y) not in adjacent:
                 return False
+        if hasattr(self.rig, "bag_full") and self.rig.bag_full() and hasattr(self.rig, "make_room"):
+            # A body's hand-over silently fails at 20 stacks (the Secret House said its greeting
+            # eleven times, HM03 never landed). Free a slot BEFORE the talk, not after the leg.
+            self.log("  bag full before the talk: freeing a slot")
+            self.rig.make_room()
         before = self.rig.bag()
         said = self.rig.talk("right" if bx > x else "left" if bx < x else "down" if by > y else "up")
         # settle() closes the win / award box that a battle leaves open. It is the step that

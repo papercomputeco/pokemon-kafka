@@ -157,6 +157,40 @@ def forget_pick(rows, move_ids: dict, keep: set) -> tuple[int, str] | None:
     return None
 
 
+# Items whose only effect is to raise a stat when used: freeing a slot with one of these costs
+# nothing. The names are the cartridge's own (rom_truth item table), matched exactly.
+BOOSTERS = ("HP UP", "PROTEIN", "IRON", "CARBOS", "CALCIUM", "RARE CANDY")
+SELL_ONLY = ("NUGGET",)
+
+
+def room_plan(bag_named) -> list[tuple[str, str]]:
+    """How to free one bag slot, cheapest loss first. Pure: (action, item name) pairs, in order.
+
+    Measured 2026-09-04: at 20 stacks the Secret House NPC repeated his greeting eleven times and
+    HM03 never landed; a tossed NUGGET fixed it on the next talk. Using a consumable is better
+    than tossing anything, so stat boosters go first (only upside), then the sell-only stack,
+    then the largest multi-item stack (the old measured rule: key items are single-copy), then a
+    healing stack, then TMs. HMs and anything not on these lists are never touched.
+    """
+    names = [(n, q) for n, q in bag_named]
+    plan: list[tuple[str, str]] = []
+    for n, _q in names:
+        if n in BOOSTERS:
+            plan.append(("use", n))
+    for n, _q in names:
+        if n in SELL_ONLY:
+            plan.append(("toss", n))
+    stacks = sorted(((q, n) for n, q in names if q > 1 and not n.startswith(("HM", "TM"))), reverse=True)
+    plan.extend(("toss", n) for _q, n in stacks)
+    for n, _q in names:
+        if ("POTION" in n or "ETHER" in n or "ELIXER" in n) and ("toss", n) not in plan:
+            plan.append(("toss", n))
+    for n, _q in names:
+        if n.startswith("TM"):
+            plan.append(("toss", n))
+    return plan
+
+
 class Rig:
     """A loaded cartridge plus the road engine, recording and emitting as it plays."""
 
@@ -374,38 +408,35 @@ class Rig:
             self.ctl.wait(30)
         return len(self.bag()) < before
 
-    def make_room(self) -> bool:
-        """Toss the largest stack so a pickup can land. Returns True if a slot came free.
+    def make_room(self) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
+        """Free one bag slot along ``room_plan``: use what only helps, toss what only sells.
 
-        Which items are safe to lose is not a judgement this makes from lore: quantity is the
-        measured signal. Key items are single-copy, consumables come in stacks, so the biggest
-        stack is both the most expendable and the one whose loss costs the least.
+        The verdict is the stack count dropping -- never the menu having been navigated. A use that
+        the game refuses ("It won't have any effect") leaves the count alone and the plan moves on.
         """
-        stacks = [(qty, item) for item, qty in self.bag() if qty > 1]
-        candidates = [max(stacks)] if stacks else []
-        if not candidates:
-            # Every slot holds a single item. Rather than guess which are expendable, ask the
-            # cartridge: TMs are named TM<n> in the extracted item table, we are carrying eight,
-            # and they are the most redundant thing in the bag. The game itself is the backstop —
-            # it refuses to toss a key item, so a slot that does not come free tells us to move
-            # on to the next candidate instead of losing something irreplaceable.
-            candidates = [(1, item) for item, _q in self.bag() if self.item_name(item).startswith("TM")]
-        if not candidates:
-            print("  bag is full and nothing in it is expendable", flush=True)
-            return False
-        freed = False
-        for qty, item in candidates:
-            print(f"  bag full: tossing {qty}x {self.item_name(item)} to free a slot", flush=True)
-            freed = self.toss_stack(item)
-            if freed:
-                break
-            print(f"  the game would not part with {self.item_name(item)}", flush=True)
-        # Backing out of the ITEM menu is not the same as the world accepting input again, and a
-        # pickup that starts inside a half-closed menu sends its A presses to the menu. Measured:
-        # a slot was freed on Silph 2F and the very next collect_item still came back empty.
-        self.settle()
-        self.emit("supervisor.tossed", item=self.item_name(item), qty=qty, freed=freed)
-        return freed
+        before = len(self.bag())
+        if before < BAG_SLOTS:
+            return True
+        by_name = {self.item_name(i): i for i, _q in self.bag()}
+        for action, name in room_plan(self.bag_named(full=True)):
+            if name not in by_name:
+                continue
+            print(f"  bag full: {action} {name} to free a slot", flush=True)
+            if action == "use":
+                if self.use_item(name):
+                    for _ in range(6):  # the member prompt / the "went up" pages; B backs out of a refusal
+                        self.ctl.press("a")
+                        self.ctl.wait(40)
+                for _ in range(6):
+                    self.ctl.press("b")
+                    self.ctl.wait(25)
+            else:
+                self.toss_stack(by_name[name])
+            if len(self.bag()) < before:
+                self.emit("bag.freed", action=action, item=name, slots=len(self.bag()))
+                return True
+        print("  bag is full and nothing in it is expendable", flush=True)
+        return False
 
     def item_balls(self, map_id: int) -> list[tuple[int, int]]:
         """Where this cartridge says the item balls are on a map — extracted, never recalled."""
