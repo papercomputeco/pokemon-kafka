@@ -11,7 +11,8 @@ sys.path.insert(0, "scripts")
 import quartermaster as qm  # noqa: E402
 from expedition_rig import Rig  # noqa: E402
 
-rig = Rig("data/local_runs/roster-bench/fly_house-186.state", settle_on_boot=True)
+STATE = sys.argv[1] if len(sys.argv) > 1 else "data/local_runs/roster-bench/fly_house-186.state"
+rig = Rig(STATE, settle_on_boot=True)
 
 
 def drain(limit=12):
