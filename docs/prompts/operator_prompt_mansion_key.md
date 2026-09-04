@@ -59,3 +59,9 @@ STATIC SUMMARY (computed from the ROM at launch):
 `secret_key.state` banked with SECRET KEY in the bag, or the journal holding the full
 switch→door catalog with the stairs door's controlling switch identified (or proven absent
 among the reachable ones), with screenshots.
+
+MEASURED LATER (after pressing 215's switch):
+- 215 from (10,6): 240 cells; warps touching it: [[6, 1, 214, 3], [25, 14, 214, 2]]; (7,11) is NOT ROM-connected to (10,6) (a wall, not a door).
+- 214 from the (6,1) landing with (9,4) shut: 324 cells; warps touching it: [[5, 10, 165, 4], [7, 10, 215, 0], [6, 1, 215, 1]]. The step (8,4)->(9,4) is REFUSED after 215's switch: 215's switch shut (9,4), which was open before, so the (6,1) pocket and 215's (10,6) region form a closed loop until 215's switch is pressed again.
+- Untested: whether 215's switch group also includes 165's stairs door (20,17)/(21,17). It cannot be tested from inside the loop; the order of presses across floors is the puzzle.
+wrote 1
