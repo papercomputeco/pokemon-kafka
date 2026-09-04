@@ -1,0 +1,1824 @@
+{
+ "161": {
+  "pushes": [
+   {
+    "after": "3,15;5,14;8,14;9,14;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "bb7870e67cae",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:42"
+   },
+   {
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "unreachable",
+    "run_id": "bb7870e67cae",
+    "stand": [
+     6,
+     14
+    ],
+    "walk": "map-change"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "bb7870e67cae",
+    "stand": [
+     8,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:43"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "bb7870e67cae",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-14_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:43"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:54"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:54"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:54"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:55"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,14;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:55"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:53:55"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-14_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:56"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:53:56"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:56"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;5,14;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-14_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:56"
+   },
+   {
+    "after": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "boulder": [
+     4,
+     14
+    ],
+    "config": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     4,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-13_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:57"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:57"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:57"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;4,14;8,13;9,14;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:57"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:57"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 466 EXP. Points!",
+    "ts": "10:53:58"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:58"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 471 EXP. Points!",
+    "ts": "10:53:58"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:58"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "down",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-15_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:59"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,14;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:59"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:59"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:59"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:53:59"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;5,14;8,13;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:00"
+   },
+   {
+    "after": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "boulder": [
+     4,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     4,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-14_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:00"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:00"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:00"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;4,14;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-14_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:00"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:01"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:01"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:01"
+   },
+   {
+    "after": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "down",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-15_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:01"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:01"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:02"
+   },
+   {
+    "after": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;5,14;8,14;9,12;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:02"
+   },
+   {
+    "after": "2,14;3,15;8,13;9,14;18,6;19,6",
+    "boulder": [
+     3,
+     14
+    ],
+    "config": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     3,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     4,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_2-14_3-15_8-13_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:02"
+   },
+   {
+    "after": "3,14;3,15;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-12_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:02"
+   },
+   {
+    "after": "3,14;3,15;8,13;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-13_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:02"
+   },
+   {
+    "after": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,14;3,15;8,13;9,14;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:03"
+   },
+   {
+    "after": "3,14;3,15;8,12;9,14;18,6;19,6",
+    "boulder": [
+     4,
+     14
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     5,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:54:03"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:03"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:03"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:54:04"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "down",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-15_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:04"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "boulder": [
+     9,
+     14
+    ],
+    "config": "3,15;4,14;8,12;9,14;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:54:04"
+   },
+   {
+    "after": "3,14;3,15;8,13;9,13;18,6;19,6",
+    "boulder": [
+     4,
+     14
+    ],
+    "config": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     5,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:04"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;4,14;8,13;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:05"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,15;5,14;8,12;9,13;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:06"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:06"
+   },
+   {
+    "after": "3,15;4,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 343 EXP. Points!",
+    "ts": "10:54:06"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:06"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     8,
+     12
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:07"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     9,
+     15
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "down",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:07"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "boulder": [
+     9,
+     15
+    ],
+    "config": "3,15;5,14;8,12;9,15;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:07"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     5,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 442 EXP. Points!",
+    "ts": "10:54:07"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     5,
+     14
+    ],
+    "config": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     6,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     6,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:07"
+   },
+   {
+    "after": "3,15;5,14;8,12;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:08"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     13
+    ],
+    "config": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:08"
+   },
+   {
+    "after": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;5,14;8,13;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:08"
+   },
+   {
+    "after": "2,14;3,15;8,14;9,13;18,6;19,6",
+    "boulder": [
+     3,
+     14
+    ],
+    "config": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     3,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     4,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_2-14_3-15_8-14_9-13_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:08"
+   },
+   {
+    "after": "3,14;3,15;8,13;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 343 EXP. Points!",
+    "ts": "10:54:08"
+   },
+   {
+    "after": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:09"
+   },
+   {
+    "after": "3,14;3,15;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     13
+    ],
+    "config": "3,14;3,15;8,14;9,13;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-14_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:09"
+   },
+   {
+    "after": "3,14;3,15;8,14;9,12;18,6;19,6",
+    "boulder": [
+     4,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     5,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     5,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:09"
+   },
+   {
+    "after": "3,15;4,14;8,13;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     15
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:09"
+   },
+   {
+    "after": "3,15;4,14;8,15;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "down",
+    "outcome": "moved",
+    "player": [
+     8,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     13
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-15_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:09"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     14
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "refused",
+    "player": [
+     9,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     14
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:10"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:10"
+   },
+   {
+    "after": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;4,14;8,14;9,12;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:10"
+   },
+   {
+    "after": "3,15;5,14;8,16;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     15
+    ],
+    "config": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "dir": "down",
+    "outcome": "moved",
+    "player": [
+     8,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-16_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:10"
+   },
+   {
+    "after": "3,15;5,14;7,15;9,12;18,6;19,6",
+    "boulder": [
+     8,
+     15
+    ],
+    "config": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     9,
+     15
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     15
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_3-15_5-14_7-15_9-12_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:10"
+   },
+   {
+    "after": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "dir": "up",
+    "outcome": "refused",
+    "player": [
+     9,
+     13
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     9,
+     13
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:11"
+   },
+   {
+    "after": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "boulder": [
+     9,
+     12
+    ],
+    "config": "3,15;5,14;8,15;9,12;18,6;19,6",
+    "dir": "right",
+    "outcome": "refused",
+    "player": [
+     8,
+     12
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     8,
+     12
+    ],
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:11"
+   },
+   {
+    "after": "1,14;3,15;8,13;9,14;18,6;19,6",
+    "boulder": [
+     2,
+     14
+    ],
+    "config": "2,14;3,15;8,13;9,14;18,6;19,6",
+    "dir": "left",
+    "outcome": "moved",
+    "player": [
+     2,
+     14
+    ],
+    "run_id": "b7a0b7126e73",
+    "stand": [
+     3,
+     14
+    ],
+    "state": "data/local_runs/roster-bench/oracle/161_1-14_3-15_8-13_9-14_18-6_19-6.state",
+    "text": "AAAAAAAAAA gained 438 EXP. Points!",
+    "ts": "10:54:11"
+   }
+  ],
+  "states": {
+   "1,14;3,15;8,13;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_1-14_3-15_8-13_9-14_18-6_19-6.state",
+   "2,14;3,15;8,13;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_2-14_3-15_8-13_9-14_18-6_19-6.state",
+   "2,14;3,15;8,14;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_2-14_3-15_8-14_9-13_18-6_19-6.state",
+   "3,14;3,15;8,12;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-12_9-14_18-6_19-6.state",
+   "3,14;3,15;8,13;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-13_9-13_18-6_19-6.state",
+   "3,14;3,15;8,13;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-13_9-14_18-6_19-6.state",
+   "3,14;3,15;8,14;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-14_9-12_18-6_19-6.state",
+   "3,14;3,15;8,14;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-14_3-15_8-14_9-13_18-6_19-6.state",
+   "3,15;4,14;8,12;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-13_18-6_19-6.state",
+   "3,15;4,14;8,12;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-14_18-6_19-6.state",
+   "3,15;4,14;8,12;9,15;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-12_9-15_18-6_19-6.state",
+   "3,15;4,14;8,13;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-12_18-6_19-6.state",
+   "3,15;4,14;8,13;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-13_18-6_19-6.state",
+   "3,15;4,14;8,13;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-13_9-14_18-6_19-6.state",
+   "3,15;4,14;8,14;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-14_9-12_18-6_19-6.state",
+   "3,15;4,14;8,14;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-14_9-13_18-6_19-6.state",
+   "3,15;4,14;8,15;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_4-14_8-15_9-12_18-6_19-6.state",
+   "3,15;5,14;7,15;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_7-15_9-12_18-6_19-6.state",
+   "3,15;5,14;8,12;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-12_18-6_19-6.state",
+   "3,15;5,14;8,12;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-13_18-6_19-6.state",
+   "3,15;5,14;8,12;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-14_18-6_19-6.state",
+   "3,15;5,14;8,12;9,15;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-12_9-15_18-6_19-6.state",
+   "3,15;5,14;8,13;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-12_18-6_19-6.state",
+   "3,15;5,14;8,13;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-13_18-6_19-6.state",
+   "3,15;5,14;8,13;9,14;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-13_9-14_18-6_19-6.state",
+   "3,15;5,14;8,14;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-14_9-12_18-6_19-6.state",
+   "3,15;5,14;8,14;9,13;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-14_9-13_18-6_19-6.state",
+   "3,15;5,14;8,15;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-15_9-12_18-6_19-6.state",
+   "3,15;5,14;8,16;9,12;18,6;19,6": "data/local_runs/roster-bench/oracle/161_3-15_5-14_8-16_9-12_18-6_19-6.state"
+  }
+ }
+}

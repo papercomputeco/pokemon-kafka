@@ -18,6 +18,8 @@ HOPS = [  # (map, stair cell to step onto, map it leads to)
     (159, (13, 7), 160),
     (160, (5, 13), 161),
     (161, (25, 14), 160),
+    (162, (25, 4), 161),  # the current's drop point is B4's east water; its stair leads to B3's east region
+    (161, (25, 3), 160),
     (160, (25, 11), 159),
     (159, (23, 15), 192),
     (192, (26, 17), 31),

@@ -70,8 +70,8 @@ def classify(before_map: int, after_map: int, before_boulders, after_boulders) -
 class Catalog:
     """Every push ever tried, per map and configuration. Saved after each record."""
 
-    def __init__(self, path: Path = CATALOG_PATH):
-        self.path = Path(path)
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path or CATALOG_PATH)  # resolved at call time, so tests can point it elsewhere
         self.data = json.loads(self.path.read_text()) if self.path.exists() else {}
 
     def records(self, map_id: int) -> list[dict]:
