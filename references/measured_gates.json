@@ -1,11 +1,4 @@
 {
-  "10": {
-    "13,25,left": "AAAAAAA got 500 for winning!",
-    "35,13,right": "AAAAAAA got 500 for winning!",
-    "36,14,up": "AAAAAAA got 500 for winning!",
-    "37,14,up": "AAAAAAA got 500 for winning!",
-    "38,14,up": "AAAAAAA got 500 for winning!"
-  },
   "156": {
     "4,0,down": "Leaving early"
   },
@@ -25,15 +18,11 @@
     "24,5,up": "Hey kid! What are you doing here?",
     "24,6,left": "Hey kid! What are you doing here?",
     "24,6,right": "Hey kid! What are you doing here?",
-    "4,11,up": "AAAAAAA got 1400 for winning!",
-    "4,3,down": "AAAAAAA got 1400 for winning!",
     "4,5,up": "be merged with TEAM ROCKET!",
     "4,9,down": "be merged with TEAM ROCKET!",
-    "5,11,up": "AAAAAAA got 1400 for winning!",
     "5,14,left": "Help! I a SILPH employee.",
     "5,14,up": "Help! I a SILPH employee.",
     "5,15,left": "Help! I a SILPH employee.",
-    "5,3,down": "AAAAAAA got 1400 for winning!",
     "5,5,up": "be merged with TEAM ROCKET!",
     "5,9,down": "be merged with TEAM ROCKET!"
   },
@@ -51,10 +40,8 @@
     "11,6,up": "My POK\u00e9MON are my loyal soldiers!",
     "12,14,left": "TEAM ROCKET has taken command of",
     "12,6,right": "My POK\u00e9MON are my loyal soldiers!",
-    "12,7,down": "AAAAAAA got 1400 for winning!",
     "12,9,up": "Darn! It needs a CARD KEY!",
     "13,14,left": "TEAM ROCKET has taken command of",
-    "13,7,down": "AAAAAAA got 1400 for winning!",
     "13,9,up": "Darn! It needs a CARD KEY!",
     "26,6,down": "",
     "26,8,up": "Intruder spotted!",
@@ -99,10 +86,8 @@
     "2,14,left": "Heheh!",
     "2,15,left": "Heheh!",
     "2,16,left": "Heheh!",
-    "20,13,up": "AAAAAAA got 1400 for winning!",
     "20,14,up": "A child intruder? That must be you",
     "20,3,down": "Darn! It needs a CARD KEY!",
-    "21,13,up": "AAAAAAA got 1400 for winning!",
     "21,14,left": "A child intruder? That must be you!",
     "21,14,right": "A child intruder? That must be you!",
     "21,14,up": "A child intruder? That must be you!",
@@ -122,11 +107,7 @@
     "15,2,right": "",
     "16,15,right": "I am one of the 4 ROCKET BROTHERS!",
     "16,2,right": "That's as far as you'll go!",
-    "17,2,right": "That's as far as you'll go!",
-    "6,8,right": "AAAAAAA got 840 for winning!",
-    "6,9,right": "AAAAAAA got 840 for winning!",
-    "8,8,left": "AAAAAAA got 840 for winning!",
-    "8,9,left": "AAAAAAA got 840 for winning!"
+    "17,2,right": "That's as far as you'll go!"
   },
   "233": {
     "12,12,left": "Darn! It needs a CARD KEY!",
@@ -142,17 +123,13 @@
   },
   "234": {
     "10,7,down": "OPTION EXIT",
-    "10,9,left": "AAAAAAA got 1400 for winning!",
-    "10,9,up": "AAAAAAA got 1400 for winning!",
     "11,7,down": "OPTION EXIT",
-    "11,9,up": "AAAAAAA got 1400 for winning!",
     "3,9,left": "Welcome to the 10F! So good of",
     "4,9,left": "Welcome to the 10F! So good of",
     "4,9,right": "Welcome to the 10F! So good of",
     "6,2,left": "999999999999999 999999999999999999 999999999999999999 999999999999999999 999999999999999999 999999999999999999",
     "7,2,left": "Enough of your silly games!",
     "8,2,left": "Enough of your silly games!",
-    "9,10,down": "AAAAAAA got 1400 for winning!",
     "9,2,left": "Enough of your silly games!"
   }
 }
