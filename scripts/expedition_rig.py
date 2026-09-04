@@ -1206,6 +1206,9 @@ class Rig:
         for _ in range(6):  # close anything already open before opening ours
             self.ctl.press("b")
             self.ctl.wait(25)
+        if self.mem[qm.ADDR_IN_BATTLE]:
+            print("  a battle is open; the field move waits for it", flush=True)
+            return False
         self.ctl.press("start")
         self.ctl.wait(50)
         for _ in range(8):  # POKeMON is the row above ITEM
@@ -1218,7 +1221,11 @@ class Rig:
         # By species when given: a fainted member is not drawn, so party index != menu index.
         target = member if species is None else self.menu_row_of(species)
         if target is None:
-            print(f"  {species} is not on the POKeMON menu (fainted members are not listed)", flush=True)
+            # Measured 2026-09-04 on Route 20: this fired for a standing Gyarados because START
+            # was pressed while a wild battle's text ("attack missed!") owned the screen -- the
+            # party menu never opened and the roster read was a battle screen. Say which it was.
+            why = "a battle owns the screen" if self.mem[qm.ADDR_IN_BATTLE] else "fainted members are not listed"
+            print(f"  {species} is not on the POKeMON menu ({why})", flush=True)
             for _ in range(6):
                 self.ctl.press("b")
                 self.ctl.wait(25)
