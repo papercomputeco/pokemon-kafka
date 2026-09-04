@@ -191,6 +191,15 @@ def room_plan(bag_named) -> list[tuple[str, str]]:
     return plan
 
 
+def fly_row_names(row_text: str, town: str) -> bool:
+    """Does the town map's top row name ``town``? Measured 2026-09-04 on Route 16: the row decodes
+    as ``ToPALLET TOWN`` / ``ToSAFFRON CITY`` (no space after ``To``); DOWN and UP cycle it."""
+    t = row_text.strip().upper()
+    if t.startswith("TO"):
+        t = t[2:].strip()
+    return t == town.strip().upper()
+
+
 class Rig:
     """A loaded cartridge plus the road engine, recording and emitting as it plays."""
 
@@ -1512,6 +1521,51 @@ class Rig:
             self.ctl.press("b")
             self.ctl.wait(30)
         return False
+
+    def fly_to(self, town: str, presses: int = 12) -> bool:  # pragma: no cover - drives the emulator
+        """FLY to ``town`` by the town map: DOWN until the top row names it, then A.
+
+        Measured 2026-09-04: indoors the game answers "<FLYER> can't FLY here." and no map opens;
+        outdoors the map's row 0 reads ``To<TOWN>`` and DOWN/UP cycle the destination while
+        LEFT/RIGHT do nothing. The verdict is the map id changing -- the town is looked up in the
+        cartridge's map names when known, otherwise any map change after the pick counts.
+        """
+        flyer_i = self.knows_move("FLY")
+        if flyer_i is None:
+            print("  nobody standing knows FLY", flush=True)
+            return False
+        before = self.pos()
+        if not self.use_field_move("FLY", species=self.party()[flyer_i][0]):
+            return False
+        self.ctl.wait(60)
+        said = self.textbox()
+        if "CAN'T FLY" in said.upper():
+            print(f"  {said}", flush=True)
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
+        for _ in range(presses):
+            if fly_row_names(self.window_row(0), town):
+                break
+            self.ctl.press("down")
+            self.ctl.wait(30)
+        if not fly_row_names(self.window_row(0), town):
+            print(f"  the town map never offered {town!r}; last row {self.window_row(0)!r}", flush=True)
+            for _ in range(6):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            return False
+        self.ctl.press("a")
+        for _ in range(12):  # the flight animation, then the landing
+            self.ctl.wait(30)
+            if self.pos()[0] != before[0]:
+                break
+        landed = self.pos()[0] != before[0]
+        print(f"  FLY to {town}: {'landed at' if landed else 'still at'} {self.pos()}", flush=True)
+        if landed:
+            self.emit("flew", town=town, pos=list(self.pos()))
+        return landed
 
     def teach(
         self, machine: str, species: str | None = None

@@ -1682,3 +1682,11 @@ def test_make_room_moves_past_a_use_the_game_refused(tmp_path):
     r.emit = lambda *a, **kw: None
     assert r.make_room() is True
     assert tossed == [60]  # the largest stack, once using got nowhere
+
+
+def test_the_town_map_row_is_matched_without_the_to_prefix():
+    """Measured: the row decodes as 'ToPALLET TOWN' with no space after 'To'."""
+    assert rig.fly_row_names("ToPALLET TOWN", "Pallet Town")
+    assert rig.fly_row_names("ToFUCHSIA CITY", "FUCHSIA CITY")
+    assert not rig.fly_row_names("ToSAFFRON CITY", "FUCHSIA CITY")
+    assert not rig.fly_row_names("", "PALLET TOWN")
