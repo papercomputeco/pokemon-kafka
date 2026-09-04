@@ -1895,3 +1895,27 @@ def test_exhaustion_attaches_a_screenshot_to_the_written_record(tmp_path):
     assert "exhausted_map1" in rig.shots
     doc = next(tmp_path.iterdir()).read_text()
     assert "SCREENSHOT AT THE POINT OF FAILURE: <fake>/exhausted_map1.png" in doc
+
+
+def _truth_with_an_item_ball():
+    t = _truth()
+    t["maps"]["1"]["sprites"] = [{"x": 5, "y": 5, "kind": "item", "item": 64}]
+    return t
+
+
+def test_recon_picks_up_item_balls_by_default():
+    """The GOLD TEETH sat on the Safari Zone's own floor through every earlier leg that walked
+    past it, because sweeping was opt-in (the SWEEP_ITEMS menu action) and nobody chose it. Recon
+    now sweeps every map it visits, the same way it now screenshots and talks to bodies."""
+    rig = FakeRig(hops=[None], truth=_truth_with_an_item_ball())
+    rig._pickups[(5, 5)] = 64
+    LegRunner(rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert 64 in rig.bag()
+
+
+def test_recon_does_not_resweep_a_map_it_has_already_visited():
+    rig = FakeRig(hops=[None, None], truth=_truth_with_an_item_ball())
+    rig._pickups[(5, 5)] = 64
+    runner = LegRunner(rig, goal=2, consult=_consult("RETRY_SAME"), log=lambda *_: None)
+    runner.run()
+    assert rig.bag().count(64) == 1

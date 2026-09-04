@@ -755,6 +755,12 @@ class LegRunner:
             # screen the tile it refused on was a boulder in open water, not a barrier. The
             # Investigator's whole job is to look before reasoning, so it looks first.
             self.rig.screenshot(f"recon_map{mp}")
+        # Pick up and catalog every item ball on the map, not only when a seat happens to choose
+        # SWEEP_ITEMS off a menu. The GOLD TEETH sat on the Safari Zone's own floor (map 219,
+        # (19,7)) through every earlier leg that walked past it, because sweeping was opt-in and
+        # nobody opted in. sweep_items is idempotent (gated on self.looted), so calling it here
+        # unconditionally costs nothing on a map already swept.
+        self.sweep_items()
         sprites = [
             (s["x"], s["y"])
             for s in self.rig.truth["maps"].get(str(mp), {}).get("sprites", [])
