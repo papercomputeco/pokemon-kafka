@@ -447,6 +447,7 @@ class LegRunner:
         clear_floor: bool = False,
         engage_rounds: int = DEFAULT_ENGAGE_ROUNDS,
         learnings_dir: Path | None = None,
+        memory_dir: Path | None = None,
         want: str | None = None,
         hunt: str | None = None,
     ) -> None:
@@ -470,6 +471,7 @@ class LegRunner:
         # hunt in one night because the supervisor could only judge a leg on a badge or a ball.
         self.hunt = hunt
         self.learnings_dir = learnings_dir or LEARNINGS_DIR
+        self.memory_dir = memory_dir or Path("pokedex/memory")  # the upstream journal, see prior_observations
         self.attempts: Counter = Counter()  # wall id -> attempts spent on it
         self.tried: list[str] = []  # every action executed, for the exhaustion record
         self.notes: list[str] = []  # measured observations that feed the next consult
@@ -1266,6 +1268,27 @@ class LegRunner:
         self.rig.emit(
             "supervisor.exhausted", goal=self.goal, pos=[mp, x, y], failure=failure, doc=str(path), tried=self.tried
         )
+        # The record above is prose for a human. The journal line is for the NEXT LEG: prior_observations
+        # hands it to every seat that lands on this map, so a wall found once is never re-derived
+        # blind. Until 2026-09-04 exhaustion reached the future only if a person pasted the doc into
+        # a mission by hand; the walls that fell today were ones a prior leg had already measured.
+        try:
+            from memory_writer import append_observations
+
+            tried = ", ".join(str(t) for t in self.tried[-6:]) or "nothing"
+            row = {
+                "referenced_time": time.strftime("%Y-%m-%d"),
+                "priority": "important",
+                "source_session": "supervisor",
+                "content": (
+                    f"map={mp} exhausted at ({x},{y}) reaching goal {self.goal}: {failure}; tried {tried}"
+                    + (f"; screenshot {shot}" if shot else "")
+                    + f"; record {path.name}"
+                ),
+            }
+            append_observations(self.memory_dir, [row], dedupe=True)
+        except OSError as e:  # the journal must never fail a leg
+            self.log(f"  journal write failed: {e}")
         self.log(f"EXHAUSTED — record written to {path}")
         return path
 
