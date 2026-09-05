@@ -471,13 +471,17 @@ class Rig:
             self.ctl.wait(30)
         return len(self.bag()) < before
 
-    def make_room(self) -> bool:
-        """Free one bag slot along ``room_plan``: use what only helps, toss what only sells.
+    def make_room(self, allow_toss: bool = False) -> bool:
+        """Free one bag slot along ``room_plan``: use what only helps; toss only when told to.
 
         The caller decides when (``bag_full``); this frees exactly one slot. The verdict is the
         stack count dropping -- never the menu having been navigated. A use the game refuses
         ("It won't have any effect") leaves the count alone and the plan moves on; so does a toss
         the game refuses (a key item), which is the backstop against lore about what is safe.
+
+        Tossing is off by default: the 2026-09-05 replays threw away NUGGETs and TMs on bag-full
+        talks. The game's own answer to a full bag is the Center PC (``store_at_pc``); a leg that
+        cannot reach one says so (``bag.full``) rather than selling the bag one item at a time.
         """
         before = len(self.bag())
         # room_plan sees the FULL names ("TM28 DIG"); the id lookup must use the same names, or every
@@ -487,6 +491,8 @@ class Rig:
         can_use = hasattr(self, "use_item") and hasattr(self, "ctl")
         for action, name in room_plan(named):
             if name not in by_name or (action == "use" and not can_use):
+                continue
+            if action == "toss" and not allow_toss:
                 continue
             print(f"  bag full: {action} {name} to free a slot", flush=True)
             if action == "use":
@@ -512,6 +518,9 @@ class Rig:
                 if hasattr(self, "emit"):
                     self.emit("bag.freed", action=action, item=name, slots=len(self.bag()))
                 return True
+        print("  bag full: nothing to use; store at a Center PC (store_at_pc) rather than toss", flush=True)
+        if hasattr(self, "emit"):
+            self.emit("bag.full", slots=len(self.bag()), hint="store_at_pc")
         print("  bag is full and nothing in it is expendable", flush=True)
         return False
 

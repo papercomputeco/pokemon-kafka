@@ -381,6 +381,17 @@ def test_engage_that_changes_nothing_is_reported_as_such():
     assert result["outcome"] == "engaged-no-badge" and not result["ok"]
 
 
+def test_engage_never_talks_to_an_item_ball():
+    """Balls are in the live sprite table too; they are sweep_items' job. Talking to one read the
+    START menu the bag step had left on the window layer (measured on maps 194, 219, 234)."""
+    truth = _truth()
+    truth["maps"]["2"]["sprites"] = [{"kind": "item", "x": 2, "y": 2, "pic": 61, "item": 10}]
+    rig = FakeRig(start=(2, 3, 3), badges=0b11111, bodies={(4, 3), (2, 2)}, truth=truth)
+    LegRunner(rig, goal=2, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    talked = {c[1] for c in rig.calls if c[0] == "talk"}
+    assert talked and (2, 2) not in talked
+
+
 def _truth_with_a_nurse():
     """The fake world plus a Center nurse ON MAP 2, because `engage_bodies` meets the bodies the
     *cartridge* lists, not the live sprite table — and in the real game the nurse is one of them.
@@ -1162,6 +1173,18 @@ def test_hop_blocker_is_none_for_a_pair_with_no_connection():
     rig = FakeRig()
     assert supervisor.hop_blocker(rig, {"via": "edge", "to": 404}) is None
     assert supervisor.hop_blocker(rig, None) is None
+
+
+def test_a_map_missing_from_the_truth_is_not_a_crash():
+    """The connection table can lack a side (edge_cells answers empty); the truth can also lack the
+    map the rig reads (a garbage map byte mid-warp). Every reader of the edge handles the second."""
+    rig = FakeRig(start=(404, 1, 1))
+    assert supervisor.hop_blocker(rig, {"via": "edge", "to": 2}) is None
+    runner = LegRunner(rig, goal=2, engage=False, consult=_consult("GIVE_UP"), log=lambda *_: None)
+    assert runner.read_refusal({"via": "edge", "to": 2}) == ""
+    runner._act("USE_GATE_WARP", {"via": "edge", "to": 2})  # targets fall back to the map's warps
+    facts = supervisor.describe(rig, 2, {"via": "edge", "to": 2}, "no-path")
+    assert "no side for this pair" in facts
 
 
 def test_describe_survives_a_hop_whose_pair_has_no_side():

@@ -4,7 +4,8 @@
 
 Writes {name: {"map": m, "x": x, "y": y, "party": [[species, level, hp], ...], "bag": n}} so a
 catalog sweep can pick, for any map, a save that already stands on it — without booting 700 states
-again. Boots without settling (no button presses): the read is the banked position as saved.
+again. Boots settled: five saves banked on warp pads reported the destination map when read
+unsettled (measured 2026-09-05: 148 vs 147, 74 vs 17, 85 vs 22, 192 vs 31, 220 vs 156).
 """
 
 import json
@@ -25,7 +26,7 @@ for i, path in enumerate(states, 1):
     if path.stem in index:
         continue
     try:
-        rig = Rig(str(path), settle_on_boot=False)
+        rig = Rig(str(path), settle_on_boot=True)  # a save banked on a warp pad reads the wrong map unsettled
         mp, x, y = rig.pos()
         index[path.stem] = {
             "map": mp,

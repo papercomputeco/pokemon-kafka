@@ -285,7 +285,7 @@ def hop_blocker(rig, hop: dict | None) -> tuple[int, int] | None:
             if doors:
                 targets = doors  # the terrain is severed: the gate door is the real objective
         return road.blocking_body(rig.truth, rig.pairs, mp, (x, y), targets, rig.bodies())
-    except (StopIteration, KeyError):
+    except KeyError:  # the map itself is missing from the truth; a missing side is not an error
         return None
 
 
@@ -341,13 +341,16 @@ def describe(
         if hop["via"] == "edge":
             try:
                 cells, direction = road.edge_cells(rig.truth, mp, hop["to"])
+            except KeyError:
+                cells, direction = set(), ""
+            if not direction:
+                lines.append(f"OPEN EDGE CELLS toward {hop['to']}: the connection table has no side for this pair.")
+            else:
                 shown = sorted(cells)[:14]
                 lines.append(
                     f"OPEN EDGE CELLS toward {hop['to']} (step {direction}): {shown}"
                     + (" ..." if len(cells) > 14 else "")
                 )
-            except (StopIteration, KeyError):
-                lines.append(f"OPEN EDGE CELLS toward {hop['to']}: the connection table has no side for this pair.")
         else:
             lines.append(f"WARP TILE: ({hop.get('x')}, {hop.get('y')}) on this map.")
     else:
@@ -742,7 +745,7 @@ class LegRunner:
                     direction = "right" if dx > 0 else "left" if dx < 0 else "down"
                 else:
                     direction = "down" if dy > 0 else "up"
-        except (StopIteration, KeyError):
+        except KeyError:  # the map itself is missing from the truth; a missing side is not an error
             return ""
         before = self.rig.pos()
 
@@ -810,10 +813,11 @@ class LegRunner:
             if hop and hop["via"] == "edge":
                 try:
                     targets, _d = road.edge_cells(self.rig.truth, cur, hop["to"])
-                except (StopIteration, KeyError):
+                except KeyError:  # the map itself is missing from the truth; a missing side is not an error
                     targets = set()
             if not targets:
-                targets = {(w[0], w[1]) for w in self.rig.truth["maps"][str(cur)]["warps"]}
+                warps = self.rig.truth["maps"].get(str(cur), {}).get("warps", [])
+                targets = {(w[0], w[1]) for w in warps}
             self.rig.gate(cur, targets)
             return
         if action == "BACK_OUT_AND_REENTER":
@@ -1218,7 +1222,11 @@ class LegRunner:
             if done():
                 return True
             mp, _x, _y = self.rig.pos()
-            all_bodies = list(self.rig.bodies())
+            # Item balls are in the live sprite table too; they are sweep_items' job, and "talking"
+            # to one reads whatever the bag step left on the window layer ("OPTION EXIT", measured
+            # on maps 194, 219, 234) -- never the body's words.
+            balls = set(self.rig.item_balls(mp)) if hasattr(self.rig, "item_balls") else set()
+            all_bodies = [b for b in self.rig.bodies() if b not in balls]
             if not all_bodies:
                 return done()
             # Keep a stable order for the retry phase: which bodies reappear is decided by the

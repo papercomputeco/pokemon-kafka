@@ -1372,3 +1372,31 @@ def test_the_water_model_calls_anything_off_the_map_land():
     assert road._water_model(m, 0, 2) is False
     assert road._water_model(m, 0, -1) is False
     assert road._water_model(m, 0, 0) is True
+
+
+def test_edge_cells_without_a_connection_is_empty_not_an_error():
+    truth = {"maps": {"1": _map(["111", "111"], connections={"north": 2}), "2": _map(["111"])}}
+    assert road.edge_cells(truth, 1, 2) == ({(0, 0), (1, 0), (2, 0)}, "up")
+    assert road.edge_cells(truth, 1, 9) == (set(), "")  # 17->10 on a reroute raised StopIteration here
+
+
+def test_a_door_is_reachable_and_a_steppable_target_but_never_a_corridor():
+    """The Elite Four rooms' door tiles (4,0)/(5,0) are warps the collision grid calls solid."""
+    import rom_truth as rt
+
+    m = _map(["000", "111", "111"], warps=[[1, 0, 9, 0]])
+    truth = {"maps": {"1": m}}
+    region = road.reachable(truth, set(), 1, (1, 2))
+    assert (1, 0) in region and (0, 0) not in region and (2, 0) not in region
+    assert rt.path_on_map(truth, set(), 1, (1, 2), {(1, 0)}) == [(1, 2), (1, 1), (1, 0)]
+    assert rt.path_on_map(truth, set(), 1, (1, 2), {(0, 0)}) is None  # not a warp: still solid
+    # the door is a terminal cell: nothing routes *through* it to the far side
+    m2 = _map(["101", "000", "111"], warps=[[1, 1, 9, 0]])
+    assert rt.path_on_map({"maps": {"1": m2}}, set(), 1, (1, 2), {(1, 0)}) is None
+
+
+def test_shore_stand_and_surf_cross_bail_when_the_pair_has_no_side():
+    assert road.shore_stand(_strip_truth(), PAIRS, 1, 404, (3, 0)) is None  # a tiled map, no side to 404
+    io = SurfIO(1, (2, 0, 0))
+    assert road.surf_cross(io, _surf_truth(1), set(), 1, 404, arm_surf=io.arm) == "no-route"
+    assert io.mem[qm.ADDR_MAP] == 1

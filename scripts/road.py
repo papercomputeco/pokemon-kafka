@@ -93,12 +93,19 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
     def tile(tx, ty):
         return int(tiles[ty][2 * tx : 2 * tx + 2], 16)
 
+    # A door is a warp tile the collision grid calls solid (the Elite Four rooms' (4,0)/(5,0),
+    # measured): it is reachable from the cell beside it, and leads off the map, so it is a
+    # terminal cell here -- seen, never expanded from.
+    warps = {(wp[0], wp[1]) for wp in m.get("warps", [])}
     seen = {tuple(start)}
     queue = deque([tuple(start)])
     while queue:
         x, y = queue.popleft()
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
             if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in seen or (nx, ny) in blocked:
+                continue
+            if (nx, ny) in warps and m["grid"][ny][nx] != "1" and m["grid"][y][x] == "1":
+                seen.add((nx, ny))
                 continue
             if m["grid"][ny][nx] != "1" or not rt.passable(m, pairs, x, y, nx, ny):
                 continue
@@ -433,7 +440,9 @@ def blocking_body(truth, pairs, map_id: int, start, targets, bodies):
 def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], str]:
     """The open cells on ``cur``'s edge facing ``nxt``, and the outward direction."""
     m = truth["maps"][str(cur)]
-    side = next(k for k, v in m.get("connections", {}).items() if v == nxt)
+    side = next((k for k, v in m.get("connections", {}).items() if v == nxt), None)
+    if side is None:  # not a neighbour by connection: no edge, no direction (measured: 17->10 on a reroute)
+        return set(), ""
     if side in ("north", "south"):
         row = 0 if side == "north" else m["height"] - 1
         return {(x, row) for x in range(m["width"]) if m["grid"][row][x] == "1"}, _OUTWARD[side]
@@ -695,6 +704,8 @@ def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tup
     if not m.get("tiles"):
         return None
     _cells, d = edge_cells(truth, cur, nxt)
+    if not d:
+        return None
     w, h = m["width"], m["height"]
 
     def far_edge(c):
@@ -849,6 +860,8 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
     when the shore has refused every row (the ladder then bans and reroutes, so a bad line
     costs one hop rather than hanging)."""
     _, d = edge_cells(truth, cur, nxt)
+    if not d:
+        return "no-route"
     left = SURF_MAX_STEPS
     armed = False
     stand = shore_stand(truth, pairs, cur, nxt, read_pos(io)[1:])

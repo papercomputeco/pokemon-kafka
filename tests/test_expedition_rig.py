@@ -191,8 +191,19 @@ def test_make_room_tosses_the_largest_stack(monkeypatch, tmp_path):
         return True
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room() is False  # never by default: the 2026-09-05 replays sold NUGGETs and TMs this way
+    assert tossed == {}
+    assert r.make_room(allow_toss=True) is True
     assert tossed["item"] == 60  # FRESH WATER x6, not the LIFT KEY and not RARE CANDY x2
+
+
+def test_make_room_says_so_when_only_the_pc_can_help(tmp_path):
+    r = _bag_rig([(74, 1), (60, 6)], items={"74": "LIFT KEY", "60": "FRESH WATER"})
+    r.telemetry_root = tmp_path
+    events = []
+    r.emit = lambda event, **fields: events.append((event, fields))
+    assert r.make_room() is False
+    assert events == [("bag.full", {"slots": 2, "hint": "store_at_pc"})]
 
 
 def test_make_room_refuses_when_every_slot_is_a_single_item(tmp_path):
@@ -243,7 +254,7 @@ def test_make_room_falls_back_to_a_tm_when_nothing_is_stacked(tmp_path):
         return True
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tried == [207]  # the TM, never the LIFT KEY or the SILPH SCOPE
 
 
@@ -257,7 +268,7 @@ def test_make_room_moves_on_when_the_game_refuses_a_toss(tmp_path):
         return item == 210  # the first one will not go
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tried == [207, 210]
 
 
@@ -1683,7 +1694,7 @@ def test_make_room_moves_past_a_use_the_game_refused(tmp_path):
     r.use_item, r.ctl = (lambda name: True), Ctl()  # selected, but the count never moved
     r.toss_stack = lambda item: tossed.append(item) or True
     r.emit = lambda *a, **kw: None
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tossed == [60]  # the largest stack, once using got nowhere
 
 
@@ -1702,7 +1713,9 @@ def test_make_room_reaches_the_tm_fallback_under_its_full_name(tmp_path):
     r.telemetry_root = tmp_path
     tossed = []
     r.toss_stack = lambda item: tossed.append(item) or True
-    assert r.make_room() is True  # no use_item on this rig: the use entries are skipped, the TM is tossed
+    assert (
+        r.make_room(allow_toss=True) is True
+    )  # no use_item on this rig: the use entries are skipped, the TM is tossed
     assert tossed == [228]
 
 
