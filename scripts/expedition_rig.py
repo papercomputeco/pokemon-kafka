@@ -948,7 +948,7 @@ class Rig:
         c.wait(60)
 
     def _face_water(self) -> None:
-        """Turn to face a water model (0x11/0x14) so the SURF activation has a tile to land on.
+        """Turn to face a water model (``road.WATER_TILES``) so the SURF activation has a tile to land on.
 
         Measured on map 30: the identical arm from (4,9) fails while facing the solid western
         tile (0x3a) — the player stays put — and succeeds while facing the water tile to the
@@ -968,7 +968,7 @@ class Rig:
                 self.ctl.wait(25)
                 return
 
-    def _arm_surf(self) -> bool:
+    def _arm_surf(self, _retry: bool = False) -> bool:
         """Arm SURF on whoever actually knows it — the measured lead first, then by species.
 
         The old path assumed "Surf is the lead's job (member 0)" and then read the species off the
@@ -999,6 +999,14 @@ class Rig:
         holder = self.knows_move("SURF")
         if holder is None:
             return False
+        # Route 20 at (24,14), measured 2026-09-05 (run 20260905-231616-f9a9): a swimmer spotted the
+        # player on the step before the arm; the in-battle flag was still 0 while the approach
+        # cutscene ran, the START press went into it, and "Gyarados is not on the POKeMON menu (a
+        # battle owns the screen)" was written up as a refused surf. A battle that is on, or that
+        # opens while we are arming, is fought first and the arm asked again once.
+        io = getattr(self, "io", None)
+        if io is not None and io.read(qm.ADDR_IN_BATTLE):
+            self.battle()
         # Measured on map 30: the identical arm from (4,9) fails when the player faces the
         # solid west tile (0x3a) and lands at (4,10) — on the water — when they face it from the
         # south (0x14). The activation animates the player onto the tile they are facing, so the
@@ -1028,6 +1036,9 @@ class Rig:
             self.ctl.press("a")
             self.ctl.wait(45)
         refused = self.pos() == before  # settled before the clear loop; pressing B never moves us
+        if refused and io is not None and io.read(qm.ADDR_IN_BATTLE) and not _retry:
+            self.battle()  # the keystrokes went into a battle that opened under them: fight, then ask once more
+            return self._arm_surf(_retry=True)
         if refused:
             self.screenshot("surf_refused")  # the picture, not just the sentence -- see screenshot()
         for _ in range(6):  # a refusal left on screen freezes every later step

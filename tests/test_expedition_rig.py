@@ -1819,3 +1819,44 @@ def test_boulders_are_the_live_cells_of_pic_63_sprites_by_slot():
     assert r.boulders() == {(3, 12)}
     r.pos = lambda: (999, 0, 0)
     assert r.boulders() == set()
+
+
+def test_a_battle_around_the_arm_is_fought_and_the_arm_asked_again():
+    """Route 20 (24,14), 2026-09-05: a swimmer's approach ate the START press; the flag was up by
+    the time the arm read its verdict. Fight it, arm once more, and only then call it refused."""
+    party = [("Gyarados", 100, 377), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados")
+    flags = {"battle": 1, "fought": 0}
+
+    class _IO:
+        def read(self, addr):
+            return flags["battle"] if addr == qm.ADDR_IN_BATTLE else 0
+
+    r.io = _IO()
+    r.battle = lambda io=None: flags.update(battle=0, fought=flags["fought"] + 1)
+    # a battle already on when the arm is asked: fought first, then the arm proceeds
+    assert r._arm_surf() is True
+    assert flags["fought"] == 1
+    # the keystrokes go into a battle that opens under them (the lead arm does not move us while
+    # the flag comes up): fought, re-asked once, then it succeeds
+    r2, fake2 = _surf_rig(party, "Gyarados")
+    state = {"battle": 0, "fought": 0, "calls": 0}
+
+    class _IO2:
+        def read(self, addr):
+            return state["battle"] if addr == qm.ADDR_IN_BATTLE else 0
+
+    real_surf = r2.surf_facing
+
+    def ambushed_surf(face=None):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            state["battle"] = 1  # the swimmer arrives as the menu opens; the player does not move
+            return
+        real_surf(face)
+
+    r2.io = _IO2()
+    r2.surf_facing = ambushed_surf
+    r2.battle = lambda io=None: state.update(battle=0, fought=state["fought"] + 1)
+    assert r2._arm_surf() is True
+    assert state["fought"] == 1 and state["calls"] == 2

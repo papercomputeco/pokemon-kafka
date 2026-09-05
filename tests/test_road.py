@@ -1124,10 +1124,11 @@ def _water_map(rows, connections=None):
 def test_the_water_model_reads_the_grid_when_there_is_one():
     """Tiles present: the model answers from the cartridge. Absent (fake truth): it proposes
     everything and lets the game's refusals be the authority."""
-    m = _water_map(["1400", "1411"])
+    m = _water_map(["1400", "3211"])
     assert road._water_model(m, 0, 0) is True  # 0x14, water
     assert road._water_model(m, 1, 0) is False  # 0x00, not water
-    assert road._water_model(m, 1, 1) is True  # 0x11, the shallows class
+    assert road._water_model(m, 0, 1) is True  # 0x32, the shore-edged water (measured on Route 21)
+    assert road._water_model(m, 1, 1) is False  # 0x11, the pond tile SURF refuses (measured on map 15)
     assert road._water_model({"tiles": None}, 9, 9) is True
 
 
@@ -1698,9 +1699,10 @@ def test_surf_route_needs_a_tile_model_before_it_believes_it_is_afloat():
 
 
 def _shore_map(rows, **kw):
-    """'w' water (0x14, not walkable), '.' land (0x03, walkable), '#' rock (0x3a, solid)."""
+    """'w' water (0x14), 's' shore-edged water (0x32) - neither walkable; '.' land (0x03, walkable);
+    '#' rock (0x3a, solid)."""
     m = _map(["".join("1" if c == "." else "0" for c in r) for r in rows], **kw)
-    m["tiles"] = ["".join({"w": "14", ".": "03"}.get(c, "3a") for c in r) for r in rows]
+    m["tiles"] = ["".join({"w": "14", "s": "32", ".": "03"}.get(c, "3a") for c in r) for r in rows]
     return m
 
 
@@ -1743,14 +1745,14 @@ class PlazaIO(RoadIO):
         if tile == "03":
             self.armed = False  # surfing onto land gets off the water
             self._tp((mp, nx, ny))
-        elif tile == "14" and self.armed:
+        elif tile in ("14", "32") and self.armed:
             self._tp((mp, nx, ny))
 
     def arm(self):
         self.arms += 1
         mp, x, y = qm.read_pos(self)
         dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[self.face]
-        if self._tile(x + dx, y + dy) != "14":
+        if self._tile(x + dx, y + dy) not in ("14", "32"):
             return False  # "There's no place to get off!"
         self.armed = True
         self._tp((mp, x + dx, y + dy))
@@ -1901,3 +1903,47 @@ def test_a_wild_drawn_on_the_shore_step_is_fought_before_the_arm():
     io = WildShore(_route21_truth(), (1, 4, 1), wild_on="left")
     assert road._board_water(io, io.truth, PAIRS, 1, 2, io.arm, fight) is True
     assert io.fought == 1 and io.arms == 1
+
+
+def _route20_truth():
+    """Route 20 in miniature (31 -> 30, measured 2026-09-05): a west sea, an island of land, a
+    column of shore-edged water (0x32) on its east side, and the east sea that alone touches the
+    east edge. No water joins the seas: the crossing is sea -> island -> sea."""
+    rows = ["wwww..sww", "wwww..sww", "wwww..sww", "wwww..#ww"]
+    return {"maps": {"1": _shore_map(rows, connections={"east": 2}), "2": _map(["1"] * 4, connections={"west": 1})}}
+
+
+class SeaIO(PlazaIO):
+    """PlazaIO whose east edge opens from any water cell on the last column."""
+
+    def press(self, btn, hold=8, release=8):
+        mp, x, y = qm.read_pos(self)
+        m = self.truth["maps"]["1"]
+        if btn == "right" and x == m["width"] - 1 and self._tile(x, y) in ("14", "32") and self.armed:
+            self.pressed.append(btn)
+            self._tp((2, 0, y))
+            return
+        super().press(btn, hold, release)
+
+
+def test_surf_cross_lands_on_the_island_and_boards_from_its_far_shore():
+    """Afloat in the west sea: no water reaches the east edge from here, so the crossing surfs to
+    the island, walks it, arms on the far shore facing the 0x32 water and routes east."""
+    truth = _route20_truth()
+    io = SeaIO(truth, (1, 0, 1), afloat=True)
+    east = {(x, y) for x in (7, 8) for y in range(4)} | {(6, 0), (6, 1), (6, 2)}
+    assert road._edge_water(truth["maps"]["1"], "right") == east
+    assert road.surf_cross(io, truth, PAIRS, 1, 2, arm_surf=io.arm) is True
+    assert qm.read_pos(io)[0] == 2 and io.arms == 1  # one arm: on the island's east shore
+
+
+def test_hop_to_far_shore_declines_when_a_walk_already_reaches_the_shore_or_there_is_none():
+    truth = _route20_truth()
+    ashore = SeaIO(truth, (1, 4, 1))  # on the island already: boarding handles it, no hop
+    assert road._hop_to_far_shore(ashore, truth, PAIRS, 1, 2, "right", ashore.arm, None) is False
+    landlocked = {"maps": {"1": _shore_map(["....", "...."], connections={"east": 2})}}
+    io = SeaIO(landlocked, (1, 0, 0))
+    assert road._hop_to_far_shore(io, landlocked, PAIRS, 1, 2, "right", io.arm, None) is False
+    no_stand = {"maps": {"1": _shore_map(["##ww", "##ww"], connections={"east": 2})}}  # water, no land beside it
+    io = SeaIO(no_stand, (1, 2, 0), afloat=True)
+    assert road._hop_to_far_shore(io, no_stand, PAIRS, 1, 2, "right", io.arm, None) is False

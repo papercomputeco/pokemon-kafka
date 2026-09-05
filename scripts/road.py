@@ -686,8 +686,14 @@ def cross_edge(io, truth, pairs, cur: int, nxt: int, *, battle=_default_battle):
 # and answered live by the game's refusals, which re-plan the route.
 SURF_MAX_STEPS = 200  # water steps per crossing; a straight run in the connection direction
 # reaches the far edge well under this, and more than this is a wrong map, not a long sea.
-WATER_TILES = {0x11, 0x14}  # 0x14 measured standable (the island ring stands on it); 0x11 is
-# the shallows class of the routes; either refusal re-plans around it
+# Every id here is measured, not recalled. 0x14: standable (the island ring stands on it). 0x32:
+# the shore-edged water beside a land column - three left steps from (5,y) onto (4,y) on Route 21
+# moved the player (probe_tile32, 2026-09-05); it is what the tile model at Route 20's x=62 and
+# Route 19's x=0 is made of. 0x11 was here as "the shallows class" without a measurement, and the
+# game refused SURF onto it 103 times on map 15 ("No SURFing on GYARADOS here!") - it is a pond
+# tile the fence rows enclose, and a model that called it water sent every 15 -> 3 leg to a shore
+# that opens nothing.
+WATER_TILES = {0x14, 0x32}
 
 
 def _water_model(m, x: int, y: int) -> bool:
@@ -744,21 +750,7 @@ def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tup
     _cells, d = edge_cells(truth, cur, nxt)
     if not d:
         return None
-    w, h = m["width"], m["height"]
-
-    def far_edge(c):
-        return {"left": c[0] == 0, "right": c[0] == w - 1, "up": c[1] == 0, "down": c[1] == h - 1}[d]
-
-    good: set = set()  # water cells in a component that touches the far edge
-    seen: set = set()
-    for y in range(h):
-        for x in range(w):
-            if (x, y) in seen or not _water_model(m, x, y):
-                continue
-            comp = _water_reach(m, x, y, set())
-            seen |= set(comp)
-            if any(far_edge(c) for c in comp):
-                good |= set(comp)
+    good = _edge_water(m, d)  # water cells in a component that touches the far edge
     if not good:
         return None
     faces = ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left"))
@@ -823,6 +815,55 @@ def _board_water(io, truth, pairs, cur: int, nxt: int, arm_surf, battle) -> bool
         io.wait(40)
     mp, x, y = read_pos(io)
     return mp == cur and _water_model(m, x, y)
+
+
+def _edge_water(m, d: str) -> set:
+    """Every water cell (in the model) whose component touches the edge the crossing leaves by."""
+    w, h = m["width"], m["height"]
+    far = {"left": lambda c: c[0] == 0, "right": lambda c: c[0] == w - 1, "up": lambda c: c[1] == 0}
+    far["down"] = lambda c: c[1] == h - 1
+    good: set = set()
+    seen: set = set()
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in seen or not _water_model(m, x, y):
+                continue
+            comp = _water_reach(m, x, y, set())
+            seen |= set(comp)
+            if any(far[d](c) for c in comp):
+                good |= set(comp)
+    return good
+
+
+def _hop_to_far_shore(io, truth, pairs, cur: int, nxt: int, d: str, arm_surf, battle) -> bool:
+    """When no water from here reaches the far edge, cross to land that does: surf to the island
+    (or bank) whose shore touches edge-reaching water, and stand on it. True once ashore there.
+
+    Route 20 (31 -> 30), measured 2026-09-05 (probe_r20_east, 20260905-225930-8d52): the west sea
+    stops at x=61 and the east sea starts at x=63; between them stands the island - land at
+    x=54..61 with the shore-edged water 0x32 at x=62. No water joins the two seas, so every
+    routed crossing from the west found nothing and every straight run ended on the island's west
+    rock. The crossing is sea -> island -> sea: ``surf_route`` lands on the island (it already
+    walks a shore, arms, and re-plans refused cells), and the caller boards from its far shore.
+    """
+    m = truth["maps"][str(cur)]
+    good = _edge_water(m, d)
+    if not good:
+        return False
+    w, h = m["width"], m["height"]
+    stands = set()
+    for x, y in good:
+        for dx, dy in _FACES:
+            n = (x + dx, y + dy)
+            if 0 <= n[0] < w and 0 <= n[1] < h and m["grid"][n[1]][n[0]] == "1":
+                stands.add(n)
+    if not stands:
+        return False
+    here = tuple(read_pos(io)[1:3])
+    if not _water_model(m, *here) and reachable(truth, pairs, cur, here) & stands:
+        return False  # a walk already reaches a shore of the far water: nothing to hop
+    r = surf_route(io, truth, pairs, cur, stands, arm_surf=arm_surf, battle=battle)
+    return r is True and read_pos(io)[0] == cur
 
 
 def _touches_far_edge(m, x: int, y: int, d: str) -> bool:
@@ -1213,6 +1254,10 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
         # opens the north edge is a column six tiles west. Board from the shore if on land, BFS
         # the water to an edge cell, step out. The straight run below stays as the fallback.
         r = _water_cross(io, truth, cur, nxt, d, battle, pairs=pairs, arm_surf=arm_surf)
+        if r is None and read_pos(io)[0] == cur and _hop_to_far_shore(io, truth, pairs, cur, nxt, d, arm_surf, battle):
+            # ashore on the land whose far side touches the edge water (Route 20's island): board
+            # there and route again
+            r = _water_cross(io, truth, cur, nxt, d, battle, pairs=pairs, arm_surf=arm_surf)
         if r is not None:
             return r
         if read_pos(io)[0] != cur:
