@@ -1829,3 +1829,36 @@ def test_surf_cross_reads_a_crossing_made_while_boarding():
         return True
 
     assert road.surf_cross(io, io.truth, PAIRS, 1, 2, arm_surf=arm_across) is True
+
+
+def test_edge_has_water_reads_the_edge_line_of_the_tile_model():
+    """Cinnabar's east column (8 -> 31): land rows 4..13 and water rows 14..16 on one edge."""
+    truth = _route21_truth()
+    assert road.edge_has_water(truth, 1, 2) is True  # the x=2..3 water column reaches row 0
+    rows = ["...", "..w", "..."]  # water on the east column only, not on the top or west edge
+    shore = {"maps": {"1": _shore_map(rows, connections={"east": 2, "north": 3, "west": 4})}}
+    assert road.edge_has_water(shore, 1, 2) is True
+    assert road.edge_has_water(shore, 1, 3) is False
+    assert road.edge_has_water(shore, 1, 4) is False
+    assert road.edge_has_water(shore, 1, 9) is False  # no connection: no side
+    assert road.edge_has_water({"maps": {"1": _map(["11"], connections={"east": 2})}}, 1, 2) is False  # no model
+
+
+def test_surf_cross_from_a_shore_edge_boards_beside_the_edge_and_steps_out():
+    """Cinnabar -> Route 20 in miniature: the east column has land rows (which face a cliff) and
+    a water row; standing on the land beside the water, the crossing boards it and steps east."""
+    rows = ["...#", "...#", "....", "wwww"]
+    truth = {"maps": {"1": _shore_map(rows, connections={"east": 2}), "2": _map(["1"] * 4, connections={"west": 1})}}
+
+    class EastIO(PlazaIO):
+        def press(self, btn, hold=8, release=8):
+            mp, x, y = qm.read_pos(self)
+            if btn == "right" and x == 3 and self._tile(x, y) == "14":
+                self.pressed.append(btn)
+                self._tp((2, 0, y))
+                return
+            super().press(btn, hold, release)
+
+    io = EastIO(truth, (1, 3, 2))
+    assert road.surf_cross(io, truth, PAIRS, 1, 2, arm_surf=io.arm) is True
+    assert io.arms == 1 and qm.read_pos(io) == (2, 0, 3)

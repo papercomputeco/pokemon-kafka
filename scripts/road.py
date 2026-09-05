@@ -465,6 +465,29 @@ def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], s
     return {(col, y) for y in range(m["height"]) if m["grid"][y][col] == "1"}, _OUTWARD[side]
 
 
+def edge_has_water(truth: dict, cur: int, nxt: int) -> bool:
+    """Does ``cur``'s edge line facing ``nxt`` carry water in the tile model?
+
+    Cinnabar -> Route 20 (8 -> 31), measured 2026-09-05 on lanes 4 and 5 (~800 s each): the east
+    column has land at rows 4..13, so the land cross walked there and was refused - the far side
+    of those rows is a cliff tile - and "land on the near edge" was read as a genuine block. The
+    crossing is on the water rows 14..16 of the same column. An edge with land AND water is a
+    shore, and the water is the part that opens; a modelled edge with no water is a wall.
+    """
+    m = truth["maps"][str(cur)]
+    if not m.get("tiles"):
+        return False
+    _cells, d = edge_cells(truth, cur, nxt)
+    if not d:
+        return False
+    w, h = m["width"], m["height"]
+    if d in ("up", "down"):
+        row = 0 if d == "up" else h - 1
+        return any(_water_model(m, x, row) for x in range(w))
+    col = 0 if d == "left" else w - 1
+    return any(_water_model(m, col, y) for y in range(h))
+
+
 def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap: int = 500, avoid_warps: bool = True):
     """BFS-walk toward the nearest target; battles are the handler's, stalls get A/B cycles.
 

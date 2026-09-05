@@ -960,7 +960,14 @@ def test_cross_routes_a_failed_cross_to_surf_only_when_the_edge_is_water(monkeyp
 
     # a land edge that still fails is a real block, not water -> surf must not swallow it
     monkeypatch.setattr(road_mod, "edge_cells", lambda *a: ({(0, 0)}, "left"))
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: False)
     assert make().cross(1, 2) == "stuck-on-edge"
+
+    # a shore: land cells on the edge AND water on the same edge line (Cinnabar's east column,
+    # 8 -> 31) -> the refused land cross is surfed
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: True)
+    assert make().cross(1, 2) == "surfed"
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: False)
 
     # the connection isn't modelled -> the water verdict was a guess, keep the land failure
     def no_map(*a):

@@ -851,8 +851,10 @@ class Rig:
             cells, _d = road.edge_cells(self.truth, cur, nxt)
         except (KeyError, StopIteration, IndexError):
             return res  # the connection isn't modelled; "water" was a guess, keep the real failure
-        if cells:  # land on the near edge: a genuine block, not water
-            return res
+        if cells and not road.edge_has_water(self.truth, cur, nxt):
+            return res  # land on the near edge and no water beside it: a genuine block
+        # No land to stand on, or a shore (land rows AND water rows on the same edge: Cinnabar's
+        # east column, measured 2026-09-05) - the crossing is the water's.
         return road.surf_cross(self.io, self.truth, self.pairs, cur, nxt, arm_surf=self._arm_surf, battle=battle)
 
     # Measured: with the roster drawn on rows 0-11, the refusal "No SURFing on / GYARADOS here!"
