@@ -1750,3 +1750,26 @@ def test_room_plan_spares_the_kit_and_tosses_tms_before_medicine():
     plan2 = room_plan([("FRESH WATER", 6), ("TM07 HORN DRILL", 1), ("ULTRA BALL", 3)])
     assert plan2[0] == ("toss", "FRESH WATER") and ("toss", "ULTRA BALL") not in plan2
     assert is_kit("GREAT BALL") and is_kit("FULL RESTORE") and not is_kit("NUGGET")
+
+
+def test_storage_plan_banks_tms_then_single_items_and_keeps_the_kit_hms_and_the_carried_item():
+    """Measured at Cinnabar 2026-09-04: the lab refused the OLD AMBER over a full bag and room_plan's answer was
+    to toss a TM. The Center's PC is the game's own answer: TMs first, then single-copy items; never HMs, the kit,
+    or the item the leg is carrying."""
+    from expedition_rig import storage_plan
+
+    bag = [
+        ("S.S.TICKET", 1),
+        ("HM01 CUT", 1),
+        ("SECRET KEY", 1),
+        ("TM27 FISSURE", 1),
+        ("MAX REPEL", 4),
+        ("ULTRA BALL", 20),
+        ("OLD AMBER", 1),
+        ("NUGGET", 3),
+    ]
+    plan = storage_plan(bag, keep=("OLD AMBER",))
+    assert plan[0] == "TM27 FISSURE"
+    assert plan[1:] == ["S.S.TICKET", "SECRET KEY"]
+    assert "HM01 CUT" not in plan and "OLD AMBER" not in plan and "ULTRA BALL" not in plan
+    assert storage_plan([("HM03 SURF", 1), ("HYPER POTION", 5)]) == []

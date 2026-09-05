@@ -206,6 +206,23 @@ def is_kit(name: str) -> bool:
     return any(w in n for w in KIT_WORDS)
 
 
+def storage_plan(bag_named, keep=()) -> list[str]:
+    """What to leave in the Center's PC to free bag slots, cheapest loss first. Pure: item names, in order.
+
+    The game has an item storage in every Center, so a full bag need not lose anything: measured
+    2026-09-04 at Cinnabar, the lab said "Your pack is crammed full!" over the OLD AMBER and the old
+    room plan's answer was to toss TM27 FISSURE. Storage keeps it. TMs go first (single copies, only
+    ever spent once), then every other single-copy item that is not an HM; the kit and anything in
+    ``keep`` (the item the leg is carrying somewhere) stay in the bag. Whether the game accepts a
+    key item into storage is the PC's verdict, not this list's.
+    """
+    keep_up = {k.upper() for k in keep}
+    names = [(n, q) for n, q in bag_named if n.upper() not in keep_up and not n.startswith("HM") and not is_kit(n)]
+    plan = [n for n, _q in names if n.startswith("TM")]
+    plan += [n for n, q in names if q == 1 and n not in plan]
+    return plan
+
+
 def fly_row_names(row_text: str, town: str) -> bool:
     """Does the town map's top row name ``town``? Measured 2026-09-04 on Route 16: the row decodes
     as ``ToPALLET TOWN`` / ``ToSAFFRON CITY`` (no space after ``To``); DOWN and UP cycle it."""
@@ -2150,45 +2167,74 @@ class Rig:
         catch. `make_room` only helps when something is stacked; everything here is a single key
         item or TM. Storage is the player's OWN PC — the one whose menu is WITHDRAW ITEM /
         DEPOSIT ITEM / TOSS ITEM — which is the same screen that was mistaken for the Pokemon box.
+
+        Measured 2026-09-04 at Cinnabar's Center: the deposit list SCROLLS (three names in the
+        window, the rest below), so a text-matched cursor cannot reach the tenth entry -- the
+        entry is picked by its bag index through ``menu_cursor_to`` (cursor + scroll), the same
+        register pair the deposit roster needed. And every early return used to leave the PC menu
+        open, where the next routine's A presses deposited whatever was highlighted (the MOON
+        STONE, the S.S.TICKET and the SECRET KEY all went that way): now every path B's out.
         """
         spot = self.center_pc(self.pos()[0])
         if spot is None or not self.approach({spot[0]}):
             return False
-        before = self.bag_named()
-        if not any(item == name for item, _qty in before):
+        before = self.bag_named(full=True)
+        names = [item for item, _qty in before]
+        if name not in names:
             return False
-        self.ctl.press(spot[1])
-        self.ctl.wait(25)
-        for _ in range(4):
-            self.ctl.press("a")
-            self.ctl.wait(55)
-            if self.menu_rows():
-                break
-        own = next(
-            (
-                t
-                for _i, t in self.menu_rows()
-                if "PC" in t.upper() and "BILL" not in t.upper() and "OAK" not in t.upper()
-            ),
-            None,
-        )
-        if own is None or not self.menu_choose(own):
-            return False
-        if not self.advance_text("DEPOSIT") or not self.menu_choose("DEPOSIT ITEM"):
-            return False
-        if not self.menu_shows(name) or not self.menu_choose(name):
-            return False
-        for _ in range(4):  # quantity prompt defaults to one, then the confirm
-            if len(self.bag_named()) < len(before):
-                break
-            self.ctl.press("a")
-            self.ctl.wait(45)
-        for _ in range(8):
-            self.ctl.press("b")
+        stored = False
+        try:
+            self.ctl.press(spot[1])
             self.ctl.wait(25)
-        self.ctl.wait(40)  # the bag count settles a few frames after the box closes
-        stored = len(self.bag_named()) < len(before)
-        print(f"  {'stored' if stored else 'could not store'} {name}; bag now {len(self.bag_named())}/20", flush=True)
+            for _ in range(4):
+                self.ctl.press("a")
+                self.ctl.wait(55)
+                if self.menu_rows():
+                    break
+            own = next(
+                (
+                    t
+                    for _i, t in self.menu_rows()
+                    if "PC" in t.upper() and "BILL" not in t.upper() and "OAK" not in t.upper()
+                ),
+                None,
+            )
+            if own is None or not self.menu_choose(own):
+                return False
+            if not self.advance_text("DEPOSIT") or not self.menu_choose("DEPOSIT ITEM"):
+                return False
+            self.ctl.wait(40)
+            if not self.menu_shows("deposit") or not self.menu_cursor_to(names.index(name)):
+                return False
+            self.ctl.press("a")  # the entry -> "How many?" (defaults to one)
+            self.ctl.wait(45)
+            self.ctl.press("a")  # confirm -> "<item> was stored"
+            self.ctl.wait(60)
+            stored = len(self.bag()) < len(before)
+            return stored
+        finally:
+            for _ in range(8):
+                self.ctl.press("b")
+                self.ctl.wait(25)
+            self.ctl.wait(40)  # the bag count settles a few frames after the box closes
+            print(f"  {'stored' if stored else 'could not store'} {name}; bag now {len(self.bag())}/20", flush=True)
+
+    def store_at_pc(self, count: int, keep=()) -> int:  # pragma: no cover - drives the emulator
+        """Bank ``count`` bag items in this Center's PC along ``storage_plan``. Returns how many left the bag.
+
+        The game's own answer to a full bag; tossing is the fallback for a leg with no Center in
+        reach. Each deposit is judged by the bag shrinking (``pc_store_item``); an item the PC
+        refuses stays and the plan moves on.
+        """
+        if self.center_pc(self.pos()[0]) is None:
+            print(f"  map {self.pos()[0]} is not a Center -- no PC to store in", flush=True)
+            return 0
+        stored = 0
+        for name in storage_plan(self.bag_named(full=True), keep=keep):
+            if stored >= count:
+                break
+            if self.pc_store_item(name):
+                stored += 1
         return stored
 
     def pc_deposit(self, index: int) -> bool:  # pragma: no cover - drives the emulator
