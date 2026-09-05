@@ -15,14 +15,14 @@ OPEN EDGE CELLS toward 2 (step right): [(7, 0), (7, 1), (7, 2), (7, 3), (7, 4), 
 LIVE BODIES (sprites on screen right now): []
 Bodies are not walls — wanderers move if you wait, but trainers never move.
 PARTY: [('CHARIZARD', 99, 337)]   BADGES byte: 0b00011111
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(29,28) action=left (count=9) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(26,28) action=left (count=9) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(26,28) action=left (count=29) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(29,28) action=left (count=29) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [GAME_STUCK_LOOP]: map=1 streak=5 (count=66) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(18,6) action=up (count=27) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [DOOR_STALL]: map=1 pos=(17,6) action=up (count=15) (session: flink)
-ALREADY OBSERVED HERE: - [important] Flink alert [GAME_STUCK_LOOP]: map=1 streak=2 (count=20) (session: flink)
+ALREADY OBSERVED HERE: - [important] map=1 Viridian door (32,7) -> map 45 with 7 badges: (1, 32, 8)->(45, 16, 17), said 'OPTION EXIT' (session: extracto)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (6,6) reaching goal 2: no-path; tried nothing; screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (0,8) reaching goal 2: cap; tried door (7,8) to 2: cap; screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (2,0) reaching goal 2: no-path; tried nothing; screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (0,0) reaching goal 2: no-path; tried nothing; screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (3,3) reaching goal 2: no-path; tried engaged the blocking body at (3, 2); screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (5,5) reaching goal 2: no-path; tried nothing; screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
+ALREADY OBSERVED HERE: - [important] map=1 exhausted at (5,5) reaching goal 2: refused; tried BACK_OUT_AND_REENTER on map 1 at (5, 5), BACK_OUT_AND_REENTER on map 1 at (5, 5), BACK_OUT_AND_REENTER on map 1 at (5, 5), BACK_OUT_AND_REENTER on map 1 at (5, 5); screenshot <fake>/exhausted_map1.png; record map1-to-2-stuck-testrun00.md (session: supervis)
 OBSERVED: collected [64] from map 1's item balls
 OBSERVED: both seats explain 1->2 the same way: scripted
 OBSERVED: both seats explain 1->2 the same way: scripted
