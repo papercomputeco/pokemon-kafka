@@ -64,6 +64,17 @@ Beats 10–11 carry the run past the forest, where every earlier field had stall
   `frame_interval=1`. The catch is a race against the poison tick (~9 HP a turn); the recipe that
   loses is the one that also SCRATCHes first.
 
+- `beat18-elite-four` — **the League, in one take**: from the Indigo lobby through Lorelei, Bruno, Agatha
+  and Lance to the Champion, then Oak's speech, the Hall of Fame and the credits until the game sets the
+  player down at home. Each room's trainer is talked to from the cell below and fought by the agent with the
+  cartridge's own move table (the hand-typed one had Hyper Beam labelled Flamethrower). Three things this
+  recording had to learn: Lance's room auto-walks the player from the door to the foot of his column for
+  ~620 frames and any press during it is lost; a winner's speech swallows every direction press until it
+  ends, so the driver advances with A until a real step registers by position; and the window text is
+  stale after menus, so position is the only verdict. Recorded from
+  `states/league_seeds/indigo_lobby.state` with `frame_interval=1`; the party arrives with two members
+  fainted from Victory Road and finishes on three.
+
 ### Why beat 11 needed a fix first
 
 `badge_to_mtmoon` had never landed — six genome lanes × 12,000 turns all wedged on
