@@ -30,8 +30,13 @@ ENGAGE = "supervisor.body_engaged"
 BLOCKER = "supervisor.blocker_engaged"
 LEG_START = "supervisor.leg_start"
 FIGHTS = ("battle.outcome", "battle.fled")
-WANTED = (ENGAGE, BLOCKER, LEG_START) + FIGHTS
+COLLECTED = "supervisor.item_collected"  # the sweep opened a ball: map, at, items
+REFUSED = "supervisor.item_refused"  # it could not: map, at, holds (what the cartridge lists)
+WANTED = (ENGAGE, BLOCKER, LEG_START, COLLECTED, REFUSED) + FIGHTS
 FIGHT_WINDOW_S = 5.0  # the talk starts the fight; its outcome lands just before the engage row
+# Reads that are not the body's words: the START menu the engage loop opens on an item-ball tile
+# (measured on maps 194, 219, 234) and the battle text pinned after a flee.
+NOISE = frozenset({"OPTION EXIT", "Got away safely!"})
 
 
 def clean_said(said: str) -> str:
@@ -123,6 +128,25 @@ def build(telemetry: Path = TELEMETRY, truth_path: Path = TRUTH) -> dict:
         if ev in FIGHTS:
             last_fight[run] = (_ts(e.get("ts")), e.get("won") if ev == "battle.outcome" else False)
             continue
+        if ev in (COLLECTED, REFUSED):
+            mp = e.get("map")
+            x, y = (e.get("at") or [None, None])[:2]
+            if mp is None or x is None:
+                continue
+            bodies = maps[int(mp)]["bodies"]
+            key = f"{x},{y}"
+            body = bodies.get(key)
+            if body is None:
+                body = bodies[key] = _new_body(sprites.get((int(mp), int(x), int(y))), items)
+            if ev == COLLECTED:
+                for item_id, qty in e.get("items") or []:
+                    name = items.get(str(item_id), f"#{item_id}")
+                    body["gained"][name] = body["gained"].get(name, 0) + int(qty)
+            else:
+                body["refused"] = body.get("refused", 0) + 1
+            if run and run not in body["runs"]:
+                body["runs"].append(run)
+            continue
         if ev == ENGAGE:
             mp = e.get("map")
             x, y = (e.get("at") or [None, None])[:2]
@@ -141,6 +165,9 @@ def build(telemetry: Path = TELEMETRY, truth_path: Path = TRUTH) -> dict:
         if run and run not in body["runs"]:
             body["runs"].append(run)
         sentence = clean_said(e.get("said") or "")
+        if sentence in NOISE:
+            body["noise"] = body.get("noise", 0) + 1
+            sentence = ""
         if sentence:
             body["sentences"][sentence] = body["sentences"].get(sentence, 0) + 1
         for item_id, qty in e.get("gained") or []:

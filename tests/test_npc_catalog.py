@@ -111,6 +111,40 @@ def test_build_joins_sprites_fights_and_handouts(tmp_path):
             "gained": [],
         },
     ]
+    rows += [
+        {
+            "ts": "2026-09-05T16:48:00+00:00",
+            "run_id": "r3",
+            "event": "supervisor.body_engaged",
+            "map": 26,
+            "at": [13, 54],
+            "said": "OPTION EXIT",
+            "gained": [],
+        },
+        {
+            "ts": "2026-09-05T16:48:01+00:00",
+            "run_id": "r3",
+            "event": "supervisor.item_collected",
+            "map": 26,
+            "at": [13, 54],
+            "items": [[10, 1]],
+        },
+        {
+            "ts": "2026-09-05T16:48:02+00:00",
+            "run_id": "r3",
+            "event": "supervisor.item_refused",
+            "map": 26,
+            "at": [20, 20],
+            "holds": "TM09",
+        },
+        {
+            "ts": "2026-09-05T16:48:03+00:00",
+            "run_id": "r3",
+            "event": "supervisor.item_refused",
+            "at": [20, 20],
+            "holds": "no map",
+        },
+    ]
     sink = _sink(tmp_path, rows)
     cat = nc.build(sink, _truth(tmp_path))
     m26 = cat["maps"]["26"]
@@ -121,11 +155,15 @@ def test_build_joins_sprites_fights_and_handouts(tmp_path):
     giver = m26["bodies"]["48,11"]
     assert giver["gained"] == {"HM03": 1} and giver["fought"] == 0
     ball = m26["bodies"]["13,54"]
-    assert ball["kind"] == "item" and ball["item"] == "MOON STONE" and ball["gained"] == {"MOON STONE": 1}
+    assert ball["kind"] == "item" and ball["item"] == "MOON STONE" and ball["gained"] == {"MOON STONE": 2}
     # a fled fight 38 s earlier is outside the window: not this body's
     assert m26["bodies"]["1,1"]["fought"] == 0 and m26["bodies"]["1,1"]["kind"] == "unknown"
     assert m26["bodies"]["10,62"]["blocker"] is True
-    assert m26["sprites"] == 3 and m26["engaged"] == 5
+    assert m26["sprites"] == 3 and m26["engaged"] == 6
+    assert ball["runs"] == ["r1", "r3"]
+    assert ball["noise"] == 1 and "OPTION EXIT" not in ball["sentences"]  # the START menu, not the ball
+    refused = m26["bodies"]["20,20"]
+    assert refused["refused"] == 1 and refused["kind"] == "unknown" and refused["seen"] == 0
     assert m26["items"] == [{"x": 13, "y": 54, "item": "MOON STONE", "picked": True}]
     # map 88 has a sprite but the only engage row had no cell; the blocker of r2 had no map
     assert cat["maps"]["88"]["engaged"] == 0 and cat["maps"]["88"]["sprites"] == 1
