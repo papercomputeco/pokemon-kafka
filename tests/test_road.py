@@ -1862,3 +1862,42 @@ def test_surf_cross_from_a_shore_edge_boards_beside_the_edge_and_steps_out():
     io = EastIO(truth, (1, 3, 2))
     assert road.surf_cross(io, truth, PAIRS, 1, 2, arm_surf=io.arm) is True
     assert io.arms == 1 and qm.read_pos(io) == (2, 0, 3)
+
+
+def test_a_wild_drawn_on_the_shore_step_is_fought_before_the_arm():
+    """Route 20, measured 2026-09-05: the last press before the arm drew a wild, the arm opened
+    the POKeMON menu into the battle and read "not on the menu" as a refusal. The battle is fought
+    first, at both arm sites (the shore walk in surf_cross and the boarding in _board_water)."""
+
+    class WildShore(PlazaIO):
+        def __init__(self, truth, start, wild_on):
+            super().__init__(truth, start)
+            self.wild_on, self.in_battle, self.fought = wild_on, False, 0
+
+        def read(self, addr):
+            if addr == qm.ADDR_IN_BATTLE:
+                return 1 if self.in_battle else 0
+            return super().read(addr)
+
+        def press(self, btn, hold=8, release=8):
+            before = qm.read_pos(self)
+            super().press(btn, hold, release)
+            if btn == self.wild_on and qm.read_pos(self) == before and not self.fought:
+                self.in_battle = True  # the facing press toward the water (no move) draws a wild
+
+        def arm(self):
+            assert not self.in_battle, "armed into a battle"
+            return super().arm()
+
+    def fight(io):
+        io.in_battle, io.fought = False, io.fought + 1
+
+    # surf_cross's own shore walk: start away from the water; the press that faces it draws the wild
+    _cell, face = road.shore_stand(_route21_truth(), PAIRS, 1, 2, (0, 1))
+    io = WildShore(_route21_truth(), (1, 0, 1), wild_on=face)
+    assert road.surf_cross(io, io.truth, PAIRS, 1, 2, arm_surf=io.arm, battle=fight) is True
+    assert io.fought == 1 and io.arms == 1
+    # _board_water: already beside the water (the plaza lip faces it west), the wild is drawn facing it
+    io = WildShore(_route21_truth(), (1, 4, 1), wild_on="left")
+    assert road._board_water(io, io.truth, PAIRS, 1, 2, io.arm, fight) is True
+    assert io.fought == 1 and io.arms == 1

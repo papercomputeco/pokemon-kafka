@@ -809,6 +809,13 @@ def _board_water(io, truth, pairs, cur: int, nxt: int, arm_surf, battle) -> bool
             return False
     io.press(face, hold=8, release=8)
     io.wait(30)
+    if io.read(ADDR_IN_BATTLE) and battle:
+        # A wild drawn on the last shore step owns the screen: the POKeMON menu is not there to
+        # open ("Gyarados is not on the POKeMON menu (a battle owns the screen)", Route 20,
+        # measured 2026-09-05), and an arm attempted into it is a refusal that never was.
+        battle(io)
+        io.press(face, hold=8, release=8)
+        io.wait(30)
     if not arm_surf():
         return False
     for _ in range(3):
@@ -1189,6 +1196,10 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
         walk(io, truth, pairs, cur, {cell}, battle=battle)
         io.press(face, hold=8, release=8)
         io.wait(30)
+        if io.read(ADDR_IN_BATTLE) and battle:
+            battle(io)  # a wild on the last shore step: fight it before the menu is asked for
+            io.press(face, hold=8, release=8)
+            io.wait(30)
         armed = arm_surf()
         for _ in range(3):
             io.press("a")
