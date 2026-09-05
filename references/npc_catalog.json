@@ -1,5 +1,5 @@
 {
- "built": "2026-09-05T13:24:19-07:00",
+ "built": "2026-09-05T13:32:30-07:00",
  "maps": {
   "0": {
    "bodies": {
@@ -573,7 +573,7 @@
      "item": "TM43",
      "kind": "item",
      "pic": 61,
-     "refused": 10,
+     "refused": 11,
      "runs": [
       "20260905-165904-ee45",
       "20260905-171326-6e5b",
@@ -584,27 +584,29 @@
       "20260905-192820-f298",
       "20260905-193131-3f49",
       "20260905-194223-d580",
-      "20260905-195817-ee01"
+      "20260905-195817-ee01",
+      "20260905-202956-110d"
      ],
      "seen": 0,
      "sentences": {},
      "won": 0
     },
     "17,13": {
-     "fought": 4,
+     "fought": 6,
      "gained": {},
      "kind": "unknown",
      "pic": null,
      "runs": [
       "20260905-180632-5794",
-      "20260905-195817-ee01"
+      "20260905-195817-ee01",
+      "20260905-202956-110d"
      ],
-     "seen": 5,
+     "seen": 8,
      "sentences": {
-      "DUGTRIO gained 169 EXP. Points!": 1,
-      "This requires STRENGTH to move!": 4
+      "DUGTRIO gained 169 EXP. Points!": 2,
+      "This requires STRENGTH to move!": 6
      },
-     "won": 4
+     "won": 6
     },
     "2,10": {
      "blocker": true,
@@ -631,7 +633,7 @@
     },
     "2,9": {
      "blocker": true,
-     "fought": 3,
+     "fought": 4,
      "gained": {},
      "kind": "unknown",
      "pic": null,
@@ -640,13 +642,14 @@
       "20260905-172944-b5f4",
       "20260905-180632-5794",
       "20260905-193437-3898",
-      "20260905-195817-ee01"
+      "20260905-195817-ee01",
+      "20260905-202956-110d"
      ],
-     "seen": 7,
+     "seen": 9,
      "sentences": {
-      "This requires STRENGTH to move!": 7
+      "This requires STRENGTH to move!": 9
      },
-     "won": 3
+     "won": 4
     },
     "5,15": {
      "fought": 6,
@@ -676,7 +679,7 @@
      "item": "RARE CANDY",
      "kind": "item",
      "pic": 61,
-     "refused": 10,
+     "refused": 11,
      "runs": [
       "20260905-165904-ee45",
       "20260905-171326-6e5b",
@@ -687,7 +690,8 @@
       "20260905-192820-f298",
       "20260905-193131-3f49",
       "20260905-194223-d580",
-      "20260905-195817-ee01"
+      "20260905-195817-ee01",
+      "20260905-202956-110d"
      ],
      "seen": 0,
      "sentences": {},
@@ -2421,7 +2425,7 @@
      "won": 3
     },
     "22,6": {
-     "fought": 1,
+     "fought": 2,
      "gained": {},
      "kind": "npc",
      "pic": 63,
@@ -2429,14 +2433,15 @@
       "1e2f18efe690",
       "381ca7cafa7d",
       "2f01925e3001",
-      "20260905-200035-9531"
+      "20260905-200035-9531",
+      "20260905-202956-c040"
      ],
-     "seen": 12,
+     "seen": 18,
      "sentences": {
       "AAAAAAAAAA gained 355 EXP. Points!": 4,
-      "AAAAAAAAAA gained 428 EXP. Points!": 8
+      "AAAAAAAAAA gained 428 EXP. Points!": 14
      },
-     "won": 1
+     "won": 2
     },
     "26,7": {
      "fought": 0,
@@ -3950,20 +3955,21 @@
   "192": {
    "bodies": {
     "18,10": {
-     "fought": 1,
+     "fought": 2,
      "gained": {},
      "kind": "npc",
      "pic": 63,
      "runs": [
       "381ca7cafa7d",
       "2f01925e3001",
-      "20260905-200035-9531"
+      "20260905-200035-9531",
+      "20260905-202956-c040"
      ],
-     "seen": 3,
+     "seen": 4,
      "sentences": {
-      "This requires STRENGTH to move!": 3
+      "This requires STRENGTH to move!": 4
      },
-     "won": 1
+     "won": 2
     }
    },
    "engaged": 1,
@@ -3991,34 +3997,121 @@
   },
   "194": {
    "bodies": {
+    "10,16": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {
+      "PIDGEOT gained 276 EXP. Points!": 1
+     },
+     "won": 0
+    },
     "11,0": {
      "fought": 0,
      "gained": {},
      "item": "GUARD SPEC.",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-a455"
      ],
      "seen": 0,
      "sentences": {},
      "won": 0
     },
-    "12,9": {
+    "11,16": {
      "fought": 1,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {
+      "PIDGEOT gained 276 EXP. Points!": 1
+     },
+     "won": 1
+    },
+    "12,16": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "12,9": {
+     "fought": 5,
      "gained": {},
      "kind": "trainer",
      "pic": 14,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-0679",
+      "20260905-203149-a455"
      ],
-     "seen": 4,
+     "seen": 8,
      "sentences": {
-      "If you get stuck, try moving some boulders around!": 4
+      "9999999999 99999999999 99999999999 999999999999 999999999999 9999999999999 99999999999999 999999999999999 9999999999999999 99999999999999999 999999999999999999 999999999999999999 999999999999999999 999999999999999999": 1,
+      "If you get stuck, try moving some boulders around!": 7
+     },
+     "won": 5
+    },
+    "13,16": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "14,16": {
+     "fought": 1,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 1
+    },
+    "15,16": {
+     "fought": 1,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-203149-0679"
+     ],
+     "seen": 1,
+     "sentences": {
+      "This requires STRENGTH to move!": 1
      },
      "won": 1
     },
@@ -4030,11 +4123,13 @@
      "item": "FULL HEAL",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-a455"
      ],
      "seen": 2,
      "sentences": {
@@ -4043,70 +4138,110 @@
      },
      "won": 1
     },
+    "19,10": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-203149-0679"
+     ],
+     "seen": 1,
+     "sentences": {
+      "You earned the right to be on VICTORY ROAD!": 1
+     },
+     "won": 0
+    },
     "19,8": {
-     "fought": 3,
+     "fought": 5,
      "gained": {},
      "kind": "trainer",
      "pic": 7,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-0679",
+      "20260905-203149-a455"
      ],
-     "seen": 4,
+     "seen": 8,
      "sentences": {
+      "AAAAAAA got 1760 for winning!": 1,
       "Come on! I'll whip you! 999 99 99 99 999999999999999999 999999999999999999 999999999999999999 999999999999999999 999999999999999999 999999999999999999": 1,
-      "You earned the right to be on VICTORY ROAD!": 3
+      "You earned the right to be on VICTORY ROAD!": 6
      },
-     "won": 3
+     "won": 5
     },
     "21,13": {
-     "fought": 1,
+     "fought": 2,
      "gained": {},
      "kind": "trainer",
      "pic": 12,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-0679",
+      "20260905-203149-a455"
      ],
-     "seen": 3,
+     "seen": 6,
      "sentences": {
-      "AAAAAAA also came through here!": 3
+      "AAAAAAA also came through here!": 6
      },
-     "won": 1
+     "won": 2
     },
     "23,16": {
-     "fought": 0,
+     "fought": 1,
      "gained": {},
      "kind": "npc",
      "pic": 63,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-0679"
      ],
-     "seen": 3,
+     "seen": 5,
      "sentences": {
-      "This requires STRENGTH to move!": 3
+      "This requires STRENGTH to move!": 5
      },
-     "won": 0
+     "won": 1
     },
     "24,3": {
-     "fought": 2,
+     "fought": 4,
      "gained": {},
      "kind": "unknown",
      "pic": null,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-a455",
+      "20260905-203149-0679"
      ],
-     "seen": 3,
+     "seen": 6,
      "sentences": {
-      "Many trainers give up the challenge here.": 3
+      "Many trainers give up the challenge here.": 6
      },
-     "won": 2
+     "won": 4
+    },
+    "26,3": {
+     "fought": 1,
+     "gained": {},
+     "kind": "trainer",
+     "pic": 12,
+     "runs": [
+      "20260905-203149-0679"
+     ],
+     "seen": 1,
+     "sentences": {
+      "AAAAAAA got 1680 for winning!": 1
+     },
+     "won": 1
     },
     "27,5": {
      "fought": 0,
@@ -4116,11 +4251,13 @@
      "item": "TM17",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-a455"
      ],
      "seen": 2,
      "sentences": {
@@ -4137,11 +4274,13 @@
      "item": "TM05",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-173026-dfab",
       "20260905-180513-6c0d",
-      "20260905-195833-88dc"
+      "20260905-195833-88dc",
+      "20260905-202959-e3dc",
+      "20260905-203149-a455"
      ],
      "seen": 2,
      "sentences": {
@@ -4149,9 +4288,23 @@
       "up the challenge here.": 1
      },
      "won": 0
+    },
+    "9,16": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-203149-a455"
+     ],
+     "seen": 1,
+     "sentences": {
+      "This requires STRENGTH to move!": 1
+     },
+     "won": 0
     }
    },
-   "engaged": 9,
+   "engaged": 18,
    "items": [
     {
      "item": "TM17",
@@ -4220,6 +4373,20 @@
      "sentences": {},
      "won": 0
     },
+    "22,15": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 63,
+     "runs": [
+      "20260905-203149-0679"
+     ],
+     "seen": 1,
+     "sentences": {
+      "This requires STRENGTH to move!": 1
+     },
+     "won": 0
+    },
     "24,10": {
      "fought": 0,
      "gained": {},
@@ -4227,11 +4394,14 @@
      "pic": 63,
      "runs": [
       "20260905-180431-a6fb",
-      "20260905-195748-5364"
+      "20260905-195748-5364",
+      "20260905-203000-9a4b",
+      "20260905-203149-0679"
      ],
-     "seen": 3,
+     "seen": 6,
      "sentences": {
-      "This requires STRENGTH to move!": 3
+      "REPEL's effect wore off. This requires STRENGTH to move!": 1,
+      "This requires STRENGTH to move!": 5
      },
      "won": 0
     },
@@ -4241,10 +4411,12 @@
      "item": "MAX REVIVE",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-180431-a6fb",
-      "20260905-195748-5364"
+      "20260905-195748-5364",
+      "20260905-203000-9a4b",
+      "20260905-203149-0679"
      ],
      "seen": 0,
      "sentences": {},
@@ -4256,17 +4428,19 @@
      "item": "TM47",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-180431-a6fb",
-      "20260905-195748-5364"
+      "20260905-195748-5364",
+      "20260905-203000-9a4b",
+      "20260905-203149-0679"
      ],
      "seen": 0,
      "sentences": {},
      "won": 0
     }
    },
-   "engaged": 5,
+   "engaged": 6,
    "items": [
     {
      "item": "MAX REVIVE",

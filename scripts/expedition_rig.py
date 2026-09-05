@@ -1886,9 +1886,13 @@ class Rig:
         # By menu index, not by name: the POKeMON menu prints NICKNAMES (this party's Charizard is
         # "AAAAAAA", measured on strength_ready) and omits fainted members, so the menu index is
         # the party index less the fainted members drawn above it.
+        # Measured both ways: the Route 23 party menu drew "HYPNO 100 FNT" in slot 0 (screenshot
+        # 20260905-193131-1de1/surf_refused.png), while an older leg saw fainted members omitted.
+        # So the party index is tried first, the index less the fainted members above second.
         party = self.party()
-        menu_index = idx - sum(1 for _n, _l, hp in party[:idx] if hp <= 0)
-        if not self.use_field_move("STRENGTH", face=face, member=menu_index):
+        fainted_above = sum(1 for _n, _l, hp in party[:idx] if hp <= 0)
+        candidates = [idx] if not fainted_above else [idx, idx - fainted_above]
+        if not any(self.use_field_move("STRENGTH", face=face, member=m) for m in candidates):
             return False
         for _ in range(4):
             self.ctl.press("a")
