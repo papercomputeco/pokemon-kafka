@@ -955,9 +955,24 @@ class LegRunner:
         north — and the badge-6 leg spent its whole crew ladder on it before the record was
         written. A structural refusal is a fact about the graph, not a question for a model.
         """
+        import road
         import rom_truth as rt
 
         cur = self.rig.pos()[0]
+        # Before a ban, ask whether the wall is only a wall from THIS region of the map. Route 13,
+        # measured 2026-09-05 (run 20260905-234505): banning 13 -> 46 after one no-path sent the
+        # leg south around the whole continent to Route 20, while the forest that joins the two
+        # halves of Route 13 stood three tiles away. A ban is a fact about the graph; a region
+        # route is a fact about where we stand, and it is asked first.
+        mp, x, y = self.rig.pos()
+        if str(mp) in self.rig.truth.get("maps", {}):
+            alt = road.region_route(self.rig.truth, self.rig.pairs, mp, (x, y), self.goal, banned=self.banned)
+            if alt and not (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
+                where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
+                self.log(f"  the hop to {hop['to']} is refused here; the region router leaves via {alt['via']} {where}")
+                self.notes.append(f"the hop to {hop['to']} is refused from this region; rerouted by region via {where}")
+                self.rig.emit("supervisor.region_rerouted", map=mp, at=[x, y], via=alt["via"], to=alt["to"])
+                return True
         # The pair banned is the hop's own, not "wherever we stand now": a failed gate pass leaves
         # the player inside the gate house, and banning (house -> target) bans a pair that is not
         # in the graph while the refused hop stays routable (Route 13, 2026-09-05: 36 identical

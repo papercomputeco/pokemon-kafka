@@ -2805,7 +2805,26 @@ def test_a_routed_warp_in_another_region_is_reached_through_the_region_router(tm
 
 
 def test_reroute_bans_the_hops_own_pair_not_the_map_we_stand_on(tmp_path):
-    rig = FakeRig(start=(9, 0, 0))  # inside the house after a failed gate pass
+    truth = _truth()
+    truth["maps"]["9"]["warps"] = []  # a house the region router cannot leave: the ban is all that is left
+    rig = FakeRig(start=(9, 0, 0), truth=truth)  # inside the house after a failed gate pass
     runner = _runner(rig, tmp_path)
     runner._reroute_around({"from": 1, "to": 2, "via": "edge", "edge": "east"})
     assert (1, 2) in runner.banned and (9, 2) not in runner.banned
+
+
+def test_reroute_asks_the_region_router_before_banning(tmp_path):
+    """Route 13: after one no-path on the warp in the other half, the ban sent the leg around the
+    continent; the region router names the gate house three tiles away, and no ban is placed."""
+    truth = _two_pocket_truth()
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    assert runner._reroute_around({"from": 1, "to": 2, "via": "warp", "x": 6, "y": 6}) is True
+    assert not runner.banned
+    assert any(e["event"] == "supervisor.region_rerouted" for e in rig.events)
+    # standing where the region router has nothing better, the ban goes on as before
+    sealed = _two_pocket_truth()
+    sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1]]
+    runner2 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)
+    runner2._reroute_around({"from": 1, "to": 2, "via": "warp", "x": 6, "y": 6})
+    assert (1, 2) in runner2.banned
