@@ -465,6 +465,98 @@ def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], s
     return {(col, y) for y in range(m["height"]) if m["grid"][y][col] == "1"}, _OUTWARD[side]
 
 
+def region_route(truth, pairs, src_map: int, src_cell, goal_map: int, banned=frozenset(), max_nodes: int = 300):
+    """The first hop out of the player's reachable REGION toward ``goal_map`` - or None.
+
+    ``rom_truth.route`` plans over map ids, and a map is not one place. Route 13, measured
+    2026-09-05 (lane 2, seven legs): the routed warp at (12,9) sits north of a one-way ledge row
+    the leg stood south of; the walk was no-path, the ban landed elsewhere, and 80 hops went
+    50 -> 13 -> 46 without taking the forest (50 -> 51 -> 47 -> 13-north) that joins the two.
+    ``rom_truth.pockets`` is undirected and calls both halves one pocket, so the unit here is
+    ``reachable`` - the walk's own flood fill, one-way ledges and door tiles included.
+
+    Nodes are (map, region); a hop is a warp standing in the region (a LAST_MAP mat resolves to
+    the door on the map that enters this one, by warp index), or a connection the region holds
+    edge cells of (entering the far map at the aligned cell, or the nearest open edge cell). A
+    water edge has no cell to stand on, so the far map counts as one region there and the surf
+    decides live. Regions are keyed by their smallest cell.
+    """
+    from collections import deque
+
+    import rom_truth as rt
+
+    maps = truth["maps"]
+    if src_map == goal_map or str(src_map) not in maps or str(goal_map) not in maps:
+        return None
+
+    def region(mp, cell):
+        return reachable(truth, pairs, mp, tuple(cell))
+
+    def whole(mp):
+        m = maps[str(mp)]
+        return {(x, y) for y in range(m["height"]) for x in range(m["width"]) if m["grid"][y][x] == "1"}
+
+    start = region(src_map, src_cell)
+    seen = {(src_map, min(start))}
+    queue = deque([(src_map, start, None)])
+    nodes = 0
+    while queue and nodes < max_nodes:
+        nodes += 1
+        mp, reg, first = queue.popleft()
+        m = maps[str(mp)]
+        hops = []
+        for wx, wy, dst, dwarp in m["warps"]:
+            if (wx, wy) not in reg:
+                continue
+            if dst == rt.LAST_MAP:  # back out the way in: the door on whichever map enters this one
+                for other, om in maps.items():
+                    if int(other) == mp or (mp, int(other)) in banned:
+                        continue
+                    if any(w[2] == mp for w in om["warps"]) and dwarp < len(om["warps"]):
+                        land = (om["warps"][dwarp][0], om["warps"][dwarp][1])
+                        hops.append((int(other), land, {"from": mp, "to": int(other), "via": "mat", "x": wx, "y": wy}))
+                continue
+            if str(dst) not in maps or (mp, dst) in banned:
+                continue
+            dw = maps[str(dst)]["warps"]
+            if dwarp >= len(dw):
+                continue
+            land = (dw[dwarp][0], dw[dwarp][1])
+            hops.append((dst, land, {"from": mp, "to": dst, "via": "warp", "x": wx, "y": wy, "dest_warp": dwarp}))
+        for side, dst in m["connections"].items():
+            if str(dst) not in maps or (mp, dst) in banned:
+                continue
+            cells, _d = edge_cells(truth, mp, dst)
+            mine = cells & reg
+            if not mine and (cells or not edge_has_water(truth, mp, dst)):
+                continue  # a land edge this region does not touch; or a modelled edge with nothing to cross on
+            entry = None
+            if mine:
+                dm = maps[str(dst)]
+                cx, cy = min(mine)
+                far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
+                far["east"] = (0, cy)
+                aligned = far[side]
+                fcells, _fd = edge_cells(truth, dst, mp)
+                if fcells:
+                    nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
+                    entry = aligned if aligned in fcells else nearest
+            hops.append((dst, entry, {"from": mp, "to": dst, "via": "edge", "edge": side}))
+        for dst, land, hop in hops:
+            reg2 = region(dst, land) if land is not None else whole(dst)
+            if not reg2:
+                continue
+            key = (dst, min(reg2))
+            if key in seen:
+                continue
+            seen.add(key)
+            chosen = first or hop
+            if dst == goal_map:
+                return chosen
+            queue.append((dst, reg2, chosen))
+    return None
+
+
 def edge_has_water(truth: dict, cur: int, nxt: int) -> bool:
     """Does ``cur``'s edge line facing ``nxt`` carry water in the tile model?
 

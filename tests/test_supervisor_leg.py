@@ -2758,7 +2758,7 @@ def _two_pocket_truth():
         "maps": {
             "1": m(warps=[[6, 6, 2, 0], [1, 1, 3, 0], [5, 1, 3, 1]]),  # (6,6) -> goal; doors to the house
             "2": m(grid=full, warps=[[0, 0, 1, 0]]),
-            "3": m(grid=full, warps=[[0, 7, 1, 1], [7, 7, 1, 2]]),
+            "3": m(grid=full, warps=[[0, 7, 255, 1], [7, 7, 255, 2]]),  # LAST_MAP mats, by warp index
         }
     }
 
@@ -2767,28 +2767,41 @@ def _runner(rig, tmp_path, goal=2):
     return LegRunner(rig, goal=goal, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
 
 
-def test_a_routed_warp_in_another_pocket_is_reached_through_the_pocket_router(tmp_path):
+def test_a_routed_warp_in_another_region_is_reached_through_the_region_router(tmp_path):
     """Route 13 (2026-09-05): the map-level chain says 'warp at (12,9)'; the leg stands in the
-    other pocket. The first hop must be the door that leaves THIS pocket, not the unreachable warp."""
+    other half. The chain gets one attempt (the deterministic fixes run on it); once that wall is
+    measured, the first hop is the door that leaves THIS region, not the unreachable warp."""
     truth = _two_pocket_truth()
-    assert rt.pocket_of(truth, 1, (1, 4)) != rt.pocket_of(truth, 1, (6, 6))
-    rig = FakeRig(start=(1, 1, 4), truth=truth, hops=[3])
-    hop = _runner(rig, tmp_path)._next_hop(1)
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    first = runner._next_hop(1)
+    assert (first["x"], first["y"]) == (6, 6)  # attempt 1: the map chain, as routed
+    runner.attempts["1->2"] = 1
+    hop = runner._next_hop(1)
     assert hop["via"] == "warp" and (hop["x"], hop["y"]) == (1, 1) and hop["to"] == 3
-    assert any(e["event"] == "supervisor.pocket_routed" for e in rig.events)
-    # standing in the warp's own pocket the map chain is used as is
-    hop2 = _runner(FakeRig(start=(1, 6, 4), truth=truth), tmp_path)._next_hop(1)
-    assert (hop2["x"], hop2["y"]) == (6, 6)
-    # an edge hop: the pocket router knows warps only, the walk decides
-    assert _runner(FakeRig(), tmp_path)._next_hop(1)["via"] == "edge"
-    # asked about a map we are not standing on: the map chain stands
-    hop4 = _runner(FakeRig(start=(9, 0, 0), truth=truth), tmp_path)._next_hop(1)
-    assert (hop4["x"], hop4["y"]) == (6, 6)
-    # no pocket chain either (the house has no east door): the map chain stands and the hop fails honestly
+    assert any(e["event"] == "supervisor.region_routed" for e in rig.events)
+    # standing in the warp's own region, a measured wall is something else: the chain stands
+    runner2 = _runner(FakeRig(start=(1, 6, 4), truth=truth), tmp_path)
+    runner2.attempts["1->2"] = 1
+    assert (runner2._next_hop(1)["x"], runner2._next_hop(1)["y"]) == (6, 6)
+    # a "back out the way in" mat toward a map with a measured wall is routed by region too
+    inside = FakeRig(start=(3, 0, 7), truth=truth)
+    runner3 = _runner(inside, tmp_path)
+    runner3.attempts["1->2"] = 1
+    hop3 = runner3._next_hop(3)
+    assert hop3["via"] == "mat" and (hop3["x"], hop3["y"]) == (7, 7)  # the EAST door, into the warp's half
+    # no region chain either (the house has no east door): the map chain stands and fails honestly
     sealed = _two_pocket_truth()
-    sealed["maps"]["3"]["warps"] = [[0, 7, 1, 1]]
-    hop3 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)._next_hop(1)
-    assert (hop3["x"], hop3["y"]) == (6, 6)
+    sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1]]
+    runner4 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)
+    runner4.attempts["1->2"] = 1
+    hop4 = runner4._next_hop(1)
+    assert (hop4["x"], hop4["y"]) == (6, 6)
+    # asked about a map we are not standing on, or no route at all: the map chain's answer
+    runner5 = _runner(FakeRig(start=(9, 0, 0), truth=truth), tmp_path)
+    runner5.attempts["1->2"] = 1
+    assert (runner5._next_hop(1)["x"], runner5._next_hop(1)["y"]) == (6, 6)
+    assert _runner(FakeRig(start=(1, 1, 4), truth=truth), tmp_path, goal=77)._next_hop(1) is None
 
 
 def test_reroute_bans_the_hops_own_pair_not_the_map_we_stand_on(tmp_path):

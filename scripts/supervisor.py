@@ -905,42 +905,47 @@ class LegRunner:
         return said
 
     def _next_hop(self, cur: int) -> dict | None:
-        """The first hop of the routed chain, from the *pocket* the player stands in.
+        """The first hop toward the goal, from the *region* the player stands in once the map
+        chain has failed here.
 
-        ``rt.route`` plans over map ids. Route 13, measured 2026-09-05 (run 20260905-230119 and six
-        legs after it): the leg stood in the south pocket at (3,43), the chain's first hop was the
-        warp at (12,9) in the north pocket, the walk was no-path, the gate logic re-entered the gate
-        house, and the loop ran 80 hops (50 -> 13 -> 46, thirty-six times) without ever taking the
-        forest that joins the pockets. When the routed hop's tile is not in our pocket the map-level
-        chain is unusable from here; the pocket router names the warp that actually leaves this
-        pocket toward the goal.
+        ``rt.route`` plans over map ids. Route 13, measured 2026-09-05 (lane 2, seven legs, e.g.
+        run 20260905-230119): the leg stood south of a one-way ledge row at (3,43), the chain's
+        first hop was the warp at (12,9) north of it, the walk was no-path, the gate logic
+        re-entered the gate house, and the loop ran 80 hops (50 -> 13 -> 46, thirty-six times)
+        without ever taking the forest that joins the two halves. So: the map chain gets its
+        first attempt (the deterministic fixes - blocker, cut, surf, push, gate - run on that
+        failure), and once a wall on it has been measured the region router (``road.region_route``,
+        the walk's own flood fill) names the hop that actually leaves this region. A "back out the
+        way in" mat toward a map where a wall was already measured is routed the same way, or the
+        gate house and the road hand the leg back and forth until the hop cap.
         """
+        import road
         import rom_truth as rt
 
         chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
         hop = chain[0] if chain else None
-        if hop is None or hop["via"] != "warp":
-            return hop  # an edge or mat hop: the pocket router knows warps only; the walk decides
+        if hop is None:
+            return None
         mp, x, y = self.rig.pos()
-        if mp != cur:
+        if mp != cur or str(cur) not in self.rig.truth.get("maps", {}):
             return hop
-        mine = rt.pocket_of(self.rig.truth, cur, (x, y))
-        theirs = rt.pocket_of(self.rig.truth, cur, (hop["x"], hop["y"]))
-        if mine is None or theirs is None or mine == theirs:
+        wall = f"{cur}->{hop['to']}"
+        failed_here = self.attempts.get(wall, 0) >= 1
+        back_into_a_wall = hop["via"] == "mat" and any(k.startswith(f"{hop['to']}->") for k in self.attempts)
+        if not (failed_here or back_into_a_wall):
             return hop
-        best = None
-        for index in range(len(rt.pockets(self.rig.truth, self.goal))):
-            pk = rt.route_pockets(self.rig.truth, (cur, mine), (self.goal, index))
-            if pk and (best is None or len(pk) < len(best)):
-                best = pk
-        if not best:
-            return hop  # no pocket chain either: let the hop fail and the ladder record it
-        first = best[0]
-        door = tuple(first["from"])
-        self.log(f"  the routed warp ({hop['x']},{hop['y']}) is in another pocket of {cur}; leaving via {door}")
-        self.notes.append(f"map {cur} is several pockets here; routed by pocket via the door at {door}")
-        self.rig.emit("supervisor.pocket_routed", map=cur, pocket=mine, via=list(door), to=first["to_map"])
-        return {"from": cur, "to": first["to_map"], "via": "warp", "x": first["from"][0], "y": first["from"][1]}
+        targets = self._hop_targets(hop, cur)
+        if failed_here and targets and road.reachable(self.rig.truth, self.rig.pairs, cur, (x, y)) & targets:
+            return hop  # the walk can reach it; the failure was something else, and the ladder owns that
+        alt = road.region_route(self.rig.truth, self.rig.pairs, cur, (x, y), self.goal, banned=self.banned)
+        if alt is None or (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
+            return hop
+        where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
+        self.log(f"  {wall} is not reachable from this region of {cur}; by region: {alt['via']} {where} -> {alt['to']}")
+        self.notes.append(f"map {cur} is more than one region here; routed by region via {alt['via']} {where}")
+        shown = list(where) if isinstance(where, tuple) else where
+        self.rig.emit("supervisor.region_routed", map=cur, at=[x, y], via=alt["via"], where=shown, to=alt["to"])
+        return alt
 
     def _reroute_around(self, hop: dict) -> bool:
         """Ban a hop the world has structurally refused and ask the graph for another chain.

@@ -1947,3 +1947,83 @@ def test_hop_to_far_shore_declines_when_a_walk_already_reaches_the_shore_or_ther
     no_stand = {"maps": {"1": _shore_map(["##ww", "##ww"], connections={"east": 2})}}  # water, no land beside it
     io = SeaIO(no_stand, (1, 2, 0), afloat=True)
     assert road._hop_to_far_shore(io, no_stand, PAIRS, 1, 2, "right", io.arm, None) is False
+
+
+# --------------------------------------------------------------------------- region_route
+
+
+def _two_half_truth():
+    """Route 13 in miniature: map 1 is two halves split by a solid column; the warp to map 2 is
+    in the east half, the gate house (map 3) joins the halves by its two doors, and map 4 lies
+    east of map 1 by connection, its own west edge open only on row 6."""
+    split = ["11101111"] * 8
+    full = ["1" * 8] * 8
+
+    def m(grid, **kw):
+        base = {"width": 8, "height": 8, "tileset": 1, "grid": grid, "sprites": [], "warps": [], "connections": {}}
+        return {**base, **kw}
+
+    east_edge = ["0" + "1" * 7] * 6 + ["1" * 8] + ["0" + "1" * 7]  # only (0,6) opens on map 4's west edge
+    return {
+        "maps": {
+            "1": m(split, warps=[[6, 6, 2, 0], [1, 1, 3, 0], [5, 1, 3, 1]], connections={"east": 4}),
+            "2": m(full, warps=[[0, 0, 1, 0]]),
+            "3": m(full, warps=[[0, 7, 255, 1], [7, 7, 255, 2]]),  # LAST_MAP mats, by warp index
+            "4": m(east_edge, connections={"west": 1}),
+        }
+    }
+
+
+def test_region_route_leaves_the_half_we_stand_in_through_the_gate_house():
+    truth = _two_half_truth()
+    hop = road.region_route(truth, PAIRS, 1, (1, 4), 2)
+    assert hop["via"] == "warp" and (hop["x"], hop["y"]) == (1, 1) and hop["to"] == 3
+    # from inside the house a LAST_MAP mat resolves by warp index: the east door lands in the east half
+    hop = road.region_route(truth, PAIRS, 3, (0, 7), 2)
+    assert hop["via"] == "mat" and (hop["x"], hop["y"]) == (7, 7) and hop["to"] == 1
+    # standing in the east half the warp itself is the hop
+    hop = road.region_route(truth, PAIRS, 1, (6, 4), 2)
+    assert hop["via"] == "warp" and (hop["x"], hop["y"]) == (6, 6)
+
+
+def test_region_route_takes_an_edge_the_region_holds_and_enters_at_the_nearest_open_cell():
+    truth = _two_half_truth()
+    hop = road.region_route(truth, PAIRS, 1, (6, 4), 4)
+    assert hop == {"from": 1, "to": 4, "via": "edge", "edge": "east"}
+    # the west half does not touch the east edge: it goes through the house first
+    hop = road.region_route(truth, PAIRS, 1, (1, 4), 4)
+    assert hop["via"] == "warp" and hop["to"] == 3
+
+
+def test_region_route_declines_cleanly():
+    truth = _two_half_truth()
+    assert road.region_route(truth, PAIRS, 1, (1, 4), 1) is None  # already there
+    assert road.region_route(truth, PAIRS, 1, (1, 4), 99) is None  # not a map
+    assert road.region_route(truth, PAIRS, 1, (1, 4), 2, banned={(1, 3)}) is None  # the house is banned: sealed
+    assert road.region_route(truth, PAIRS, 1, (1, 4), 2, max_nodes=1) is None  # out of nodes
+    sealed = _two_half_truth()
+    sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1], [7, 7, 255, 9]]  # an east mat with no such warp on map 1
+    assert road.region_route(sealed, PAIRS, 1, (1, 4), 2) is None
+    dangling = _two_half_truth()
+    dangling["maps"]["1"]["warps"].append([1, 2, 55, 0])  # a warp to a map the truth lacks
+    dangling["maps"]["1"]["warps"].append([1, 3, 3, 9])  # a warp index the house lacks
+    dangling["maps"]["1"]["connections"]["north"] = 77  # a connection to a map the truth lacks
+    assert road.region_route(dangling, PAIRS, 1, (1, 4), 2)["to"] == 3
+    assert road.region_route(dangling, PAIRS, 1, (6, 4), 4, banned={(1, 4)}) is None  # the edge itself banned
+    # a water edge onto a far map with no walkable cell at all: nothing to stand on there either
+    sea = _route21_truth()
+    sea["maps"]["2"]["grid"] = ["0" * 8]
+    assert road.region_route(sea, PAIRS, 1, (0, 1), 2) is None
+
+
+def test_region_route_crosses_a_water_edge_as_one_region():
+    """No cell to stand on at a water edge: the far map counts whole and the surf decides live."""
+    truth = _route21_truth()
+    truth["maps"]["2"]["connections"] = {"south": 1, "east": 5}
+    truth["maps"]["5"] = _map(["1" * 8], connections={"west": 2})
+    hop = road.region_route(truth, PAIRS, 1, (0, 1), 5)
+    assert hop == {"from": 1, "to": 2, "via": "edge", "edge": "north"}
+    # a modelled land edge the region does not touch, with no water either, is not a hop
+    land = _two_half_truth()
+    land["maps"]["1"]["tiles"] = ["0303030303030303"] * 8
+    assert road.region_route(land, PAIRS, 1, (1, 4), 4)["to"] == 3
