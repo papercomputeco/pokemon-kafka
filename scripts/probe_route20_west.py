@@ -62,7 +62,7 @@ def main() -> int:
     tiles, grid = m["tiles"], m["grid"]
 
     def describe(x: int, y: int) -> str:
-        return f"({x},{y}) tile={int(tiles[y][2 * x:2 * x + 2], 16):#04x} grid={grid[y][x]}"
+        return f"({x},{y}) tile={int(tiles[y][2 * x : 2 * x + 2], 16):#04x} grid={grid[y][x]}"
 
     print("cell  :", describe(*base[1:]), flush=True)
     for key, name in DIRS:
