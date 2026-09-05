@@ -2548,6 +2548,16 @@ def test_engage_surfs_to_a_body_no_walk_reaches():
     LegRunner(rig, goal=1, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
     assert any(c[0] == "surf_to" for c in rig.calls)
     assert any(c[0] == "talk" for c in rig.calls)
+    assert any(e["event"] == "supervisor.surfed" and e.get("toward") == [4, 0] for e in rig.events)
+    refused = ChannelRig(start=(1, 0, 1), bodies={(4, 0)}, result="surfmoved-failed")
+    refused.approach = lambda cells: refused.calls.append(("approach", sorted(cells))) or False
+    LegRunner(refused, goal=1, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert any(e["event"] == "supervisor.surf_refused" and e.get("toward") == [4, 0] for e in refused.events)
+    landed_short = ChannelRig(start=(1, 0, 1), bodies={(4, 0)})  # surfed over, but the last cell is walled
+    landed_short.approach = lambda cells: landed_short.calls.append(("approach", sorted(cells))) or False
+    LegRunner(landed_short, goal=1, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None).run()
+    assert any(e["event"] == "supervisor.surfed" for e in landed_short.events)
+    assert not any(c[0] == "talk" for c in landed_short.calls)
 
 
 def test_push_and_surf_hooks_decline_cleanly_when_they_do_not_apply(tmp_path):

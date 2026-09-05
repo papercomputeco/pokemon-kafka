@@ -959,7 +959,12 @@ def surf_route(
     surf_refused.png), the party menu stays up with "AAAA got on GYARADOS" typing out, and every
     direction press until it closes goes nowhere. The io alone cannot see a box; the rig can.
     """
-    m = truth["maps"][str(cur)]
+    m = truth["maps"].get(str(cur)) or {}
+    if not m.get("tiles"):
+        # Without a tile model the water model proposes EVERY cell as water (its contract for
+        # the edge crossing's live corrections); here that read a gym floor as open sea and
+        # stalled the engage loop "afloat" (measured on maps 45, 171, 236). No model, no route.
+        return "no-route"
     bodies = set(bodies)
     targets = set(targets)
     say = log or (lambda *_: None)

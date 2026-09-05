@@ -1661,3 +1661,11 @@ def test_surf_route_turns_a_guards_page_before_calling_a_step_refused():
     io = GuardIO(truth, (34, 0, 1))
     assert road.surf_route(io, truth, set(), 34, {(4, 1)}, arm_surf=io.arm, dismiss=io.dismiss) is True
     assert io.pages == 1 and io.mem[qm.ADDR_X] == 3
+
+
+def test_surf_route_needs_a_tile_model_before_it_believes_it_is_afloat():
+    """Indoors (maps 45, 171, 236, measured): no tiles, so the water model says everything is water."""
+    truth = {"maps": {"45": _map(["111", "111"])}}
+    io = ChannelIO(truth, (45, 0, 0))
+    assert road.surf_route(io, truth, set(), 45, {(2, 1)}, arm_surf=io.arm) == "no-route"
+    assert io.arms == 0

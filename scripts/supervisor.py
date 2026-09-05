@@ -1247,7 +1247,15 @@ class LegRunner:
                 # No walk and no ride: the body may stand across water (Route 19's swimmers,
                 # Seafoam's shore). SURF over, then approach again.
                 surf = getattr(self.rig, "surf_to", None)
-                if surf is None or surf(adjacent) is not True or not self.rig.approach(adjacent):
+                if surf is None:
+                    return False
+                result = surf(adjacent)
+                if result is not True:
+                    if result != "no-route":
+                        self.rig.emit("supervisor.surf_refused", map=mp, result=str(result), toward=list(spot))
+                    return False
+                self.rig.emit("supervisor.surfed", map=mp, to=list(self.rig.pos()[1:]), toward=list(spot))
+                if not self.rig.approach(adjacent):
                     return False
             mp, x, y = self.rig.pos()
             if (x, y) not in adjacent:
