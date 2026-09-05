@@ -2583,6 +2583,11 @@ def test_push_and_surf_hooks_decline_cleanly_when_they_do_not_apply(tmp_path):
     runner = LegRunner(across, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
     assert runner._surf_through({"via": "warp", "to": 2, "x": 4, "y": 1}) is False
     assert not any(c[0] == "surf_to" for c in across.calls)
+    # a water edge has no land cell to surf to: the crossing belongs to Rig.cross, not this hook
+    water_edge = ChannelRig()
+    runner = LegRunner(water_edge, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner._surf_through({"via": "edge", "to": 77}) is False
+    assert not any(c[0] == "surf_to" for c in water_edge.calls)
     # the edge form of a hop's targets is the open edge
     edge_rig = FakeRig()
     runner = LegRunner(edge_rig, goal=2, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)

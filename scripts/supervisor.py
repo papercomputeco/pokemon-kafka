@@ -352,6 +352,11 @@ def describe(
                 lines.append(
                     f"OPEN EDGE CELLS toward {hop['to']} (step {direction}): {shown}"
                     + (" ..." if len(cells) > 14 else "")
+                    + (
+                        " -- no land on this edge: it is a WATER edge, crossed by SURF along a water route"
+                        if not cells
+                        else ""
+                    )
                 )
         else:
             lines.append(f"WARP TILE: ({hop.get('x')}, {hop.get('y')}) on this map.")
@@ -767,6 +772,8 @@ class LegRunner:
         if str(mp) not in self.rig.truth.get("maps", {}):
             return False
         targets = self._hop_targets(hop, mp)
+        if not targets:
+            return False  # a water edge has no land cell to surf TO; ``Rig.cross`` surfs it as a crossing
         if road.reachable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies()) & targets:
             return False
         self.log(f"  water between here and {sorted(targets)[:3]} -- surfing across map {mp}")

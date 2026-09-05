@@ -752,8 +752,59 @@ def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tup
     return (best[1], best[2]) if best else None
 
 
-def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | None:
-    """Route the water to an opening edge row, live-corrected: propose a path on the water
+def _board_water(io, truth, pairs, cur: int, nxt: int, arm_surf, battle) -> bool:
+    """From dry land, get afloat on water that reaches the far edge: walk to the shore cell
+    ``shore_stand`` names (or stay, if this cell already touches such water), face the water,
+    arm SURF. True once the position reads as a water cell in the model.
+
+    Route 21 -> Pallet, measured 2026-09-05 (run 20260905-220532-b24c): the straight north run
+    from the sea boarded the land plaza at x=8..13, walked it to row 1 and was refused by the
+    rock at (11,0); SURF was then armed facing that rock and failed. The only water that reaches
+    row 0 is the x=5..7 column; the crossing is a water ROUTE, and it starts from a shore that
+    touches that column - not from wherever the straight line stopped.
+    """
+    m = truth["maps"][str(cur)]
+    here = read_pos(io)
+    if here[0] != cur:
+        return False
+    stand = shore_stand(truth, pairs, cur, nxt, here[1:])
+    if stand is not None:
+        cell, face = stand
+        walk(io, truth, pairs, cur, {cell}, battle=battle)
+        if read_pos(io)[0] != cur:
+            return False
+    else:
+        # already beside edge-reaching water: face it (any water neighbour in a far-edge component)
+        _cells, d = edge_cells(truth, cur, nxt)
+        x, y = read_pos(io)[1:3]
+        face = None
+        for dx, dy, f in ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left")):
+            if _water_model(m, x + dx, y + dy) and _touches_far_edge(m, x + dx, y + dy, d):
+                face = f
+                break
+        if face is None:
+            return False
+    io.press(face, hold=8, release=8)
+    io.wait(30)
+    if not arm_surf():
+        return False
+    for _ in range(3):
+        io.press("a")
+        io.wait(40)
+    mp, x, y = read_pos(io)
+    return mp == cur and _water_model(m, x, y)
+
+
+def _touches_far_edge(m, x: int, y: int, d: str) -> bool:
+    """Does the water component holding (x, y) reach the edge the crossing leaves by?"""
+    w, h = m["width"], m["height"]
+    far = {"left": lambda c: c[0] == 0, "right": lambda c: c[0] == w - 1, "up": lambda c: c[1] == 0}
+    far["down"] = lambda c: c[1] == h - 1
+    return any(far[d](c) for c in _water_reach(m, x, y, set()))
+
+
+def _water_cross(io, truth, cur: int, nxt: int, d: str, battle, *, pairs=None, arm_surf=None) -> bool | str | None:
+    """Route the water to an opening edge cell, live-corrected: propose a path on the water
     model, verify it press-by-press, let each refusal re-plan. Returns True once the map has
     flipped to the far map, "detoured" when a step flipped to a third map (the ladder takes
     the state back), None when the whole shore has been asked and answered no (or no water
@@ -764,6 +815,13 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
     approach is on row 10, and the column between carries a solid notch at rows 38..39, so a
     single-column slide cannot round it. Slides find no row; a route finds one.
 
+    North and south edges are the same shape turned: Route 21's north edge (map 32 -> 0,
+    measured 2026-09-05) opens only on the x=5..7 water column, and the candidate set is the
+    edge ROW's columns. When ``pairs`` and ``arm_surf`` are given and the player stands on dry
+    land in the model, the crossing first boards the water from the shore (``_board_water``);
+    a water BFS from a landlocked cell finds nothing, which is how the plaza refusal became
+    "stuck-on-edge" with the open column six tiles west.
+
     A step cancelled by a wild is fought and re-stepped on the SAME row: a cancelled step and
     a refused step are the same bytes at the position, and reading the first as "solid" is the
     exact error the encounter tests fixed for the crossing step.
@@ -771,9 +829,12 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
     m = truth["maps"][str(cur)]
     w = m["width"]
     h = m["height"]
-    edge_col = 0 if d == "left" else (w - 1 if d == "right" else None)
-    if edge_col is None:
+    if d not in ("left", "right", "up", "down"):
         return None
+    if pairs is not None and arm_surf is not None and m.get("tiles"):
+        mp, x, y = read_pos(io)
+        if mp == cur and not _water_model(m, x, y) and not _board_water(io, truth, pairs, cur, nxt, arm_surf, battle):
+            return None
 
     def key_between(a, b):
         dx, dy = b[0] - a[0], b[1] - a[1]
@@ -782,16 +843,20 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
         return "down" if dy > 0 else "up"
 
     blocked: set = set()  # cells the game has refused - measurements, not recall
-    start_y = read_pos(io)[2]
-    rows = sorted(range(h), key=lambda y: abs(y - start_y))  # near first; the opening band of
-    # an unequal-height edge can sit far along the shore (measured: 30 rows), so the whole
-    # shore is the candidate set and nearness is only the order
-    for y in rows:
+    start_x, start_y = read_pos(io)[1:3]
+    if d in ("left", "right"):
+        edge_col = 0 if d == "left" else w - 1
+        # near first; the opening band of an unequal-height edge can sit far along the shore
+        # (measured: 30 rows), so the whole shore is the candidate set and nearness is only the order
+        candidates = [(edge_col, y) for y in sorted(range(h), key=lambda y: abs(y - start_y))]
+    else:
+        edge_row = 0 if d == "up" else h - 1
+        candidates = [(x, edge_row) for x in sorted(range(w), key=lambda x: abs(x - start_x))]
+    for target in candidates:
         sx, sy = read_pos(io)[1:3]
         prev = _water_reach(m, sx, sy, blocked)
-        target = (edge_col, y)
         if target not in prev:
-            continue  # no water path to this row now; a later refusal or row may change that
+            continue  # no water path to this cell now; a later refusal or cell may change that
         path = [target]
         while prev[path[-1]] is not None:
             path.append(prev[path[-1]])
@@ -818,7 +883,7 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
             if not walked:
                 break
         if not walked:
-            continue  # that cell is solid where the model said water; replan for the next row
+            continue  # that cell is solid where the model said water; replan for the next target
         while True:
             io.press(d, hold=15, release=15)
             io.wait(45)
@@ -829,8 +894,8 @@ def _water_cross(io, truth, cur: int, nxt: int, d: str, battle) -> bool | str | 
             if pos[0] != cur:
                 return True if pos[0] == nxt else "detoured"
             break
-        # This row stands but does not open. `rows` visits each y exactly once, so there is
-        # nothing to remember: the next iteration is already a different row.
+        # This cell stands but does not open. `candidates` visits each exactly once, so there is
+        # nothing to remember: the next iteration is already a different cell.
     return None
 
 
@@ -1108,6 +1173,17 @@ def surf_cross(io, truth, pairs, cur: int, nxt: int, *, arm_surf, battle=_defaul
         if not armed:
             r = _water_cross(io, truth, cur, nxt, d, battle)
             return "surfmoved-failed" if r is None else r
+    if truth["maps"][str(cur)].get("tiles"):
+        # A modelled shore is routed, not run straight: the straight line from the sea on Route 21
+        # boards the land plaza and ends facing rock (measured 2026-09-05), while the water that
+        # opens the north edge is a column six tiles west. Board from the shore if on land, BFS
+        # the water to an edge cell, step out. The straight run below stays as the fallback.
+        r = _water_cross(io, truth, cur, nxt, d, battle, pairs=pairs, arm_surf=arm_surf)
+        if r is not None:
+            return r
+        if read_pos(io)[0] != cur:
+            io.wait(60)
+            return True
     while left > 0:
         left -= 1
         if io.read(ADDR_IN_BATTLE) and battle:
