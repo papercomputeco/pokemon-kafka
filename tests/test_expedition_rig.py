@@ -1786,3 +1786,29 @@ def test_storage_plan_banks_tms_then_single_items_and_keeps_the_kit_hms_and_the_
     assert plan[1:] == ["S.S.TICKET", "SECRET KEY"]
     assert "HM01 CUT" not in plan and "OLD AMBER" not in plan and "ULTRA BALL" not in plan
     assert storage_plan([("HM03 SURF", 1), ("HYPER POTION", 5)]) == []
+
+
+def test_boulders_are_the_live_cells_of_pic_63_sprites_by_slot():
+    r = rig.Rig.__new__(rig.Rig)
+    r.truth = {
+        "maps": {
+            "108": {
+                "width": 20,
+                "height": 20,
+                "sprites": [{"kind": "npc", "x": 2, "y": 10, "pic": 63}, {"kind": "trainer", "x": 5, "y": 5, "pic": 6}],
+            }
+        }
+    }
+    r.pos = lambda: (108, 1, 1)
+
+    class IO:
+        def read(self, addr):
+            if addr < rig.road.SPRITE_DATA_BASE:
+                return 1 if (addr - rig.road.SPRITE_STATE_BASE) // 0x10 in (1, 2) else 0
+            slot, off = (addr - rig.road.SPRITE_DATA_BASE) // 0x10, addr & 0xF
+            return {1: {4: 12 + 4, 5: 3 + 4}, 2: {4: 5 + 4, 5: 5 + 4}}[slot][off]  # the boulder moved to (3,12)
+
+    r.io = IO()
+    assert r.boulders() == {(3, 12)}
+    r.pos = lambda: (999, 0, 0)
+    assert r.boulders() == set()

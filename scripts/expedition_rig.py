@@ -1016,6 +1016,15 @@ class Rig:
                 if self.use_field_move("SURF", species=name):
                     break
         said = self.textbox()
+        # Measured on Route 23 (2026-09-05): "AAAA got on GYARADOS!" types out over the party menu
+        # and the position updates only when that page closes -- read at once, a mount that worked
+        # looked refused (four legs, one screenshot each, the player already on the water in all).
+        # So the verdict waits for the page: A advances it; the position is the proof either way.
+        for _ in range(8):
+            if self.pos() != before:
+                break
+            self.ctl.press("a")
+            self.ctl.wait(45)
         refused = self.pos() == before  # settled before the clear loop; pressing B never moves us
         if refused:
             self.screenshot("surf_refused")  # the picture, not just the sentence -- see screenshot()
@@ -1082,6 +1091,63 @@ class Rig:
         and an off-map "blocker" is one a leg will walk across the floor to argue with."""
         m = self.truth["maps"].get(str(self.pos()[0]))
         return road.live_bodies(self.io, (m["width"], m["height"]) if m else None)
+
+    def boulders(self) -> set[tuple[int, int]]:
+        """Live cells of the sprites the cartridge draws as boulders (pic 63): a pushed boulder
+        keeps its slot, so slot ``i`` is matched to the map's sprite ``i - 1``."""
+        m = self.truth["maps"].get(str(self.pos()[0]))
+        if not m:
+            return set()
+        sprites = m.get("sprites") or []
+        live = road.live_sprites(self.io, (m["width"], m["height"]))
+        return {
+            xy
+            for slot, xy in live.items()
+            if slot - 1 < len(sprites) and sprites[slot - 1].get("pic") == road.BOULDER_PIC
+        }
+
+    def push_boulder(self, stand, face: str) -> bool:  # pragma: no cover - drives the emulator
+        """Stand beside a boulder and shove it with STRENGTH; the sprite table is the verdict.
+
+        Measured on Victory Road 1F (2026-09-05): a wild Onix opened on the walk to the stand and
+        the push that followed was refused twice -- the win box was still up. So the walk is
+        settled, the stand re-checked, and the shove tried twice.
+        """
+        stand = tuple(stand)
+        for _ in range(2):
+            if self.pos()[1:] != stand and not self.approach({stand}):
+                return False
+            self.settle()
+            if self.pos()[1:] != stand:
+                continue
+            if self.strength_push(face):
+                return True
+            self.settle()
+        return False
+
+    def surf_to(self, targets) -> bool | str:  # pragma: no cover - drives the emulator
+        """SURF across this map's water to the land that reaches ``targets`` (``road.surf_route``)."""
+        return road.surf_route(
+            self.io,
+            self.truth,
+            self.pairs,
+            self.pos()[0],
+            set(targets),
+            mount=self.surf_onto,  # measured to answer by position, which the menu read cannot
+            battle=self.battle,
+            bodies=self.bodies(),
+            log=lambda msg: print(msg, flush=True),
+            dismiss=self._turn_pages,
+        )
+
+    def _turn_pages(self, rounds: int = 12) -> None:  # pragma: no cover - drives the emulator
+        """A while the game is saying something: a guard's badge check, a "got on" line. Stops
+        the moment the window is clear; the stale-window case just costs a few harmless A's."""
+        for _ in range(rounds):
+            if not self.textbox():
+                return
+            self.ctl.press("a")
+            self.ctl.wait(40)
 
     def screenshot_path(self, tag: str) -> Path:
         """Where a tagged screen grab for this run lives. Pure — no PyBoy, so it is testable."""
@@ -1807,8 +1873,17 @@ class Rig:
     def strength_push(
         self, face: str
     ) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
-        """Enable Strength, then shove the boulder. Proved by the boulder's tile opening up."""
-        if not self.use_field_move("STRENGTH", face=face):
+        """Enable Strength, then shove the boulder. Proved by the boulder's tile opening up.
+
+        The move is used by whoever knows it, named by species: measured on Victory Road 1F
+        (2026-09-05), party member 0 was a fainted Hypno and "no field move called 'STRENGTH' on
+        party member 0" refused every push while Gyarados held it in slot 3.
+        """
+        idx = self.knows_move("STRENGTH")
+        if idx is None:
+            return False
+        species = self.party()[idx][0] if idx < len(self.party()) else None
+        if not self.use_field_move("STRENGTH", face=face, species=species):
             return False
         for _ in range(4):
             self.ctl.press("a")
