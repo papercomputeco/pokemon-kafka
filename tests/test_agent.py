@@ -285,9 +285,13 @@ class TestBattleStrategy:
         assert score == 20.0
 
     def test_score_move_type_not_in_chart(self):
-        # Psychic type not in our chart -> effectiveness = 1.0
+        # a psychic-type move: psychic is not in this test's chart -> effectiveness = 1.0.
+        # Power and accuracy come from the cartridge's table (the hand-typed one had Psychic at 0x5D;
+        # this ROM's 0x5D is a 50-power psychic move).
+        _name, move_type, power, accuracy = MOVE_DATA[0x5D]
+        assert move_type == "psychic"
         score = self.strategy.score_move(0x5D, 10, "normal")
-        assert score == 90 * 1.0 * 1.0
+        assert score == pytest.approx(power * (accuracy / 100.0) * 1.0)
 
     def test_score_move_enemy_not_in_chart_entry(self):
         # Ember (0x34, fire) vs "dragon" -- "dragon" not in fire's chart entry -> 1.0
@@ -5330,3 +5334,21 @@ def test_stop_condition_min_x_narrows_a_map_stop():
     assert met(east_exit, stop_on_map=15, stop_min_x=22)
     assert met(west_bounce, stop_on_map=15)  # without the column, old behaviour is unchanged
     assert not met(OverworldState(map_id=59, x=30, y=5), stop_on_map=15, stop_min_x=22)
+
+
+def test_move_data_loads_the_cartridge_table_and_falls_back_without_it(tmp_path):
+    import json
+
+    from agent import _DEMO_MOVE_DATA, _load_move_data
+
+    # no extraction on disk: the hand-typed subset, unchanged
+    assert _load_move_data(tmp_path / "missing.json") == _DEMO_MOVE_DATA
+    # a truth without a moves table: the same fallback
+    (tmp_path / "bare.json").write_text(json.dumps({"maps": {}}))
+    assert _load_move_data(tmp_path / "bare.json") == _DEMO_MOVE_DATA
+    # the cartridge's table wins, keyed by int id, names title-cased, 0x00 kept
+    truth = {"moves": {"63": {"name": "HYPER BEAM", "type": "normal", "power": 150, "accuracy": 90, "pp": 5}}}
+    (tmp_path / "rom_truth.json").write_text(json.dumps(truth))
+    table = _load_move_data(tmp_path / "rom_truth.json")
+    assert table[0x3F] == ("Hyper Beam", "normal", 150, 90)
+    assert table[0x00] == ("(No move)", "none", 0, 0)

@@ -844,3 +844,26 @@ def test_a_battle_page_is_never_recorded_as_a_gate(tmp_path):
     assert not rt.is_battle_sentence("This requires STRENGTH to move!")
     # a survey made only of battle pages leaves no trace at all
     assert rt.merge_measured_gates({"99": {"1,1,up": "AAAAAAA got 840 for winning!"}}, path=p) == merged
+
+
+def test_move_table_comes_from_the_six_byte_table_that_opens_with_pound(rom):
+    import rom_truth as rt
+
+    _, data = rom
+    assert rt.move_table(data) == {}  # the mini ROM carries names but no move-data table
+    # plant the table: POUND, KARATE CHOP (the signature), then a third move to prove the walk
+    table = bytes([1, 0, 40, 0, 255, 35, 2, 0, 50, 0, 255, 25, 3, 0, 15, 0, 216, 10])
+    moves = rt.move_table(bytes(data) + table)
+    assert moves["1"] == {"name": "POUND", "type": "normal", "power": 40, "accuracy": 100, "pp": 35}
+    assert moves["3"]["power"] == 15 and moves["3"]["accuracy"] == 85 and moves["3"]["pp"] == 10
+    assert len(moves) == 3  # the walk stops where the id sequence breaks
+    assert rt.move_table(bytes(0x100)) == {}
+
+
+@pytest.mark.skipif(not rom_truth.ROM_DEFAULT.exists(), reason="no cartridge on this checkout")
+def test_move_table_on_the_cartridge_names_surf_and_hyper_beam():
+    moves = rom_truth.move_table(rom_truth.ROM_DEFAULT.read_bytes())
+    assert len(moves) == 165
+    assert moves["57"] == {"name": "SURF", "type": "water", "power": 95, "accuracy": 100, "pp": 15}
+    assert moves["63"]["name"] == "HYPER BEAM" and moves["63"]["type"] == "normal"
+    assert moves["53"]["name"] == "FLAMETHROWER"  # the hand-typed table had put this name on 0x3F

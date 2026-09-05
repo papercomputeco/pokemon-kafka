@@ -467,6 +467,35 @@ def move_names(rom: bytes, count: int = 165) -> dict[str, str]:
     return out
 
 
+def move_table(rom: bytes, count: int = 165) -> dict[str, dict]:
+    """Move id -> {name, type, power, accuracy, pp}, from the ROM's own 6-byte-per-move table.
+
+    Located by content signature: the table opens with POUND (id 1: effect 0, power 40, NORMAL,
+    accuracy 255/255, 35 PP) followed by KARATE CHOP (id 2: power 50, 25 PP). Names come from
+    :func:`move_names`; the type byte is decoded with the same TYPE_NAMES the species table uses;
+    accuracy is the ROM's /255 byte rendered as a percentage. The measured reason this exists: the
+    agent carried an 18-entry hand-typed move table whose entry 0x3F said "Flamethrower" -- on this
+    cartridge 0x3F is HYPER BEAM, and the fight against Giovanni's Rhydon chose it over Surf.
+    """
+    base = rom.find(bytes([1, 0, 40, 0, 255, 35, 2, 0, 50, 0, 255, 25]))
+    if base < 0:
+        return {}
+    names = move_names(rom, count)
+    out: dict[str, dict] = {}
+    for mid in range(1, count + 1):
+        e = base + 6 * (mid - 1)
+        if e + 6 > len(rom) or rom[e] != mid:
+            break
+        out[str(mid)] = {
+            "name": names.get(str(mid), f"#{mid:02X}"),
+            "type": TYPE_NAMES.get(rom[e + 3], "?"),
+            "power": rom[e + 2],
+            "accuracy": round(rom[e + 4] * 100 / 255),
+            "pp": rom[e + 5],
+        }
+    return out
+
+
 def machine_moves(rom: bytes) -> dict[str, str]:
     """``"HM03" -> "SURF"`` — what each TM and HM actually teaches.
 
@@ -720,6 +749,7 @@ def parse_rom(path: Path = ROM_DEFAULT, map_ids: list[int] | None = None) -> dic
         "type_chart": type_chart(rom),
         "items": item_names(rom),
         "machines": machine_moves(rom),
+        "moves": move_table(rom),
         "maps": maps,
     }
 

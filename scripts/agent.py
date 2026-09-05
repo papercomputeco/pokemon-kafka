@@ -219,8 +219,8 @@ EARLY_GAME_TARGETS = {
 }
 
 # Move ID → (name, type, power, accuracy)
-# Subset of Gen 1 moves for demonstration
-MOVE_DATA = {
+# The pre-ROM subset; only the fallback when references/rom_truth.json carries no "moves" table.
+_DEMO_MOVE_DATA = {
     0x01: ("Pound", "normal", 40, 100),
     0x0A: ("Scratch", "normal", 40, 100),
     0x21: ("Tackle", "normal", 35, 95),
@@ -240,6 +240,33 @@ MOVE_DATA = {
     0x26: ("Earthquake", "ground", 100, 100),
     0x00: ("(No move)", "none", 0, 0),
 }
+
+
+def _load_move_data(path=None) -> dict:
+    """Move id -> (name, type, power, accuracy) from this cartridge's own move table.
+
+    ``references/rom_truth.json['moves']`` is extracted by ``rom_truth.move_table`` (located by
+    content signature). The hand-typed subset above is kept only as the fallback for a checkout
+    without the extraction; it is the table whose 0x3F said "Flamethrower" while the cartridge's
+    0x3F is HYPER BEAM, which is how Giovanni's Rhydon was hit with a normal move instead of Surf.
+    """
+    import json
+    from pathlib import Path
+
+    p = Path(path) if path is not None else Path(__file__).resolve().parent.parent / "references" / "rom_truth.json"
+    try:
+        moves = json.loads(p.read_text()).get("moves") or {}
+    except (OSError, ValueError):
+        moves = {}
+    if not moves:
+        return dict(_DEMO_MOVE_DATA)
+    out = {0x00: ("(No move)", "none", 0, 0)}
+    for mid, m in moves.items():
+        out[int(mid)] = (str(m["name"]).title(), m["type"], int(m["power"]), int(m["accuracy"]))
+    return out
+
+
+MOVE_DATA = _load_move_data()
 
 
 def load_type_chart():

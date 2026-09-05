@@ -39,6 +39,7 @@ WORKSPACE = SCRIPT_DIR.parent
 ADDR_MAP, ADDR_Y, ADDR_X = 0xD35E, 0xD361, 0xD362
 ADDR_IN_BATTLE = 0xD057
 ADDR_MENU_CUR, ADDR_MENU_MAX, ADDR_TEXT_ID = 0xCC26, 0xCC28, 0xD125
+ADDR_LIST_SCROLL = 0xCC36  # how far a scrolling list has scrolled; the cursor register caps inside its window
 ADDR_MONEY = 0xD347  # 3 BCD bytes
 ADDR_BAG_COUNT, ADDR_BAG_ITEMS = 0xD31D, 0xD31E
 ADDR_PARTY_COUNT, ADDR_PARTY_STRUCTS = 0xD163, 0xD16B
@@ -49,8 +50,20 @@ TEXT_SHOP_MENU, TEXT_ITEM_LIST = 14, 13
 # Item ids (pokered constants). POKE_BALL=4 verified live (the probe's purchase landed as (4, 4)).
 MASTER_BALL, ULTRA_BALL, GREAT_BALL, POKE_BALL = 1, 2, 3, 4
 POTION, SUPER_POTION = 0x14, 0x13
+# Cinnabar mart, measured 2026-09-04: ids from the ROM item list, prices off the shop menu.
+ULTRA_BALL, HYPER_POTION, MAX_REPEL, FULL_HEAL, REVIVE = 2, 18, 57, 52, 53
 BALL_IDS = (POKE_BALL, GREAT_BALL, ULTRA_BALL, MASTER_BALL)  # cheapest first: spend plain balls first
-PRICES = {POKE_BALL: 200, POTION: 300, SUPER_POTION: 700}
+PRICES = {
+    POKE_BALL: 200,
+    POTION: 300,
+    SUPER_POTION: 700,
+    ULTRA_BALL: 1200,
+    GREAT_BALL: 600,
+    HYPER_POTION: 1500,
+    MAX_REPEL: 700,
+    FULL_HEAL: 600,
+    REVIVE: 1500,
+}
 ITEM_NAMES = {POKE_BALL: "poke_ball", GREAT_BALL: "great_ball", POTION: "potion", SUPER_POTION: "super_potion"}
 NAME_TO_ITEM = {v: k for k, v in ITEM_NAMES.items()}
 
@@ -89,7 +102,28 @@ SHOPS = {
     2: Shop(2, (23, 17), 56, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
     # Vermilion: door (23,13) -> map 91 per the extracted warps; same interior template.
     5: Shop(5, (23, 13), 91, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
+    # Cinnabar: door (15,11) -> map 172 (entered from (15,12) UP); stock read off the menu 2026-09-04.
+    8: Shop(
+        8,
+        (15, 11),
+        172,
+        (2, 5),
+        "left",
+        (ULTRA_BALL, GREAT_BALL, HYPER_POTION, MAX_REPEL, FULL_HEAL, REVIVE),
+        ((3, 7), (4, 7)),
+    ),
 }
+
+
+def list_index(io) -> int:
+    """Which entry a scrolling list has highlighted: the cursor inside its window PLUS the scroll.
+
+    Measured on Cinnabar's mart (2026-09-04): the cursor register stops at the window's last row,
+    so walking it alone to index 3 (MAX REPEL) bought another ULTRA BALL instead. The battle bag
+    and the PC roster read the same two registers."""
+    return io.read(ADDR_MENU_CUR) + io.read(ADDR_LIST_SCROLL)
+
+
 # Cerulean Center: door (19,17) in the city; the nurse (3,1) is talked to across the counter
 # from (3,3) facing up — the same geometry as Pewter's flow.
 CENTERS = {
@@ -404,9 +438,10 @@ def buy(io, shop: Shop, plan: list[tuple[int, int]]) -> list[tuple[int, int]]:
         money_before, bag_before = read_money(io), dict(read_bag(io))
         io.press("a")  # BUY
         settle(io, lambda: menu_state(io)[2] == TEXT_ITEM_LIST, lambda: io.press("a"), cap=6, label="item list")
-        # Cursor to the stock index, verified against the live cursor register.
-        for _ in range(12):
-            cur = io.read(ADDR_MENU_CUR)
+        # Cursor to the stock index, verified against cursor + scroll (the list scrolls under a
+        # window; the cursor register alone never reaches a row past it).
+        for _ in range(24):
+            cur = list_index(io)
             if cur == idx:
                 break
             io.press("down" if cur < idx else "up")

@@ -739,3 +739,45 @@ def test_cli_go_vermilion(tmp_path, monkeypatch, capsys):
     out = tmp_path / "out.state"
     assert qm.main(["errand", "--state", str(state), "--out", str(out), "--go", "vermilion"]) == 0
     assert seen["dest"] == qm.VERMILION_CITY_MAP
+
+
+class FakeScrollingShopIO(FakeShopIO):
+    """A mart whose item list shows three rows: the cursor register stops at 2 and the list scrolls."""
+
+    WINDOW = 3
+
+    def press(self, btn, hold=8, release=8):
+        if self.phase == "item_list" and btn in ("down", "up"):
+            self.pressed.append(btn)
+            cur, scroll = self.mem.get(qm.ADDR_MENU_CUR, 0), self.mem.get(qm.ADDR_LIST_SCROLL, 0)
+            if btn == "down" and cur + scroll < len(self.stock) - 1:
+                if cur < self.WINDOW - 1:
+                    self.mem[qm.ADDR_MENU_CUR] = cur + 1
+                else:
+                    self.mem[qm.ADDR_LIST_SCROLL] = scroll + 1
+            elif btn == "up" and cur + scroll > 0:
+                if cur > 0:
+                    self.mem[qm.ADDR_MENU_CUR] = cur - 1
+                else:
+                    self.mem[qm.ADDR_LIST_SCROLL] = scroll - 1
+            return
+        if self.phase == "confirm" and btn == "a":
+            self.pressed.append(btn)
+            item = self.stock[qm.list_index(self)]
+            cost = self.prices[item] * self.qty
+            set_money(self, qm.read_money(self) - cost)
+            self.bag_now[item] = self.bag_now.get(item, 0) + self.qty
+            set_bag(self, sorted(self.bag_now.items()))
+            self.phase = "item_list"
+            return
+        super().press(btn, hold, release)
+
+
+def test_buy_reaches_a_row_past_the_window_by_cursor_plus_scroll():
+    shop = qm.SHOPS[8]
+    io = FakeScrollingShopIO(shop.stock, qm.PRICES)
+    set_money(io, 60000)
+    bought = qm.buy(io, shop, [(qm.MAX_REPEL, 8), (qm.REVIVE, 2)])
+    assert bought == [(qm.MAX_REPEL, 8), (qm.REVIVE, 2)]
+    assert qm.read_money(io) == 60000 - 8 * 700 - 2 * 1500
+    assert qm.list_index(io) == shop.stock.index(qm.REVIVE)
