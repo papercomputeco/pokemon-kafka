@@ -304,7 +304,18 @@ class Rig:
             frame_interval=frame_interval,
             live=producer.send,
         )
-        self.ag.collector = GameEventCollector(recorder=self.recorder, game=self.ag.profile.name, run_id=run_id)
+        # The same date-partitioned sink the expedition events use (data/telemetry/game/<date>.jsonl):
+        # the game-event-bridge container tails it into Kafka, and Flink reads that topic. Without a
+        # publisher the fight rows stopped at runs/<run_id>/events.jsonl and never reached the stream.
+        from publisher import make_publisher
+
+        sink = (self.telemetry_root or TELEMETRY_DIR).parent / "game"
+        self.ag.collector = GameEventCollector(
+            publisher=make_publisher(telemetry_dir=str(sink)),
+            recorder=self.recorder,
+            game=self.ag.profile.name,
+            run_id=run_id,
+        )
         self.recorder.start({"label": label, "rom": str(ROM_DEFAULT)})
 
         def wrap(press_fn):
@@ -717,9 +728,20 @@ class Rig:
         """The agent's full battle turn until the fight ends; a stuck fight is a wedge."""
         self.ag._catch_enemy = None
         self.ag._catch_throws = 0
+        # The same start-of-battle snapshot the standalone agent takes, so the fight ends with a
+        # battle_outcome row (species, levels, HP, move types, result) in runs/<run_id>/events.jsonl.
+        # Without it every supervisor-driven fight since 2026-08-27 left only per-turn rows.
+        # Measured: the flag flips before the battle struct is loaded, so a snapshot taken at
+        # once carries the previous battler (a L20 Gyarados logged as L100 with Charizard's HP).
+        # The struct is complete once FIGHT is drawn, which is what _await_battle_menu syncs on.
+        # And on a fight a trainer starts on approach (Lance, measured), the in-battle flag is up
+        # before the battle-type byte, so the first sync fails; the attempt repeats each turn until
+        # the struct is there, rather than dropping the whole fight's row.
         turns = 0
         no_fight = 0  # consecutive turns on a menu the routine cannot drive
         while self.mem[qm.ADDR_IN_BATTLE] and turns < BATTLE_TURN_CAP:
+            if not self.ag._pre_battle_species and self.ag._await_battle_menu():
+                self.ag.snapshot_battle_start(self.mr.read_battle_state())
             self.ag.run_battle_turn()
             turns += 1
             # The fight routine leaves a special (no-FIGHT) menu exactly where it found it: after a
@@ -732,6 +754,7 @@ class Rig:
                 no_fight = 0
             if no_fight >= SPECIAL_MENU_GRACE and self._flee_special_menu():
                 self.emit("battle.fled", pos=list(self.pos()), turns=turns)
+                self._battle_summary(won=False, turns=turns)
                 return
             if turns in (60, 110, 160):
                 self.ag._recover_battle_wedge()
@@ -739,6 +762,14 @@ class Rig:
             self.bank("wedge")
             self.emit("battle.wedge", pos=list(self.pos()), turns=turns)
             raise BattleWedge(f"battle did not end in {turns} turns; banked wedge.state")
+        self._battle_summary(won=not self.mr.player_whited_out(), turns=turns)
+
+    def _battle_summary(self, won: bool, turns: int) -> None:  # pragma: no cover - drives the emulator
+        """Close the fight on the collector; a fight that was never snapshotted has no row."""
+        if not self.ag._pre_battle_species:
+            return
+        disposition = self.ag.emit_battle_summary(won, turns)
+        self.emit("battle.outcome", won=won, turns=turns, disposition=disposition)
 
     def _fightable(self, probes: int = 8) -> bool:  # pragma: no cover - drives the emulator
         """B through intro/dialog (B is a no-op on a menu, A on the evolution screen); report
