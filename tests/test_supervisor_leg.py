@@ -2628,3 +2628,108 @@ def test_a_push_that_fails_in_the_hop_attempt_is_tried_again_from_the_ladder(tmp
     result = runner.run()
     assert result["ok"], result["reason"]
     assert sum(1 for c in rig.calls if c[0] == "push") == 3  # one refused, then the two that opened the shaft
+
+
+class BoulderedBodyRig(BoulderRig):
+    """The shaft again, with the map's one body and one item ball on the far side of the boulder
+    (map 155's shape: the boulder at (8,4) with a RARE CANDY behind it, measured 2026-09-05)."""
+
+    def __init__(self, **kw):
+        truth = _shaft_truth()
+        truth["maps"]["1"]["sprites"] += [
+            {"kind": "npc", "x": 0, "y": 2, "pic": 1},
+            {"kind": "item", "x": 2, "y": 2, "pic": 61, "item": 10},
+        ]
+        truth["maps"]["1"]["warps"] = []
+        kw.setdefault("truth", truth)
+        kw.setdefault("bodies", {(1, 1), (0, 2), (2, 2)})
+        super().__init__(**kw)
+        self.opened: list = []
+
+    def bodies(self):
+        return {self.boulder, (0, 2), (2, 2)}
+
+    def collect_item(self, bx, by):
+        self.calls.append(("collect", (bx, by)))
+        if self.boulder[1] < 3:
+            return False  # the boulder still plugs the shaft
+        self.opened.append((bx, by))
+        self._bag.append((10, 1))
+        return True
+
+    def item_balls(self, map_id):
+        return [(2, 2)]
+
+    def ball_contents(self, map_id):
+        return {(2, 2): "MOON STONE"}
+
+
+def test_a_body_behind_a_boulder_is_reached_by_pushing_it(tmp_path):
+    rig = BoulderedBodyRig()
+    runner = LegRunner(
+        rig, goal=1, engage=True, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path
+    )
+    runner.run()
+    assert [c for c in rig.calls if c[0] == "push"] == [("push", (1, 0), "down"), ("push", (1, 1), "down")]
+    assert any(c[0] == "talk" for c in rig.calls)
+    assert any(e["event"] == "supervisor.boulder_pushed" for e in rig.events)
+
+
+def test_a_ball_behind_a_boulder_is_opened_after_a_push(tmp_path):
+    rig = BoulderedBodyRig()
+    runner = LegRunner(rig, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    gained = runner.sweep_items()
+    assert rig.opened == [(2, 2)] and gained == [(10, 1)]
+    assert sum(1 for c in rig.calls if c[0] == "push") == 2
+    quiet = BoulderedBodyRig(knows_strength=False)
+    runner = LegRunner(quiet, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.sweep_items() == [] and not any(c[0] == "push" for c in quiet.calls)
+
+
+class HmRig(BoulderedBodyRig):
+    """HM04 in the bag; Gyarados knows STRENGTH but is fainted; Charizard stands and can learn it."""
+
+    def __init__(self, hm=True, able=("CHARIZARD",), **kw):
+        kw.setdefault("party", (("GYARADOS", 20, 0), ("CHARIZARD", 99, 337)))
+        super().__init__(knows_strength=False, **kw)
+        self.hm = hm
+        self.able = set(able)
+        self.learned = {"GYARADOS"}
+        self.taught: list = []
+
+    def bag_named(self, full=False):
+        return [("NUGGET", 1)] + ([("HM04 STRENGTH", 1)] if self.hm else [])
+
+    def knows_move(self, name, species=None):
+        if name != "STRENGTH":
+            return None
+        if species is not None:
+            return 0 if species in self.learned else None
+        standing = [n for n, _l, hp in self._party if hp > 0 and n in self.learned]
+        return self._party.index(next((p for p in self._party if p[0] == standing[0]), None)) if standing else None
+
+    def teach(self, machine, species=None):
+        self.taught.append((machine, species))
+        if species not in self.able:
+            return None
+        self.learned.add(species)
+        return [p[0] for p in self._party].index(species)
+
+
+def test_strength_is_taught_to_a_standing_member_before_the_first_push(tmp_path):
+    """Map 155: HM04 in the bag, the only holder fainted, a boulder beside the WARDEN's RARE CANDY."""
+    rig = HmRig()
+    runner = LegRunner(rig, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.sweep_items() == [(10, 1)]
+    assert rig.taught == [("HM04", "CHARIZARD")]  # never the fainted holder
+    assert any(e["event"] == "supervisor.move_taught" and e["species"] == "CHARIZARD" for e in rig.events)
+    # no HM in the bag: nothing to teach; nobody ABLE: the note says so
+    bare = HmRig(hm=False)
+    assert (
+        LegRunner(bare, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path).sweep_items()
+        == []
+    )
+    assert bare.taught == []
+    unable = HmRig(able=())
+    runner = LegRunner(unable, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.sweep_items() == [] and any("no standing member could learn it" in n for n in runner.notes)

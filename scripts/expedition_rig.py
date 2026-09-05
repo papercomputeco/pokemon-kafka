@@ -1658,7 +1658,8 @@ class Rig:
         if anchor is None or item_row is None:
             print("  the START menu did not open", flush=True)
             return False
-        if not self.menu_cursor_to((item_row - anchor) // 2):
+        if not self.start_menu_cursor_to((item_row - anchor) // 2):
+            print("  could not put the START menu's cursor on ITEM", flush=True)
             return False
         self.ctl.press("a")
         self.ctl.wait(60)
@@ -1882,8 +1883,12 @@ class Rig:
         idx = self.knows_move("STRENGTH")
         if idx is None:
             return False
-        species = self.party()[idx][0] if idx < len(self.party()) else None
-        if not self.use_field_move("STRENGTH", face=face, species=species):
+        # By menu index, not by name: the POKeMON menu prints NICKNAMES (this party's Charizard is
+        # "AAAAAAA", measured on strength_ready) and omits fainted members, so the menu index is
+        # the party index less the fainted members drawn above it.
+        party = self.party()
+        menu_index = idx - sum(1 for _n, _l, hp in party[:idx] if hp <= 0)
+        if not self.use_field_move("STRENGTH", face=face, member=menu_index):
             return False
         for _ in range(4):
             self.ctl.press("a")
@@ -2215,6 +2220,19 @@ class Rig:
         party roster, its STATS/SWITCH/CANCEL submenu and the TM roster all "failed to reach" an
         entry that was three presses away.
         """
+        for _ in range(presses):
+            at = self.mem[qm.ADDR_MENU_CUR]
+            if at == index:
+                return True
+            self.ctl.press("down" if at < index else "up")
+            self.ctl.wait(20)
+        return self.mem[qm.ADDR_MENU_CUR] == index
+
+    def start_menu_cursor_to(self, index: int, presses: int = 16) -> bool:  # pragma: no cover - drives the emulator
+        """The START menu does not scroll: its highlight is the cursor register alone. Judged with
+        ``list_index`` (cursor + scroll), a scroll value left behind by an earlier list made ITEM
+        unreachable -- measured on strength_ready (2026-09-05): every press cycled the cursor and
+        the teach reported HM04 "not in the bag" with the HM in it."""
         for _ in range(presses):
             at = self.mem[qm.ADDR_MENU_CUR]
             if at == index:

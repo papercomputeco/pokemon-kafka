@@ -1,5 +1,5 @@
 {
- "built": "2026-09-05T13:09:32-07:00",
+ "built": "2026-09-05T13:24:19-07:00",
  "maps": {
   "0": {
    "bodies": {
@@ -2086,6 +2086,33 @@
   },
   "155": {
    "bodies": {
+    "0,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 4,
+     "sentences": {
+      "This requires STRENGTH to move!": 4
+     },
+     "won": 0
+    },
+    "1,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
     "2,3": {
      "fought": 0,
      "gained": {
@@ -2096,26 +2123,116 @@
      "runs": [
       "04dabd83e329",
       "20260905-181143-c853",
-      "20260905-200409-f237"
+      "20260905-200409-f237",
+      "20260905-201710-cb73",
+      "20260905-201827-eec2",
+      "20260905-201925-73f3",
+      "20260905-202120-9f39",
+      "20260905-202241-0e18"
      ],
-     "seen": 12,
+     "seen": 43,
      "sentences": {
       "AAAAAAA gave the GOLD TEETH to the WARDEN!": 1,
-      "WARDEN: HM04 teaches STRENGTH! It lets POK\u00e9MON move boulders": 11
+      "WARDEN: HM04 teaches STRENGTH! It lets POK\u00e9MON move boulders": 42
      },
+     "won": 0
+    },
+    "2,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "3,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "4,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "5,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "6,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
+     "won": 0
+    },
+    "7,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "noise": 1,
+     "pic": null,
+     "runs": [
+      "20260905-202241-0e18"
+     ],
+     "seen": 1,
+     "sentences": {},
      "won": 0
     },
     "8,3": {
      "fought": 0,
-     "gained": {},
+     "gained": {
+      "RARE CANDY": 1
+     },
      "item": "RARE CANDY",
      "kind": "item",
      "pic": 61,
-     "refused": 3,
+     "refused": 7,
      "runs": [
       "04dabd83e329",
       "20260905-181143-c853",
-      "20260905-200409-f237"
+      "20260905-200409-f237",
+      "20260905-201710-cb73",
+      "20260905-201827-eec2",
+      "20260905-201925-73f3",
+      "20260905-202120-9f39",
+      "20260905-202241-0e18"
      ],
      "seen": 0,
      "sentences": {},
@@ -2129,20 +2246,24 @@
      "runs": [
       "04dabd83e329",
       "20260905-181143-c853",
-      "20260905-200409-f237"
+      "20260905-200409-f237",
+      "20260905-201710-cb73",
+      "20260905-201827-eec2",
+      "20260905-201925-73f3",
+      "20260905-202120-9f39"
      ],
-     "seen": 13,
+     "seen": 41,
      "sentences": {
-      "This requires STRENGTH to move!": 13
+      "This requires STRENGTH to move!": 41
      },
      "won": 0
     }
    },
-   "engaged": 3,
+   "engaged": 11,
    "items": [
     {
      "item": "RARE CANDY",
-     "picked": false,
+     "picked": true,
      "x": 8,
      "y": 3
     }

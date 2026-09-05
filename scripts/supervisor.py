@@ -681,10 +681,51 @@ class LegRunner:
         A boulder is found like a growth is: on the sprite table, with the plan simulated on it
         (``boulder_oracle.push_plan``), and every push is proved by the table changing.
         """
+        mp = self.rig.pos()[0]
+        if not self._push_to(self._hop_targets(hop, mp), what="this hop"):
+            return False
+        self.notes[-1] += "; the hop's region changed"
+        self.gated.discard((mp, hop["to"]))
+        self.banned.discard((mp, hop["to"]))
+        return True
+
+    def _teach_from_bag(self, machine: str, move: str) -> bool:
+        """Teach ``machine`` from the bag when nobody knows ``move`` yet. Map 155, measured
+        2026-09-05: the WARDEN had handed over HM04 STRENGTH, the bag held it, nobody had learned
+        it, and the boulder beside his RARE CANDY was talked to seven times. The move id landing
+        in RAM is the proof (``Rig.teach``)."""
+        bag = getattr(self.rig, "bag_named", None)
+        teach = getattr(self.rig, "teach", None)
+        if bag is None or teach is None:
+            return False
+        if not any(name.upper().startswith(machine) for name, _q in bag(full=True)):
+            return False
+        # A fainted member who knows the move is no use (map 155: Gyarados at 0 HP held STRENGTH
+        # and "already knows" ended the teach). Teach a STANDING member who does not; the
+        # game's ABLE captions decide who can, so a refusal moves to the next.
+        for name, _lvl, hp in self.rig.party():
+            if hp <= 0 or self.rig.knows_move(move, name) is not None:
+                continue
+            self.log(f"  nobody standing knows {move}; teaching {machine} to {name}")
+            who = teach(machine, species=name)
+            if who is not None and self.rig.knows_move(move) is not None:
+                self.rig.emit("supervisor.move_taught", machine=machine, move=move, member=who, species=name)
+                return True
+        self.notes.append(f"{machine} is in the bag but no standing member could learn it")
+        return False
+
+    def _push_to(self, targets, what: str = "the target", exclude=()) -> bool:
+        """Push ONE boulder so a walk reaches one of ``targets``; every push is proved by the
+        sprite table. Serves a hop's cells, a body's neighbours and a ball's neighbours alike:
+        map 155, measured 2026-09-05, had the boulder at (8,4) talked to seven times with a RARE
+        CANDY ball behind it, because pushes served hops only. ``exclude`` are sprites that are
+        the goal, not a wall (the body or ball itself)."""
         import boulder_oracle
 
         knows = getattr(self.rig, "knows_move", None)
-        if knows is None or knows("STRENGTH") is None or not hasattr(self.rig, "boulders"):
+        if knows is None or not hasattr(self.rig, "boulders"):
+            return False
+        if knows("STRENGTH") is None and not self._teach_from_bag("HM04", "STRENGTH"):
             return False
         mp, x, y = self.rig.pos()
         if str(mp) not in self.rig.truth.get("maps", {}):
@@ -692,26 +733,22 @@ class LegRunner:
         # The sprite table names most boulders by picture (63); the cartridge lists Victory Road
         # 1F's plateau boulder (7,5) as a trainer, and what it said when engaged is the proof.
         heard = {cell for cell, said in self.heard.items() if "requires STRENGTH" in (said or "")}
-        boulders = set(self.rig.boulders()) | heard
+        boulders = (set(self.rig.boulders()) | heard) - set(exclude)
         if not boulders:
             return False
-        targets = self._hop_targets(hop, mp)
-        plan = boulder_oracle.push_plan(
-            self.rig.truth, self.rig.pairs, mp, (x, y), targets, self.rig.bodies(), boulders
-        )
+        bodies = set(self.rig.bodies())  # the goal sprite stays a wall: a boulder cannot land on a ball
+        plan = boulder_oracle.push_plan(self.rig.truth, self.rig.pairs, mp, (x, y), set(targets), bodies, boulders)
         if not plan:
             return False
         for stand, face, boulder in plan:
-            self.log(f"  a boulder at {boulder} seals this hop -- pushing it {face} from {stand}")
+            self.log(f"  a boulder at {boulder} seals {what} -- pushing it {face} from {stand}")
             if not self.rig.push_boulder(stand, face):
                 self.notes.append(f"the boulder at {boulder} did not move when pushed {face} from {stand}")
                 self.rig.emit("supervisor.push_refused", map=mp, boulder=list(boulder), stand=list(stand), face=face)
                 return False
             self.rig.emit("supervisor.boulder_pushed", map=mp, boulder=list(boulder), stand=list(stand), face=face)
         self.tried.append(f"pushed the boulder at {plan[0][2]} {plan[0][1]} x{len(plan)}")
-        self.notes.append(f"pushed the boulder at {plan[0][2]} {plan[0][1]} x{len(plan)}; the hop's region changed")
-        self.gated.discard((mp, hop["to"]))
-        self.banned.discard((mp, hop["to"]))
+        self.notes.append(f"pushed the boulder at {plan[0][2]} {plan[0][1]} x{len(plan)} toward {what}")
         return True
 
     def _surf_through(self, hop: dict) -> bool:
@@ -982,6 +1019,8 @@ class LegRunner:
         the wanted ball is opened first, before a full bag or a lost trainer fight can cost it.
         Bag growth is the only proof a pickup happened.
         """
+        import road
+
         mp = self.rig.pos()[0]
         gained: list[tuple[int, int]] = []
         contents = self.rig.ball_contents(mp)
@@ -994,6 +1033,11 @@ class LegRunner:
             self.looted.add((mp, ball))
             before = self.rig.bag()
             holds = contents.get(ball, "?")
+            bx, by = ball
+            beside = {(bx + 1, by), (bx - 1, by), (bx, by + 1), (bx, by - 1)}
+            px, py = self.rig.pos()[1:]
+            if not (road.walkable(self.rig.truth, self.rig.pairs, mp, (px, py), self.rig.bodies() - {ball}) & beside):
+                self._push_to(beside, what=f"the ball at {ball}", exclude={ball})  # the pickup is the verdict
             if not self.rig.collect_item(*ball):
                 self.log(f"  could not open the ball at {ball} on map {mp} (cartridge says {holds})")
                 self.name_the_ride(ball)
@@ -1233,6 +1277,10 @@ class LegRunner:
             # the gym cleared.
             reach = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot})
             near = reach & adjacent
+            if not near and self._push_to(adjacent, what=f"the body at {spot}", exclude={spot}):
+                mp, x, y = self.rig.pos()
+                reach = road.walkable(self.rig.truth, self.rig.pairs, mp, (x, y), self.rig.bodies() - {spot})
+                near = reach & adjacent
             if not near:
                 # No neighbouring tile: this body may be behind a COUNTER, which is a shape the
                 # engine only knew about for Pokemon Center nurses. Measured on the BIKE SHOP
