@@ -904,6 +904,44 @@ class LegRunner:
             self.rig.emit("supervisor.gate_text", map=mp, at=[x, y], direction=direction, said=said[:300])
         return said
 
+    def _next_hop(self, cur: int) -> dict | None:
+        """The first hop of the routed chain, from the *pocket* the player stands in.
+
+        ``rt.route`` plans over map ids. Route 13, measured 2026-09-05 (run 20260905-230119 and six
+        legs after it): the leg stood in the south pocket at (3,43), the chain's first hop was the
+        warp at (12,9) in the north pocket, the walk was no-path, the gate logic re-entered the gate
+        house, and the loop ran 80 hops (50 -> 13 -> 46, thirty-six times) without ever taking the
+        forest that joins the pockets. When the routed hop's tile is not in our pocket the map-level
+        chain is unusable from here; the pocket router names the warp that actually leaves this
+        pocket toward the goal.
+        """
+        import rom_truth as rt
+
+        chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
+        hop = chain[0] if chain else None
+        if hop is None or hop["via"] != "warp":
+            return hop  # an edge or mat hop: the pocket router knows warps only; the walk decides
+        mp, x, y = self.rig.pos()
+        if mp != cur:
+            return hop
+        mine = rt.pocket_of(self.rig.truth, cur, (x, y))
+        theirs = rt.pocket_of(self.rig.truth, cur, (hop["x"], hop["y"]))
+        if mine is None or theirs is None or mine == theirs:
+            return hop
+        best = None
+        for index in range(len(rt.pockets(self.rig.truth, self.goal))):
+            pk = rt.route_pockets(self.rig.truth, (cur, mine), (self.goal, index))
+            if pk and (best is None or len(pk) < len(best)):
+                best = pk
+        if not best:
+            return hop  # no pocket chain either: let the hop fail and the ladder record it
+        first = best[0]
+        door = tuple(first["from"])
+        self.log(f"  the routed warp ({hop['x']},{hop['y']}) is in another pocket of {cur}; leaving via {door}")
+        self.notes.append(f"map {cur} is several pockets here; routed by pocket via the door at {door}")
+        self.rig.emit("supervisor.pocket_routed", map=cur, pocket=mine, via=list(door), to=first["to_map"])
+        return {"from": cur, "to": first["to_map"], "via": "warp", "x": first["from"][0], "y": first["from"][1]}
+
     def _reroute_around(self, hop: dict) -> bool:
         """Ban a hop the world has structurally refused and ask the graph for another chain.
 
@@ -915,14 +953,19 @@ class LegRunner:
         import rom_truth as rt
 
         cur = self.rig.pos()[0]
-        self.banned.add((cur, hop["to"]))
+        # The pair banned is the hop's own, not "wherever we stand now": a failed gate pass leaves
+        # the player inside the gate house, and banning (house -> target) bans a pair that is not
+        # in the graph while the refused hop stays routable (Route 13, 2026-09-05: 36 identical
+        # reroutes in one leg).
+        src = hop.get("from", cur)
+        self.banned.add((src, hop["to"]))
         alt = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
         if not alt:
-            self.notes.append(f"banning {cur}->{hop['to']} leaves no chain to {self.goal} at all")
+            self.notes.append(f"banning {src}->{hop['to']} leaves no chain to {self.goal} at all")
             return False
-        self.log(f"  banned {cur}->{hop['to']}; rerouted: {rt.describe_route(alt)}")
-        self.notes.append(f"the hop {cur}->{hop['to']} is structurally refused; rerouted around it")
-        self.rig.emit("supervisor.rerouted", banned=[cur, hop["to"]], chain=rt.describe_route(alt))
+        self.log(f"  banned {src}->{hop['to']}; rerouted: {rt.describe_route(alt)}")
+        self.notes.append(f"the hop {src}->{hop['to']} is structurally refused; rerouted around it")
+        self.rig.emit("supervisor.rerouted", banned=[src, hop["to"]], chain=rt.describe_route(alt))
         return True
 
     # ---- the bounded actions ----------------------------------------------------------------
@@ -1470,7 +1513,6 @@ class LegRunner:
 
     def run(self) -> dict:
         import road
-        import rom_truth as rt
 
         started = self.clock()
         self.rig.emit("supervisor.leg_start", goal=self.goal, pos=list(self.rig.pos()), budget_s=self.budget_s)
@@ -1501,8 +1543,7 @@ class LegRunner:
                         "engaged-no-item", f"arrived on map {self.goal}, engaged every body, {self.hunt} not in the bag"
                     )
                 return self._finish("arrived", f"reached map {self.goal}")
-            chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
-            hop = chain[0] if chain else None
+            hop = self._next_hop(cur)
             if hop is None:
                 failure = "no-route"
             else:

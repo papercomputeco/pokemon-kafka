@@ -2738,3 +2738,61 @@ def test_strength_is_taught_to_a_standing_member_before_the_first_push(tmp_path)
     unable = HmRig(able=())
     runner = LegRunner(unable, goal=1, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
     assert runner.sweep_items() == [] and any("no standing member could learn it" in n for n in runner.notes)
+
+
+# --------------------------------------------------------------------------- pockets
+
+
+def _two_pocket_truth():
+    """Route 13 in miniature: map 1 is two pockets split by a solid column; the routed warp to the
+    goal (map 2) is in the east pocket, the player in the west one, and the gate house (map 3)
+    joins them - its west door lands in the west pocket, its east door in the east pocket."""
+    grid = ["11101111"] * 8
+    full = ["1" * 8] * 8
+
+    def m(**kw):
+        base = {"width": 8, "height": 8, "tileset": 0, "grid": grid, "sprites": [], "warps": [], "connections": {}}
+        return {**base, **kw}
+
+    return {
+        "maps": {
+            "1": m(warps=[[6, 6, 2, 0], [1, 1, 3, 0], [5, 1, 3, 1]]),  # (6,6) -> goal; doors to the house
+            "2": m(grid=full, warps=[[0, 0, 1, 0]]),
+            "3": m(grid=full, warps=[[0, 7, 1, 1], [7, 7, 1, 2]]),
+        }
+    }
+
+
+def _runner(rig, tmp_path, goal=2):
+    return LegRunner(rig, goal=goal, consult=_consult("GIVE_UP"), log=lambda *_: None, learnings_dir=tmp_path)
+
+
+def test_a_routed_warp_in_another_pocket_is_reached_through_the_pocket_router(tmp_path):
+    """Route 13 (2026-09-05): the map-level chain says 'warp at (12,9)'; the leg stands in the
+    other pocket. The first hop must be the door that leaves THIS pocket, not the unreachable warp."""
+    truth = _two_pocket_truth()
+    assert rt.pocket_of(truth, 1, (1, 4)) != rt.pocket_of(truth, 1, (6, 6))
+    rig = FakeRig(start=(1, 1, 4), truth=truth, hops=[3])
+    hop = _runner(rig, tmp_path)._next_hop(1)
+    assert hop["via"] == "warp" and (hop["x"], hop["y"]) == (1, 1) and hop["to"] == 3
+    assert any(e["event"] == "supervisor.pocket_routed" for e in rig.events)
+    # standing in the warp's own pocket the map chain is used as is
+    hop2 = _runner(FakeRig(start=(1, 6, 4), truth=truth), tmp_path)._next_hop(1)
+    assert (hop2["x"], hop2["y"]) == (6, 6)
+    # an edge hop: the pocket router knows warps only, the walk decides
+    assert _runner(FakeRig(), tmp_path)._next_hop(1)["via"] == "edge"
+    # asked about a map we are not standing on: the map chain stands
+    hop4 = _runner(FakeRig(start=(9, 0, 0), truth=truth), tmp_path)._next_hop(1)
+    assert (hop4["x"], hop4["y"]) == (6, 6)
+    # no pocket chain either (the house has no east door): the map chain stands and the hop fails honestly
+    sealed = _two_pocket_truth()
+    sealed["maps"]["3"]["warps"] = [[0, 7, 1, 1]]
+    hop3 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)._next_hop(1)
+    assert (hop3["x"], hop3["y"]) == (6, 6)
+
+
+def test_reroute_bans_the_hops_own_pair_not_the_map_we_stand_on(tmp_path):
+    rig = FakeRig(start=(9, 0, 0))  # inside the house after a failed gate pass
+    runner = _runner(rig, tmp_path)
+    runner._reroute_around({"from": 1, "to": 2, "via": "edge", "edge": "east"})
+    assert (1, 2) in runner.banned and (9, 2) not in runner.banned
