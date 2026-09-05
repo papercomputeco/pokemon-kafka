@@ -51,7 +51,7 @@ TEXT_SHOP_MENU, TEXT_ITEM_LIST = 14, 13
 MASTER_BALL, ULTRA_BALL, GREAT_BALL, POKE_BALL = 1, 2, 3, 4
 POTION, SUPER_POTION = 0x14, 0x13
 # Cinnabar mart, measured 2026-09-04: ids from the ROM item list, prices off the shop menu.
-ULTRA_BALL, HYPER_POTION, MAX_REPEL, FULL_HEAL, REVIVE = 2, 18, 57, 52, 53
+ULTRA_BALL, HYPER_POTION, MAX_REPEL, FULL_HEAL, REVIVE, ESCAPE_ROPE = 2, 18, 57, 52, 53, 29
 BALL_IDS = (POKE_BALL, GREAT_BALL, ULTRA_BALL, MASTER_BALL)  # cheapest first: spend plain balls first
 PRICES = {
     POKE_BALL: 200,
@@ -102,14 +102,15 @@ SHOPS = {
     2: Shop(2, (23, 17), 56, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
     # Vermilion: door (23,13) -> map 91 per the extracted warps; same interior template.
     5: Shop(5, (23, 13), 91, (2, 5), "left", (POKE_BALL, POTION), ((3, 7), (4, 7))),
-    # Cinnabar: door (15,11) -> map 172 (entered from (15,12) UP); stock read off the menu 2026-09-04.
+    # Cinnabar: door (15,11) -> map 172 (entered from (15,12) UP); stock read off the menu 2026-09-04 -- the
+    # first read scrolled past ESCAPE ROPE between MAX REPEL and FULL HEAL, and the buys landed one row off.
     8: Shop(
         8,
         (15, 11),
         172,
         (2, 5),
         "left",
-        (ULTRA_BALL, GREAT_BALL, HYPER_POTION, MAX_REPEL, FULL_HEAL, REVIVE),
+        (ULTRA_BALL, GREAT_BALL, HYPER_POTION, MAX_REPEL, ESCAPE_ROPE, FULL_HEAL, REVIVE),
         ((3, 7), (4, 7)),
     ),
 }
