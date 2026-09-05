@@ -180,15 +180,30 @@ def room_plan(bag_named) -> list[tuple[str, str]]:
     for n, _q in names:
         if n in SELL_ONLY:
             plan.append(("toss", n))
-    stacks = sorted(((q, n) for n, q in names if q > 1 and not n.startswith(("HM", "TM"))), reverse=True)
+    stacks = sorted(
+        ((q, n) for n, q in names if q > 1 and not n.startswith(("HM", "TM")) and not is_kit(n)), reverse=True
+    )
     plan.extend(("toss", n) for _q, n in stacks)
-    for n, _q in names:
-        if ("POTION" in n or "ETHER" in n or "ELIXER" in n) and ("toss", n) not in plan:
-            plan.append(("toss", n))
     for n, _q in names:
         if n.startswith("TM"):
             plan.append(("toss", n))
+    # The kit goes last, and only its medicine: measured 2026-09-04 at Cinnabar's mart, the old
+    # "largest stack" rule tossed the 31 ULTRA BALLs bought for the League and then the HYPER POTIONs,
+    # to make room for MAX REPELs. Balls are never tossed by this plan.
+    for n, _q in names:
+        if ("POTION" in n or "ETHER" in n or "ELIXER" in n) and ("toss", n) not in plan:
+            plan.append(("toss", n))
     return plan
+
+
+KIT_WORDS = ("BALL", "POTION", "REPEL", "HEAL", "REVIVE", "ETHER", "ELIXER", "RESTORE", "ESCAPE ROPE")
+
+
+def is_kit(name: str) -> bool:
+    """Is this bag entry part of the travelling kit (balls, medicine, repels, the rope)? Those are the
+    stacks a leg bought on purpose; the room plan tosses TMs before them and balls never."""
+    n = name.upper()
+    return any(w in n for w in KIT_WORDS)
 
 
 def fly_row_names(row_text: str, town: str) -> bool:

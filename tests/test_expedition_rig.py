@@ -1627,14 +1627,17 @@ def test_room_plan_uses_what_only_helps_before_tossing_anything():
     plan = rig.room_plan(bag)
     assert plan[:2] == [("use", "HP UP"), ("use", "CALCIUM")]
     assert plan[2] == ("toss", "NUGGET")
-    assert ("toss", "HYPER POTION") in plan and plan.index(("toss", "HYPER POTION")) < plan.index(("toss", "TM28"))
+    # medicine is kit: it goes AFTER the TMs (measured at Cinnabar's mart, where the old order tossed the potions)
+    assert ("toss", "HYPER POTION") in plan and plan.index(("toss", "TM28")) < plan.index(("toss", "HYPER POTION"))
     assert not any(n in ("HM01", "POKe FLUTE") for _a, n in plan)  # HMs and unlisted items are never touched
 
 
 def test_room_plan_tosses_the_largest_multi_stack_before_singles():
-    plan = rig.room_plan([("POKe BALL", 7), ("ULTRA BALL", 3), ("TM10", 1)])
-    assert plan[0] == ("toss", "POKe BALL")
+    plan = rig.room_plan([("FRESH WATER", 7), ("SODA POP", 3), ("TM10", 1)])
+    assert plan[0] == ("toss", "FRESH WATER")
     assert plan[-1] == ("toss", "TM10")
+    # balls are kit and never in the plan, however large the stack (measured: 31 ULTRA BALLs tossed for a repel)
+    assert rig.room_plan([("POKe BALL", 7), ("ULTRA BALL", 3), ("TM10", 1)]) == [("toss", "TM10")]
 
 
 def test_room_plan_is_empty_when_nothing_is_expendable():
@@ -1731,3 +1734,19 @@ def test_make_room_hands_the_booster_to_the_lowest_level_member(tmp_path):
     r.cursor_to = lambda i: seated.append(i) or True
     assert r.make_room() is True
     assert used == ["HP UP"] and seated == [1]
+
+
+def test_room_plan_spares_the_kit_and_tosses_tms_before_medicine():
+    """Measured at Cinnabar's mart: the largest-stack rule tossed 31 ULTRA BALLs and the HYPER POTIONs to fit
+    MAX REPELs. Balls are never in the plan; TMs go before any medicine; an ordinary stack still goes first."""
+    from expedition_rig import is_kit, room_plan
+
+    bag = [("ULTRA BALL", 31), ("HYPER POTION", 5), ("MAX REPEL", 8), ("TM07 HORN DRILL", 1), ("HM03 SURF", 1)]
+    plan = room_plan(bag)
+    assert ("toss", "ULTRA BALL") not in plan and ("toss", "MAX REPEL") not in plan
+    assert ("toss", "HM03 SURF") not in plan
+    assert plan.index(("toss", "TM07 HORN DRILL")) < plan.index(("toss", "HYPER POTION"))
+    # a sellable stack that is not kit still goes before the TMs
+    plan2 = room_plan([("FRESH WATER", 6), ("TM07 HORN DRILL", 1), ("ULTRA BALL", 3)])
+    assert plan2[0] == ("toss", "FRESH WATER") and ("toss", "ULTRA BALL") not in plan2
+    assert is_kit("GREAT BALL") and is_kit("FULL RESTORE") and not is_kit("NUGGET")

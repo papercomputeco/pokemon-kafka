@@ -1362,3 +1362,13 @@ def test_surf_cross_walks_to_the_shore_before_arming_and_reports_when_it_cannot_
     assert road.shore_stand(truth, PAIRS, 1, 2, (3, 0)) is not None  # the branch under test
     assert road.surf_cross(io, truth, PAIRS, 1, 2, arm_surf=lambda: False) == "surfmoved-failed"
     assert io.mem[qm.ADDR_MAP] == 1  # never left our side
+
+
+def test_the_water_model_calls_anything_off_the_map_land():
+    """Route 22 -> 23 crashed on int('') when the facing cell lay past the row's end."""
+    m = {"width": 2, "height": 2, "tiles": ["1400", "0011"]}
+    assert road._water_model(m, 2, 0) is False
+    assert road._water_model(m, -1, 0) is False
+    assert road._water_model(m, 0, 2) is False
+    assert road._water_model(m, 0, -1) is False
+    assert road._water_model(m, 0, 0) is True

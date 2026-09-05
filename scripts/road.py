@@ -649,6 +649,10 @@ def _water_model(m, x: int, y: int) -> bool:
     tiles = m.get("tiles")
     if tiles is None:
         return True
+    # Off the map is never water. Measured on Route 23 (20x144): facing across the map edge read an
+    # empty slice and int('') crashed the whole League leg at the Route 22 -> 23 hop.
+    if not (0 <= y < len(tiles)) or not (0 <= x < len(tiles[y]) // 2):
+        return False
     return int(tiles[y][2 * x : 2 * x + 2], 16) in WATER_TILES
 
 
