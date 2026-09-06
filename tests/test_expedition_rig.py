@@ -191,8 +191,19 @@ def test_make_room_tosses_the_largest_stack(monkeypatch, tmp_path):
         return True
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room() is False  # never by default: the 2026-09-05 replays sold NUGGETs and TMs this way
+    assert tossed == {}
+    assert r.make_room(allow_toss=True) is True
     assert tossed["item"] == 60  # FRESH WATER x6, not the LIFT KEY and not RARE CANDY x2
+
+
+def test_make_room_says_so_when_only_the_pc_can_help(tmp_path):
+    r = _bag_rig([(74, 1), (60, 6)], items={"74": "LIFT KEY", "60": "FRESH WATER"})
+    r.telemetry_root = tmp_path
+    events = []
+    r.emit = lambda event, **fields: events.append((event, fields))
+    assert r.make_room() is False
+    assert events == [("bag.full", {"slots": 2, "hint": "store_at_pc"})]
 
 
 def test_make_room_refuses_when_every_slot_is_a_single_item(tmp_path):
@@ -243,7 +254,7 @@ def test_make_room_falls_back_to_a_tm_when_nothing_is_stacked(tmp_path):
         return True
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tried == [207]  # the TM, never the LIFT KEY or the SILPH SCOPE
 
 
@@ -257,7 +268,7 @@ def test_make_room_moves_on_when_the_game_refuses_a_toss(tmp_path):
         return item == 210  # the first one will not go
 
     r.toss_stack = toss
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tried == [207, 210]
 
 
@@ -949,7 +960,14 @@ def test_cross_routes_a_failed_cross_to_surf_only_when_the_edge_is_water(monkeyp
 
     # a land edge that still fails is a real block, not water -> surf must not swallow it
     monkeypatch.setattr(road_mod, "edge_cells", lambda *a: ({(0, 0)}, "left"))
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: False)
     assert make().cross(1, 2) == "stuck-on-edge"
+
+    # a shore: land cells on the edge AND water on the same edge line (Cinnabar's east column,
+    # 8 -> 31) -> the refused land cross is surfed
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: True)
+    assert make().cross(1, 2) == "surfed"
+    monkeypatch.setattr(road_mod, "edge_has_water", lambda *a: False)
 
     # the connection isn't modelled -> the water verdict was a guess, keep the land failure
     def no_map(*a):
@@ -1683,7 +1701,7 @@ def test_make_room_moves_past_a_use_the_game_refused(tmp_path):
     r.use_item, r.ctl = (lambda name: True), Ctl()  # selected, but the count never moved
     r.toss_stack = lambda item: tossed.append(item) or True
     r.emit = lambda *a, **kw: None
-    assert r.make_room() is True
+    assert r.make_room(allow_toss=True) is True
     assert tossed == [60]  # the largest stack, once using got nowhere
 
 
@@ -1702,7 +1720,9 @@ def test_make_room_reaches_the_tm_fallback_under_its_full_name(tmp_path):
     r.telemetry_root = tmp_path
     tossed = []
     r.toss_stack = lambda item: tossed.append(item) or True
-    assert r.make_room() is True  # no use_item on this rig: the use entries are skipped, the TM is tossed
+    assert (
+        r.make_room(allow_toss=True) is True
+    )  # no use_item on this rig: the use entries are skipped, the TM is tossed
     assert tossed == [228]
 
 
@@ -1773,3 +1793,70 @@ def test_storage_plan_banks_tms_then_single_items_and_keeps_the_kit_hms_and_the_
     assert plan[1:] == ["S.S.TICKET", "SECRET KEY"]
     assert "HM01 CUT" not in plan and "OLD AMBER" not in plan and "ULTRA BALL" not in plan
     assert storage_plan([("HM03 SURF", 1), ("HYPER POTION", 5)]) == []
+
+
+def test_boulders_are_the_live_cells_of_pic_63_sprites_by_slot():
+    r = rig.Rig.__new__(rig.Rig)
+    r.truth = {
+        "maps": {
+            "108": {
+                "width": 20,
+                "height": 20,
+                "sprites": [{"kind": "npc", "x": 2, "y": 10, "pic": 63}, {"kind": "trainer", "x": 5, "y": 5, "pic": 6}],
+            }
+        }
+    }
+    r.pos = lambda: (108, 1, 1)
+
+    class IO:
+        def read(self, addr):
+            if addr < rig.road.SPRITE_DATA_BASE:
+                return 1 if (addr - rig.road.SPRITE_STATE_BASE) // 0x10 in (1, 2) else 0
+            slot, off = (addr - rig.road.SPRITE_DATA_BASE) // 0x10, addr & 0xF
+            return {1: {4: 12 + 4, 5: 3 + 4}, 2: {4: 5 + 4, 5: 5 + 4}}[slot][off]  # the boulder moved to (3,12)
+
+    r.io = IO()
+    assert r.boulders() == {(3, 12)}
+    r.pos = lambda: (999, 0, 0)
+    assert r.boulders() == set()
+
+
+def test_a_battle_around_the_arm_is_fought_and_the_arm_asked_again():
+    """Route 20 (24,14), 2026-09-05: a swimmer's approach ate the START press; the flag was up by
+    the time the arm read its verdict. Fight it, arm once more, and only then call it refused."""
+    party = [("Gyarados", 100, 377), ("Dugtrio", 100, 259)]
+    r, fake = _surf_rig(party, "Gyarados")
+    flags = {"battle": 1, "fought": 0}
+
+    class _IO:
+        def read(self, addr):
+            return flags["battle"] if addr == qm.ADDR_IN_BATTLE else 0
+
+    r.io = _IO()
+    r.battle = lambda io=None: flags.update(battle=0, fought=flags["fought"] + 1)
+    # a battle already on when the arm is asked: fought first, then the arm proceeds
+    assert r._arm_surf() is True
+    assert flags["fought"] == 1
+    # the keystrokes go into a battle that opens under them (the lead arm does not move us while
+    # the flag comes up): fought, re-asked once, then it succeeds
+    r2, fake2 = _surf_rig(party, "Gyarados")
+    state = {"battle": 0, "fought": 0, "calls": 0}
+
+    class _IO2:
+        def read(self, addr):
+            return state["battle"] if addr == qm.ADDR_IN_BATTLE else 0
+
+    real_surf = r2.surf_facing
+
+    def ambushed_surf(face=None):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            state["battle"] = 1  # the swimmer arrives as the menu opens; the player does not move
+            return
+        real_surf(face)
+
+    r2.io = _IO2()
+    r2.surf_facing = ambushed_surf
+    r2.battle = lambda io=None: state.update(battle=0, fought=state["fought"] + 1)
+    assert r2._arm_surf() is True
+    assert state["fought"] == 1 and state["calls"] == 2
