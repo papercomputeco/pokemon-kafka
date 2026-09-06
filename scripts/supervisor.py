@@ -489,6 +489,7 @@ class LegRunner:
         self.reconned: set[int] = set()  # maps whose bodies have been asked
         self.consults: list[dict] = []
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
+        self.region_mode = False  # the region router has taken this leg over (see _next_hop)
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
         self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
         self.gates: dict[tuple[int, int, int], str] = {}  # (map, x, y) -> what the game said when it refused
@@ -948,11 +949,25 @@ class LegRunner:
 
         chain = rt.route(self.rig.truth, cur, self.goal, banned=self.banned)
         hop = chain[0] if chain else None
-        if hop is None:
-            return None
         mp, x, y = self.rig.pos()
         if mp != cur or str(cur) not in self.rig.truth.get("maps", {}):
             return hop
+        if self.region_mode:
+            # Once the region router has taken over a leg, the map chain is not asked again until it
+            # has nothing to say: Seafoam B1/B2, measured 2026-09-06 (run probe_seafoam_cross2), the
+            # map chain on each floor said "back up", that hop succeeded, and the leg ping-ponged
+            # between the floors for its whole budget with the cave's way down one region away.
+            alt = self._region_alt(cur, (x, y))
+            if alt is not None:
+                key = (alt["to"], alt.get("x"), alt.get("y"))
+                same = hop is not None and key == (hop["to"], hop.get("x"), hop.get("y"))
+                if not same:
+                    where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
+                    self.log(f"  by region: {alt['via']} {where} -> {alt['to']}")
+                return alt
+            return hop
+        if hop is None:
+            return None
         wall = f"{cur}->{hop['to']}"
         failed_here = self.attempts.get(wall, 0) >= 1
         back_into_a_wall = hop["via"] == "mat" and any(k.startswith(f"{hop['to']}->") for k in self.attempts)
@@ -965,6 +980,7 @@ class LegRunner:
         if alt is None or (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
             return hop
         where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
+        self.region_mode = True
         self.log(f"  {wall} is not reachable from this region of {cur}; by region: {alt['via']} {where} -> {alt['to']}")
         self.notes.append(f"map {cur} is more than one region here; routed by region via {alt['via']} {where}")
         shown = list(where) if isinstance(where, tuple) else where
@@ -992,6 +1008,7 @@ class LegRunner:
             alt = self._region_alt(mp, (x, y))
             if alt and not (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
                 where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
+                self.region_mode = True
                 self.log(f"  the hop to {hop['to']} is refused here; the region router leaves via {alt['via']} {where}")
                 self.notes.append(f"the hop to {hop['to']} is refused from this region; rerouted by region via {where}")
                 self.rig.emit("supervisor.region_rerouted", map=mp, at=[x, y], via=alt["via"], to=alt["to"])

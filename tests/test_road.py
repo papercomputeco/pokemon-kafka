@@ -2014,11 +2014,17 @@ def test_region_route_declines_cleanly():
     # a water edge onto a far map with no walkable cell at all: nothing to stand on there either
     sea = _route21_truth()
     sea["maps"]["2"]["grid"] = ["0" * 8]
+    sea["maps"]["2"]["tiles"] = ["3a" * 8]  # rock all along the far edge
+    assert road.region_route(sea, PAIRS, 1, (0, 1), 2, surf=True) is None
+    sea["maps"]["2"]["tiles"] = ["14" * 8]  # open water there: the surf region starts on it
+    assert road.region_route(sea, PAIRS, 1, (0, 1), 2, surf=True)["to"] == 2
+    del sea["maps"]["2"]["tiles"]  # no far model at all: nothing known to stand on
     assert road.region_route(sea, PAIRS, 1, (0, 1), 2, surf=True) is None
 
 
-def test_region_route_crosses_a_water_edge_as_one_region():
-    """No cell to stand on at a water edge: the far map counts whole and the surf decides live."""
+def test_region_route_crosses_a_water_edge_into_the_far_maps_land():
+    """No cell to stand on at a water edge on our side: a surfer enters the far map at the cell
+    across from its water (land there, or the far water and its shores)."""
     truth = _route21_truth()
     truth["maps"]["2"]["connections"] = {"south": 1, "east": 5}
     truth["maps"]["5"] = _map(["1" * 8], connections={"west": 2})

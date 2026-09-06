@@ -2849,3 +2849,27 @@ def test_region_alt_looks_for_a_way_across_this_map_before_leaving_it(tmp_path):
     assert alt2 == {"from": 1, "to": 5, "via": "edge", "edge": "south"}
     # a party without SURF routes by land; with it, by land and water (the fake knows nothing)
     assert runner._can_surf() is False
+
+
+def test_once_the_region_router_has_taken_a_leg_the_map_chain_is_not_asked_first(tmp_path):
+    """Seafoam B1/B2 (2026-09-06): on each floor the map chain said 'back up', the hop succeeded,
+    and the leg ping-ponged for its whole budget. After the first region hop, the region router
+    leads; the map chain is the fallback when it has nothing."""
+    truth = _two_pocket_truth()
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    assert runner.region_mode is False
+    runner.attempts["1->2"] = 1
+    assert runner._next_hop(1)["to"] == 3
+    assert runner.region_mode is True
+    # inside the house now: the map chain would say mat (0,7) back out (into the west half); the
+    # region router says the EAST door - and it is asked first, no wall needed
+    rig._pos = (3, 0, 7)
+    hop = runner._next_hop(3)
+    assert hop["via"] == "mat" and (hop["x"], hop["y"]) == (7, 7)
+    # where the region router has nothing (a goal no chain reaches), the map chain's answer stands
+    runner.goal = 77
+    assert runner._next_hop(3) is None
+    runner.goal = 2
+    rig._pos = (1, 6, 4)  # in the warp's own half: both agree, no extra log
+    assert (runner._next_hop(1)["x"], runner._next_hop(1)["y"]) == (6, 6)

@@ -563,10 +563,6 @@ def region_route(
             return surf_region(truth, pairs, mp, tuple(cell))
         return reachable(truth, pairs, mp, tuple(cell))
 
-    def whole(mp):
-        m = maps[str(mp)]
-        return {(x, y) for y in range(m["height"]) for x in range(m["width"]) if m["grid"][y][x] == "1"}
-
     start = region(src_map, src_cell)
     seen = {(src_map, min(start))}
     queue = deque([(src_map, start, None, None)])
@@ -602,26 +598,40 @@ def region_route(
                 continue
             cells, _d = edge_cells(truth, mp, dst)
             mine = cells & reg
-            if not mine and (cells or not surf or not edge_has_water(truth, mp, dst)):
-                continue  # a land edge this region does not touch; or water, which only a surfer crosses
-            if not mine and not (_edge_water(m, _d) & reg):
-                continue  # a water edge, but not this surfer's water
-            entry = None
-            if mine:
-                dm = maps[str(dst)]
-                cx, cy = min(mine)
-                far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
-                far["east"] = (0, cy)
-                aligned = far[side]
-                fcells, _fd = edge_cells(truth, dst, mp)
-                if fcells:
-                    nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
-                    entry = aligned if aligned in fcells else nearest
+            ours_water = _edge_water(m, _d) & reg if (surf and not cells and edge_has_water(truth, mp, dst)) else set()
+            if not mine and not ours_water:
+                continue  # a land edge this region does not touch; or water, which only a surfer's own water crosses
+            dm = maps[str(dst)]
+            line = {"north": 0, "south": m["height"] - 1, "west": 0, "east": m["width"] - 1}[side]
+            on_line = [c for c in (mine or ours_water) if (c[1] if side in ("north", "south") else c[0]) == line]
+            cx, cy = min(on_line or (mine or ours_water))
+            far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
+            far["east"] = (0, cy)
+            aligned = far[side]
+            fcells, _fd = edge_cells(truth, dst, mp)
+            if fcells:
+                nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
+                entry = aligned if aligned in fcells else nearest
+            elif surf and dm.get("tiles"):
+                # No land to step onto: the far edge is water, and the surf region starts from the water
+                # cell we would land on. Counting the whole far map here let Route 20 look crossable by
+                # stepping out to Cinnabar and back (measured 2026-09-06, 39 identical hops).
+                fline = {"north": dm["height"] - 1, "south": 0, "west": dm["width"] - 1, "east": 0}[side]
+                axis = 1 if side in ("north", "south") else 0
+                fwater = [
+                    (x, y)
+                    for y in range(dm["height"])
+                    for x in range(dm["width"])
+                    if (y if axis == 1 else x) == fline and _water_model(dm, x, y)
+                ]
+                if not fwater:
+                    continue
+                entry = min(fwater, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
+            else:
+                continue  # nothing modelled to stand on over there
             hops.append((dst, entry, {"from": mp, "to": dst, "via": "edge", "edge": side}))
         for dst, land, hop in hops:
-            reg2 = region(dst, land) if land is not None else whole(dst)
-            if not reg2:
-                continue
+            reg2 = region(dst, land)  # never empty: the entry cell itself stands in it
             key = (dst, min(reg2))
             if key in seen:
                 continue
