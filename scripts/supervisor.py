@@ -904,6 +904,30 @@ class LegRunner:
             self.rig.emit("supervisor.gate_text", map=mp, at=[x, y], direction=direction, said=said[:300])
         return said
 
+    def _can_surf(self) -> bool:
+        """Does the party hold SURF? Then a region is land plus the water it touches (``road.surf_region``)."""
+        knows = getattr(self.rig, "knows_move", None)
+        return bool(knows is not None and knows("SURF") is not None)
+
+    def _region_alt(self, mp: int, cell) -> dict | None:
+        """The region router's first hop from here - preferring a way across THIS map first.
+
+        Route 20, measured 2026-09-06: the crossing to Route 19 is through the Seafoam cave (nine
+        hops: door (58,9), the hole on 1F, B1-B2-B3 and back up, out the 1F west mat onto the far
+        shore), and the unconstrained router preferred the west edge to Cinnabar and the whole
+        continent. When the goal is a neighbour we have failed to reach, the other edges off this
+        map are held back on the first ask; only if nothing crosses here is the wide chain taken.
+        """
+        import road
+
+        m = self.rig.truth["maps"].get(str(mp), {})
+        stay = set(self.banned) | {(mp, other) for other in m.get("connections", {}).values() if other != self.goal}
+        surf = self._can_surf()
+        alt = road.region_route(self.rig.truth, self.rig.pairs, mp, cell, self.goal, banned=stay, surf=surf)
+        if alt is None and stay != set(self.banned):
+            alt = road.region_route(self.rig.truth, self.rig.pairs, mp, cell, self.goal, banned=self.banned, surf=surf)
+        return alt
+
     def _next_hop(self, cur: int) -> dict | None:
         """The first hop toward the goal, from the *region* the player stands in once the map
         chain has failed here.
@@ -937,7 +961,7 @@ class LegRunner:
         targets = self._hop_targets(hop, cur)
         if failed_here and targets and road.reachable(self.rig.truth, self.rig.pairs, cur, (x, y)) & targets:
             return hop  # the walk can reach it; the failure was something else, and the ladder owns that
-        alt = road.region_route(self.rig.truth, self.rig.pairs, cur, (x, y), self.goal, banned=self.banned)
+        alt = self._region_alt(cur, (x, y))
         if alt is None or (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
             return hop
         where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
@@ -955,7 +979,6 @@ class LegRunner:
         north — and the badge-6 leg spent its whole crew ladder on it before the record was
         written. A structural refusal is a fact about the graph, not a question for a model.
         """
-        import road
         import rom_truth as rt
 
         cur = self.rig.pos()[0]
@@ -966,7 +989,7 @@ class LegRunner:
         # route is a fact about where we stand, and it is asked first.
         mp, x, y = self.rig.pos()
         if str(mp) in self.rig.truth.get("maps", {}):
-            alt = road.region_route(self.rig.truth, self.rig.pairs, mp, (x, y), self.goal, banned=self.banned)
+            alt = self._region_alt(mp, (x, y))
             if alt and not (alt["to"] == hop["to"] and alt.get("x") == hop.get("x") and alt.get("y") == hop.get("y")):
                 where = (alt["x"], alt["y"]) if "x" in alt else alt.get("edge")
                 self.log(f"  the hop to {hop['to']} is refused here; the region router leaves via {alt['via']} {where}")

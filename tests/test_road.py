@@ -2000,6 +2000,7 @@ def test_region_route_declines_cleanly():
     assert road.region_route(truth, PAIRS, 1, (1, 4), 1) is None  # already there
     assert road.region_route(truth, PAIRS, 1, (1, 4), 99) is None  # not a map
     assert road.region_route(truth, PAIRS, 1, (1, 4), 2, banned={(1, 3)}) is None  # the house is banned: sealed
+    assert road.region_route(truth, PAIRS, 3, (0, 7), 2, banned={(3, 1)}) is None  # inside it, its mats banned
     assert road.region_route(truth, PAIRS, 1, (1, 4), 2, max_nodes=1) is None  # out of nodes
     sealed = _two_half_truth()
     sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1], [7, 7, 255, 9]]  # an east mat with no such warp on map 1
@@ -2013,7 +2014,7 @@ def test_region_route_declines_cleanly():
     # a water edge onto a far map with no walkable cell at all: nothing to stand on there either
     sea = _route21_truth()
     sea["maps"]["2"]["grid"] = ["0" * 8]
-    assert road.region_route(sea, PAIRS, 1, (0, 1), 2) is None
+    assert road.region_route(sea, PAIRS, 1, (0, 1), 2, surf=True) is None
 
 
 def test_region_route_crosses_a_water_edge_as_one_region():
@@ -2021,9 +2022,91 @@ def test_region_route_crosses_a_water_edge_as_one_region():
     truth = _route21_truth()
     truth["maps"]["2"]["connections"] = {"south": 1, "east": 5}
     truth["maps"]["5"] = _map(["1" * 8], connections={"west": 2})
-    hop = road.region_route(truth, PAIRS, 1, (0, 1), 5)
+    hop = road.region_route(truth, PAIRS, 1, (0, 1), 5, surf=True)
     assert hop == {"from": 1, "to": 2, "via": "edge", "edge": "north"}
+    assert road.region_route(truth, PAIRS, 1, (0, 1), 5) is None  # no SURF: water is not crossed
     # a modelled land edge the region does not touch, with no water either, is not a hop
     land = _two_half_truth()
     land["maps"]["1"]["tiles"] = ["0303030303030303"] * 8
     assert road.region_route(land, PAIRS, 1, (1, 4), 4)["to"] == 3
+
+
+# --------------------------------------------------------------------------- surf regions
+
+
+def _route20_world():
+    """Route 20 in miniature: a west sea, a fence, the island's north land (touching the east sea
+    through shore-edged water) and its fenced-off south lobe (touching the west sea) that holds the
+    cave's east door; the cave (map 9) is two columns joined by nothing on its floor - the east
+    column has a hole to the basement (8), whose far stairs climb into the west column, whose mat
+    opens onto the north land. Map 5 lies west by connection: the decoy. The east sea alone
+    touches the east edge (map 2)."""
+    rows = ["www#..sww", "www#..sww", "www##.#ww", "wwww.###w"]
+    m1 = _shore_map(rows, connections={"east": 2, "west": 5})
+    m1["tileset"] = 0
+    m1["warps"] = [[4, 3, 9, 0], [4, 0, 9, 1]]  # south-lobe door -> cave warp 0; north door -> cave warp 1
+    cave = _map(["1101"] * 4, warps=[[3, 3, 255, 0], [0, 0, 255, 1], [3, 0, 8, 0]])
+    cave["tileset"] = 17
+    basement = _map(["11", "11"], warps=[[0, 0, 9, 2], [1, 1, 9, 1]])  # up the hole, or the far stairs
+    basement["tileset"] = 17
+    return {
+        "maps": {
+            "1": m1,
+            "2": _map(["1"] * 4, connections={"west": 1}),
+            "5": _map(["1"] * 4, connections={"east": 1}),
+            "8": basement,
+            "9": cave,
+        }
+    }
+
+
+def test_surf_region_joins_land_and_the_water_it_touches():
+    truth = _route20_world()
+    reg = road.surf_region(truth, PAIRS, 1, (0, 1))  # afloat in the west sea
+    assert (4, 3) in reg and (3, 3) in reg  # the south lobe and the water beside it
+    assert (4, 0) not in reg  # the north land is another surf region
+    north = road.surf_region(truth, PAIRS, 1, (4, 0))
+    assert north >= {(4, 0), (5, 0), (6, 0), (7, 0), (8, 0)}  # north land + east sea
+    plain = {"maps": {"1": _map(["111"])}}
+    assert road.surf_region(plain, PAIRS, 1, (0, 0)) == {(0, 0), (1, 0), (2, 0)}  # no tile model: the walk
+
+
+def _follow(truth, mp, cell, goal, **kw):
+    steps = []
+    for _ in range(8):
+        hop = road.region_route(truth, PAIRS, mp, cell, goal, **kw)
+        if hop is None:
+            return steps + [None]
+        steps.append((mp, hop["via"], hop["to"]))
+        if hop["via"] == "edge":
+            return steps
+        maps = truth["maps"]
+        if hop["via"] == "warp":
+            dw = maps[str(hop["to"])]["warps"][hop["dest_warp"]]
+        else:
+            mat = next(w for w in maps[str(mp)]["warps"] if (w[0], w[1]) == (hop["x"], hop["y"]))
+            dw = maps[str(hop["to"])]["warps"][mat[3]]
+        mp, cell = hop["to"], (dw[0], dw[1])
+    return steps
+
+
+def test_region_route_with_surf_crosses_route_20_through_the_cave():
+    truth = _route20_world()
+    chain = [(1, "warp", 9), (9, "warp", 8), (8, "warp", 9), (9, "mat", 1), (1, "edge", 2)]
+    assert _follow(truth, 1, (0, 1), 2, banned={(1, 5)}, surf=True) == chain
+    # ashore on the lobe without SURF: the cave is a walk away, but the far shore's water is not
+    # crossed by a walker, so there is no chain at all
+    assert _follow(truth, 1, (4, 3), 2, banned={(1, 5)}) == [None]
+    assert _follow(truth, 1, (4, 3), 2, banned={(1, 5)}, surf=True) == chain
+    # a water edge that is not this surfer's water is not a hop
+    assert road.region_route(truth, PAIRS, 1, (0, 1), 2, banned={(1, 5), (1, 9)}, surf=True) is None
+
+
+def test_mat_destinations_prefer_the_outdoor_map_the_building_was_entered_from():
+    maps = _route20_world()["maps"]
+    assert road._mat_destinations(maps, 9, 0, 8) == [1]  # came up from the basement: still out to Route 20
+    assert road._mat_destinations(maps, 9, 1, 1) == [1]
+    assert road._mat_destinations(maps, 9, 1, None) == [1]
+    indoor = {"maps": {"7": _map(["11"], warps=[[0, 0, 255, 0]]), "6": _map(["11"], warps=[[1, 0, 7, 0]])}}
+    indoor["maps"]["6"]["tileset"] = 17
+    assert road._mat_destinations(indoor["maps"], 7, 0, None) == [6]  # no outdoor entrant: any entrant

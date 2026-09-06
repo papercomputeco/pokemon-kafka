@@ -2828,3 +2828,24 @@ def test_reroute_asks_the_region_router_before_banning(tmp_path):
     runner2 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)
     runner2._reroute_around({"from": 1, "to": 2, "via": "warp", "x": 6, "y": 6})
     assert (1, 2) in runner2.banned
+
+
+def test_region_alt_looks_for_a_way_across_this_map_before_leaving_it(tmp_path):
+    """Route 20: the goal is next door; the wide chain west to Cinnabar is not the answer while
+    the cave across this map is. Other edges off the map are held back on the first ask."""
+    truth = _two_pocket_truth()
+    truth["maps"]["1"]["connections"] = {"south": 5}
+    truth["maps"]["5"] = {**truth["maps"]["2"], "warps": [[3, 3, 2, 0]], "connections": {"north": 1}}
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    alt = runner._region_alt(1, (1, 4))
+    assert alt["via"] == "warp" and alt["to"] == 3  # the house across map 1, not the south edge
+    # nothing crosses here: the wide chain is taken
+    sealed = _two_pocket_truth()
+    sealed["maps"]["1"]["connections"] = {"south": 5}
+    sealed["maps"]["5"] = {**sealed["maps"]["2"], "warps": [[3, 3, 2, 0]], "connections": {"north": 1}}
+    sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1]]
+    alt2 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)._region_alt(1, (1, 4))
+    assert alt2 == {"from": 1, "to": 5, "via": "edge", "edge": "south"}
+    # a party without SURF routes by land; with it, by land and water (the fake knows nothing)
+    assert runner._can_surf() is False
