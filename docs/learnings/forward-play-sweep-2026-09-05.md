@@ -39,11 +39,18 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
 
 ## Walls that remain (measured, not guessed)
 
-1. **31→30, Route 20 → Route 19.** The west sea stops at x=61, the east sea starts at x=63; the
-   island between is fenced from the west sea in the model and on screen (probe_r20_east,
-   probe_r20_island). The crossing is through the Seafoam cave — a pocket route no map-level or
-   region router expresses yet. Every leg seeded west of it died here; lanes 3–8 were re-seeded
-   from mainland batons instead (`forward_sweep_2.json`).
+1. **31→30, Route 20 → Route 19 — SOLVED 2026-09-06 (branch seafoam-crossing).** The west sea
+   stops at x=61, the east sea starts at x=63, and the island between is fenced from the west sea.
+   The crossing is through the Seafoam cave, and the region router now finds and drives it live in
+   one leg with no consults (run probe_seafoam_cross4, landed (30,0,41)): door (58,9) → 1F east
+   pocket → hole → B1 → B2 → B3 east → the 0x15 launch at (23,9) → the conveyor → B4 (20,15) →
+   the 0x15 shore at (23,5) → central land → stairs (11,7) → B3 west → (5,12) → B2 → B1 → 1F west
+   → mat (4,17) → the NE shore → east sea → 30. What it took: surf-aware regions
+   (`road.surf_region`), mats returning to the OUTDOOR map, entry over water at the aligned water
+   cell, sticky region mode per leg, no sibling-door swaps in region mode, the tileset-17 shore
+   rule (water↔land only through 0x15: `SHORE_TILES`) and measured currents
+   (`references/measured_currents.json`) as hops. Lanes 3–8 of the sweep had been re-seeded from
+   mainland batons to avoid this hop; the west-side batons can now route east.
 2. **15→3, Route 15 → Fuchsia.** Route 15 is two halves joined through the gate (59) and its upper
    floor (60); the region router finds that. But Fuchsia's west entry is a 13-cell pocket in the
    model whose only exit is the door (4,11)→228; the town is not reachable from it. Either the

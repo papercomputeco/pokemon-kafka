@@ -1895,17 +1895,23 @@ class Rig:
         if not self.surf_onto(hop["face"]):
             return False
         for _ in range(80):
-            if self.pos()[0] == hop["to"]:
+            mp = self.pos()[0]
+            if mp not in (cur, hop["to"]):
+                # Measured on the first ride (run probe_seafoam_cross4): the map byte read mid-transition
+                # is neither floor, and the ride was written "refused" with the surfer already on B4.
+                self.ctl.wait(90)
+                mp = self.settled_pos()[0]
+            if mp == hop["to"]:
                 self.ctl.wait(60)
                 return True
-            if self.pos()[0] != cur:
+            if mp != cur:
                 return False
             if self.mem[qm.ADDR_IN_BATTLE]:
                 self.battle()
                 continue
             self.io.press(hop["face"], hold=15, release=15)
             self.io.wait(45)
-        return self.pos()[0] == hop["to"]
+        return self.settled_pos()[0] == hop["to"]
 
     def cut(self, face: str) -> bool:  # pragma: no cover - drives the emulator; verified live, not in unit tests
         """Cut the growth we face and prove it by stepping through it (``road.cut_until_open``)."""
