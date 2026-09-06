@@ -539,7 +539,12 @@ class LegRunner:
         now = self.rig.pos()[0]
         if now == hop["to"]:
             return None
-        if now == cur and hop["via"] != "edge" and str(result) in ("no-path", "refused", "cap", "warp-dead"):
+        if (
+            now == cur
+            and hop["via"] != "edge"
+            and not self.region_mode  # the region router named THIS door for where it lands, not its siblings
+            and str(result) in ("no-path", "refused", "cap", "warp-dead")
+        ):
             # The routed door is one of possibly several to the same map. Route 16's gate (186)
             # has four doors back out to map 27, and the router named the west one -- behind the
             # guard who stops every walk at (4,7) ("Excuse me! Wait up please") -- so three

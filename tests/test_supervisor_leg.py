@@ -2873,3 +2873,19 @@ def test_once_the_region_router_has_taken_a_leg_the_map_chain_is_not_asked_first
     runner.goal = 2
     rig._pos = (1, 6, 4)  # in the warp's own half: both agree, no extra log
     assert (runner._next_hop(1)["x"], runner._next_hop(1)["y"]) == (6, 6)
+
+
+def test_in_region_mode_a_refused_door_is_not_swapped_for_a_sibling(tmp_path):
+    """Seafoam B3 (2026-09-06): the region router named the (5,12) stairs across the water; the
+    sibling fallback took the (25,14) stairs back up instead - 'the same map', the wrong region -
+    and the leg ping-ponged B2 <-> B3 for its whole budget."""
+    truth = _two_pocket_truth()
+    truth["maps"]["1"]["warps"].append([6, 1, 3, 0])  # a sibling door to the house
+    rig = FakeRig(start=(1, 1, 4), truth=truth, hops=[None, 3])  # the routed door refuses; a sibling would work
+    runner = _runner(rig, tmp_path)
+    runner.region_mode = True
+    runner._hop({"from": 1, "to": 3, "via": "warp", "x": 1, "y": 1})
+    assert {c for c in rig.calls if c[0] == "warp"} == {("warp", (1, 1))}  # the named door only, however often
+    plain = FakeRig(start=(1, 1, 4), truth=truth, hops=[None, 3])
+    _runner(plain, tmp_path)._hop({"from": 1, "to": 3, "via": "warp", "x": 1, "y": 1})
+    assert ("warp", (5, 1)) in plain.calls  # outside region mode the nearest sibling is still tried
