@@ -1,0 +1,8 @@
+[
+  {
+    "map": 161,
+    "cell": [23, 10],
+    "lands": [162, 20, 15],
+    "measured": "2026-09-06, runs 20260906-012811-24a8 and 20260906-012911-a9e7 (probe_b3_launch): the east water of Seafoam B3 is a conveyor. Launched from the 0x15 at (23,9), the surfer rides west along row 11, and pressing up at (15,9) is answered by (16,11) then (20,12), down the x=20 column; the 2026-09-04 legend run measured the same body from (15,7) landing on B4 at (20,15)."
+  }
+]

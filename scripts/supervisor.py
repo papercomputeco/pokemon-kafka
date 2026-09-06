@@ -502,6 +502,13 @@ class LegRunner:
         import road
 
         cur = self.rig.pos()[0]
+        if hop["via"] == "current":
+            # A measured conveyor: launch from its shore tile and let the water carry the leg
+            # (Seafoam B3 -> B4, 2026-09-06). Where it lands is the fact; there is no path to plan.
+            ride = getattr(self.rig, "ride_current", None)
+            if ride is not None and ride(hop):
+                return None
+            return "current-refused"
         result = self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
         if result in FIELD_MOVE_FAILURES and self.rig.pos()[0] == cur:
             # A field move the party holds may reconnect the target from right here. Tried

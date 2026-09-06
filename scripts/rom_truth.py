@@ -195,6 +195,22 @@ def load_dead_warps(path: Path | None = None) -> dict:
     return json.loads(path.read_text())
 
 
+CURRENTS = Path(__file__).resolve().parent.parent / "references" / "measured_currents.json"
+
+
+def load_currents(path: Path | None = None) -> list:
+    """Water bodies that carry the surfer somewhere else, by map: ``{"map", "cell", "lands"}``.
+
+    Seafoam B3's east water (measured 2026-09-06): every press on it ends on B4 at (20,15). A
+    conveyor is not a place a surfer stands, so the region router treats the whole body as one
+    hop from its launch tile to where it lands, and never as part of a region.
+    """
+    path = path or CURRENTS
+    if not path.exists():
+        return []
+    return json.loads(path.read_text())
+
+
 def merge_dead_warps(dead: dict, path: Path | None = None) -> dict:
     path = path or DEAD_WARPS
     merged = load_dead_warps(path)
@@ -768,6 +784,7 @@ def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
     for map_id, tiles in load_dead_warps().items():
         if map_id in truth.get("maps", {}):
             truth["maps"][map_id]["dead_warps"] = tiles
+    truth["currents"] = load_currents()
     return truth
 
 

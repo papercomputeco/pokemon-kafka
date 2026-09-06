@@ -133,6 +133,11 @@ class FakeRig:
     def cross(self, cur, nxt, **kw):
         return self._advance("cross", nxt)
 
+    def ride_current(self, hop):
+        before = self._pos
+        self._advance("current", (hop["x"], hop["y"]))
+        return self._pos != before and self._pos[0] == hop["to"]
+
     def warp(self, mp, x, y, **kw):
         return self._advance("warp", (x, y))
 
@@ -2889,3 +2894,17 @@ def test_in_region_mode_a_refused_door_is_not_swapped_for_a_sibling(tmp_path):
     plain = FakeRig(start=(1, 1, 4), truth=truth, hops=[None, 3])
     _runner(plain, tmp_path)._hop({"from": 1, "to": 3, "via": "warp", "x": 1, "y": 1})
     assert ("warp", (5, 1)) in plain.calls  # outside region mode the nearest sibling is still tried
+
+
+def test_a_current_hop_is_ridden_and_a_refused_ride_is_its_own_failure(tmp_path):
+    """Seafoam B3 -> B4 (2026-09-06): a measured conveyor is a hop from its launch tile to where it
+    lands; the rig rides it, and a ride that does not flip the map is 'current-refused'."""
+    hop = {"from": 1, "to": 2, "via": "current", "x": 3, "y": 3, "face": "down"}
+    rig = FakeRig(start=(1, 3, 3), hops=[2])
+    assert _runner(rig, tmp_path)._hop(hop) is None
+    assert ("current", (3, 3)) in rig.calls
+    stuck = FakeRig(start=(1, 3, 3), hops=[None])
+    assert _runner(stuck, tmp_path)._hop(hop) == "current-refused"
+    bare = FakeRig(start=(1, 3, 3))
+    bare.ride_current = None  # a rig that cannot ride: the hop is refused, not crashed
+    assert _runner(bare, tmp_path)._hop(hop) == "current-refused"

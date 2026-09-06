@@ -482,6 +482,8 @@ def surf_region(truth, pairs, map_id: int, start) -> set:
     land_todo = []
     water_todo = []
     if _water_model(m, *start):
+        if current_at(truth, map_id, start) is not None:
+            return {tuple(start)}  # afloat on a conveyor: carried, not standing
         water_todo.append(tuple(start))
     else:
         land_todo.append(tuple(start))
@@ -493,10 +495,13 @@ def surf_region(truth, pairs, map_id: int, start) -> set:
             land = reachable(truth, pairs, map_id, cell)
             region |= land
             for x, y in land:
+                if not shore_ok(m, x, y):
+                    continue
                 for dx, dy in _FACES:
                     n = (x + dx, y + dy)
                     if 0 <= n[0] < w and 0 <= n[1] < h and n not in region and _water_model(m, *n):
-                        water_todo.append(n)
+                        if current_at(truth, map_id, n) is None:  # a conveyor is a hop, not a place
+                            water_todo.append(n)
         while water_todo:
             cell = water_todo.pop()
             if cell in region:
@@ -507,7 +512,8 @@ def surf_region(truth, pairs, map_id: int, start) -> set:
                 for dx, dy in _FACES:
                     n = (x + dx, y + dy)
                     if 0 <= n[0] < w and 0 <= n[1] < h and n not in region and m["grid"][n[1]][n[0]] == "1":
-                        land_todo.append(n)
+                        if shore_ok(m, *n):
+                            land_todo.append(n)
     return region
 
 
@@ -593,6 +599,23 @@ def region_route(
                 continue
             land = (dw[dwarp][0], dw[dwarp][1])
             hops.append((dst, land, {"from": mp, "to": dst, "via": "warp", "x": wx, "y": wy, "dest_warp": dwarp}))
+        if surf:
+            for cur in truth.get("currents", []):
+                if int(cur["map"]) != mp or (mp, int(cur["lands"][0])) in banned or str(cur["lands"][0]) not in maps:
+                    continue
+                body = _water_reach(m, cur["cell"][0], cur["cell"][1], set())
+                launches = [
+                    (c, f)
+                    for c in reg
+                    if m["grid"][c[1]][c[0]] == "1" and shore_ok(m, *c)
+                    for (dx, dy), f in _FACES.items()
+                    if (c[0] + dx, c[1] + dy) in body
+                ]
+                if launches:
+                    (lx, ly), face = min(launches)
+                    land = (cur["lands"][1], cur["lands"][2])
+                    hop = {"from": mp, "to": int(cur["lands"][0]), "via": "current", "x": lx, "y": ly, "face": face}
+                    hops.append((int(cur["lands"][0]), land, hop))
         for side, dst in m["connections"].items():
             if str(dst) not in maps or (mp, dst) in banned:
                 continue
@@ -631,6 +654,10 @@ def region_route(
                 continue  # nothing modelled to stand on over there
             hops.append((dst, entry, {"from": mp, "to": dst, "via": "edge", "edge": side}))
         for dst, land, hop in hops:
+            if surf and hop["via"] != "current":
+                carried = current_at(truth, dst, land)
+                if carried is not None:  # the door opens onto a conveyor: the node is where it lands
+                    dst, land = int(carried["lands"][0]), (carried["lands"][1], carried["lands"][2])
             reg2 = region(dst, land)  # never empty: the entry cell itself stands in it
             key = (dst, min(reg2))
             if key in seen:
@@ -874,6 +901,35 @@ SURF_MAX_STEPS = 200  # water steps per crossing; a straight run in the connecti
 WATER_TILES = {0x14, 0x32}
 
 
+# Where water and land meet, per tileset. On the Seafoam tileset (17) SURF launches from, and lands
+# on, 0x15 tiles only: measured 2026-09-06 on B3 - the arm from plain floor (23,12) facing the water
+# at (23,11) was refused 31 times, the arm from the 0x15 at (23,9) rode onto (23,10) at once, and
+# getting off onto plain floor was refused; the 2026-09-04 legend run landed on B4's 0x15 at (7,3).
+# A tileset absent here has no such rule: any walkable cell beside water is a shore.
+SHORE_TILES: dict[int, set[int]] = {17: {0x15}}
+
+
+def shore_ok(m, x: int, y: int) -> bool:
+    """May the surfer step between this land cell and the water beside it?"""
+    allowed = SHORE_TILES.get(m.get("tileset"))
+    if allowed is None or not m.get("tiles"):
+        return True
+    row = m["tiles"][y]
+    return int(row[2 * x : 2 * x + 2], 16) in allowed
+
+
+def current_at(truth, map_id: int, cell) -> dict | None:
+    """The measured current whose water body holds ``cell``, or None."""
+    m = truth["maps"][str(map_id)]
+    for cur in truth.get("currents", []):
+        if int(cur["map"]) != int(map_id):
+            continue
+        body = _water_reach(m, cur["cell"][0], cur["cell"][1], set())
+        if tuple(cell) in body:
+            return cur
+    return None
+
+
 def _water_model(m, x: int, y: int) -> bool:
     """Propose whether this cell is standable mid-SURF. Maps without tile data (fake truth in
     tests) propose everything and let the injected io's refusals be the authority."""
@@ -933,10 +989,12 @@ def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tup
         return None
     faces = ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left"))
     sx, sy = start
-    if any((sx + dx, sy + dy) in good for dx, dy, _f in faces):
+    if shore_ok(m, sx, sy) and any((sx + dx, sy + dy) in good for dx, dy, _f in faces):
         return None  # already on the shore
     best = None
     for x, y in walkable(truth, pairs, cur, (sx, sy), bodies):
+        if not shore_ok(m, x, y):
+            continue
         for dx, dy, face in faces:
             if (x + dx, y + dy) in good:
                 dist = abs(x - sx) + abs(y - sy)
@@ -972,6 +1030,8 @@ def _board_water(io, truth, pairs, cur: int, nxt: int, arm_surf, battle) -> bool
         x, y = read_pos(io)[1:3]
         face = None
         for dx, dy, f in ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left")):
+            if not shore_ok(m, x, y):
+                break
             if _water_model(m, x + dx, y + dy) and _touches_far_edge(m, x + dx, y + dy, d):
                 face = f
                 break
@@ -1033,7 +1093,7 @@ def _hop_to_far_shore(io, truth, pairs, cur: int, nxt: int, d: str, arm_surf, ba
     for x, y in good:
         for dx, dy in _FACES:
             n = (x + dx, y + dy)
-            if 0 <= n[0] < w and 0 <= n[1] < h and m["grid"][n[1]][n[0]] == "1":
+            if 0 <= n[0] < w and 0 <= n[1] < h and m["grid"][n[1]][n[0]] == "1" and shore_ok(m, *n):
                 stands.add(n)
     if not stands:
         return False
@@ -1180,7 +1240,7 @@ def _water_exits(m, prev: dict, there: set, bodies: set):
     for cell in prev:
         for ex, ey in _FACES:
             land = (cell[0] + ex, cell[1] + ey)
-            if land not in there or land in bodies or m["grid"][land[1]][land[0]] != "1":
+            if land not in there or land in bodies or m["grid"][land[1]][land[0]] != "1" or not shore_ok(m, *land):
                 continue
             path = [cell]
             while prev[path[-1]] is not None:
@@ -1211,6 +1271,8 @@ def water_route(truth, pairs, map_id: int, start, targets, bodies=()):
         return None
     best = None
     for ax, ay in here:
+        if not shore_ok(m, ax, ay):
+            continue
         for (dx, dy), face_in in _FACES.items():
             wx, wy = ax + dx, ay + dy
             if not (0 <= wx < w and 0 <= wy < h) or (wx, wy) in bodies or not _water_model(m, wx, wy):
