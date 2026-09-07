@@ -309,6 +309,9 @@ def test_gate_classes_are_the_corpus_builders_and_unknown_sentences_are_not_gate
     assert crew.classify_gate("Excuse me! Wait up please!") == "route_gate_guard"
     assert crew.classify_gate("You can pass only if you have the CASCADEBADGE!") == "badge_gate"
     assert crew.classify_gate("We hope to see you again!") == "stale_window_text"
+    assert crew.classify_gate("I on guard duty. Gee, I thi") == "thirsty_guard"  # the refused step's window
+    assert crew.classify_gate("I thirsty! I want something to drink!") == "thirsty_guard"  # the guard, spoken to
+    assert crew.classify_gate("Hi, thanks for the cool drinks!") is None  # the same guard once cleared
     assert crew.classify_gate("I like shorts!") is None
 
 
