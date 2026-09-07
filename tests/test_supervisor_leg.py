@@ -133,6 +133,11 @@ class FakeRig:
     def cross(self, cur, nxt, **kw):
         return self._advance("cross", nxt)
 
+    def ride_current(self, hop):
+        before = self._pos
+        self._advance("current", (hop["x"], hop["y"]))
+        return self._pos != before and self._pos[0] == hop["to"]
+
     def warp(self, mp, x, y, **kw):
         return self._advance("warp", (x, y))
 
@@ -2828,3 +2833,78 @@ def test_reroute_asks_the_region_router_before_banning(tmp_path):
     runner2 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)
     runner2._reroute_around({"from": 1, "to": 2, "via": "warp", "x": 6, "y": 6})
     assert (1, 2) in runner2.banned
+
+
+def test_region_alt_looks_for_a_way_across_this_map_before_leaving_it(tmp_path):
+    """Route 20: the goal is next door; the wide chain west to Cinnabar is not the answer while
+    the cave across this map is. Other edges off the map are held back on the first ask."""
+    truth = _two_pocket_truth()
+    truth["maps"]["1"]["connections"] = {"south": 5}
+    truth["maps"]["5"] = {**truth["maps"]["2"], "warps": [[3, 3, 2, 0]], "connections": {"north": 1}}
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    alt = runner._region_alt(1, (1, 4))
+    assert alt["via"] == "warp" and alt["to"] == 3  # the house across map 1, not the south edge
+    # nothing crosses here: the wide chain is taken
+    sealed = _two_pocket_truth()
+    sealed["maps"]["1"]["connections"] = {"south": 5}
+    sealed["maps"]["5"] = {**sealed["maps"]["2"], "warps": [[3, 3, 2, 0]], "connections": {"north": 1}}
+    sealed["maps"]["3"]["warps"] = [[0, 7, 255, 1]]
+    alt2 = _runner(FakeRig(start=(1, 1, 4), truth=sealed), tmp_path)._region_alt(1, (1, 4))
+    assert alt2 == {"from": 1, "to": 5, "via": "edge", "edge": "south"}
+    # a party without SURF routes by land; with it, by land and water (the fake knows nothing)
+    assert runner._can_surf() is False
+
+
+def test_once_the_region_router_has_taken_a_leg_the_map_chain_is_not_asked_first(tmp_path):
+    """Seafoam B1/B2 (2026-09-06): on each floor the map chain said 'back up', the hop succeeded,
+    and the leg ping-ponged for its whole budget. After the first region hop, the region router
+    leads; the map chain is the fallback when it has nothing."""
+    truth = _two_pocket_truth()
+    rig = FakeRig(start=(1, 1, 4), truth=truth)
+    runner = _runner(rig, tmp_path)
+    assert runner.region_mode is False
+    runner.attempts["1->2"] = 1
+    assert runner._next_hop(1)["to"] == 3
+    assert runner.region_mode is True
+    # inside the house now: the map chain would say mat (0,7) back out (into the west half); the
+    # region router says the EAST door - and it is asked first, no wall needed
+    rig._pos = (3, 0, 7)
+    hop = runner._next_hop(3)
+    assert hop["via"] == "mat" and (hop["x"], hop["y"]) == (7, 7)
+    # where the region router has nothing (a goal no chain reaches), the map chain's answer stands
+    runner.goal = 77
+    assert runner._next_hop(3) is None
+    runner.goal = 2
+    rig._pos = (1, 6, 4)  # in the warp's own half: both agree, no extra log
+    assert (runner._next_hop(1)["x"], runner._next_hop(1)["y"]) == (6, 6)
+
+
+def test_in_region_mode_a_refused_door_is_not_swapped_for_a_sibling(tmp_path):
+    """Seafoam B3 (2026-09-06): the region router named the (5,12) stairs across the water; the
+    sibling fallback took the (25,14) stairs back up instead - 'the same map', the wrong region -
+    and the leg ping-ponged B2 <-> B3 for its whole budget."""
+    truth = _two_pocket_truth()
+    truth["maps"]["1"]["warps"].append([6, 1, 3, 0])  # a sibling door to the house
+    rig = FakeRig(start=(1, 1, 4), truth=truth, hops=[None, 3])  # the routed door refuses; a sibling would work
+    runner = _runner(rig, tmp_path)
+    runner.region_mode = True
+    runner._hop({"from": 1, "to": 3, "via": "warp", "x": 1, "y": 1})
+    assert {c for c in rig.calls if c[0] == "warp"} == {("warp", (1, 1))}  # the named door only, however often
+    plain = FakeRig(start=(1, 1, 4), truth=truth, hops=[None, 3])
+    _runner(plain, tmp_path)._hop({"from": 1, "to": 3, "via": "warp", "x": 1, "y": 1})
+    assert ("warp", (5, 1)) in plain.calls  # outside region mode the nearest sibling is still tried
+
+
+def test_a_current_hop_is_ridden_and_a_refused_ride_is_its_own_failure(tmp_path):
+    """Seafoam B3 -> B4 (2026-09-06): a measured conveyor is a hop from its launch tile to where it
+    lands; the rig rides it, and a ride that does not flip the map is 'current-refused'."""
+    hop = {"from": 1, "to": 2, "via": "current", "x": 3, "y": 3, "face": "down"}
+    rig = FakeRig(start=(1, 3, 3), hops=[2])
+    assert _runner(rig, tmp_path)._hop(hop) is None
+    assert ("current", (3, 3)) in rig.calls
+    stuck = FakeRig(start=(1, 3, 3), hops=[None])
+    assert _runner(stuck, tmp_path)._hop(hop) == "current-refused"
+    bare = FakeRig(start=(1, 3, 3))
+    bare.ride_current = None  # a rig that cannot ride: the hop is refused, not crashed
+    assert _runner(bare, tmp_path)._hop(hop) == "current-refused"

@@ -465,7 +465,82 @@ def edge_cells(truth: dict, cur: int, nxt: int) -> tuple[set[tuple[int, int]], s
     return {(col, y) for y in range(m["height"]) if m["grid"][y][col] == "1"}, _OUTWARD[side]
 
 
-def region_route(truth, pairs, src_map: int, src_cell, goal_map: int, banned=frozenset(), max_nodes: int = 300):
+def surf_region(truth, pairs, map_id: int, start) -> set:
+    """Everywhere a SURFER can stand from ``start`` on this map: the land the walk reaches, every
+    water component (in the tile model) that land touches, and every shore those waters touch,
+    to closure. ``start`` may itself be water (a leg banked afloat).
+
+    Route 20, measured 2026-09-06: the west sea reaches only the island's south lobe, whose door
+    (58,9) is the way into Seafoam; the NE land the cave's west door opens onto touches the east
+    sea. Neither is one walk, and both are one surf.
+    """
+    m = truth["maps"][str(map_id)]
+    w, h = m["width"], m["height"]
+    if not m.get("tiles"):
+        return reachable(truth, pairs, map_id, tuple(start))
+    region: set = set()
+    land_todo = []
+    water_todo = []
+    if _water_model(m, *start):
+        if current_at(truth, map_id, start) is not None:
+            return {tuple(start)}  # afloat on a conveyor: carried, not standing
+        water_todo.append(tuple(start))
+    else:
+        land_todo.append(tuple(start))
+    while land_todo or water_todo:
+        while land_todo:
+            cell = land_todo.pop()
+            if cell in region:
+                continue
+            land = reachable(truth, pairs, map_id, cell)
+            region |= land
+            for x, y in land:
+                if not shore_ok(m, x, y):
+                    continue
+                for dx, dy in _FACES:
+                    n = (x + dx, y + dy)
+                    if 0 <= n[0] < w and 0 <= n[1] < h and n not in region and _water_model(m, *n):
+                        if current_at(truth, map_id, n) is None:  # a conveyor is a hop, not a place
+                            water_todo.append(n)
+        while water_todo:
+            cell = water_todo.pop()
+            if cell in region:
+                continue
+            water = set(_water_reach(m, cell[0], cell[1], set()))
+            region |= water
+            for x, y in water:
+                for dx, dy in _FACES:
+                    n = (x + dx, y + dy)
+                    if 0 <= n[0] < w and 0 <= n[1] < h and n not in region and m["grid"][n[1]][n[0]] == "1":
+                        if shore_ok(m, *n):
+                            land_todo.append(n)
+    return region
+
+
+def _mat_destinations(maps: dict, mp: int, dwarp: int, came_from) -> list[int]:
+    """Where a LAST_MAP mat on ``mp`` with warp index ``dwarp`` can land.
+
+    The game returns to the OUTDOOR map the building was entered from, whatever floors were
+    walked in between. Seafoam 1F, measured 2026-09-06: walking up from B1 and out the ground-floor
+    mat lands on Route 20, not on B1, though B1 also warps into 1F. So: the map we came from if it
+    is an overworld map (tileset 0) with a door into ``mp``; else every overworld map with one;
+    else (an indoor mat between indoor floors) every map with one. Only maps with a warp at that
+    index count.
+    """
+    entrants = [
+        int(k)
+        for k, om in maps.items()
+        if int(k) != mp and any(w[2] == mp for w in om["warps"]) and dwarp < len(om["warps"])
+    ]
+    if came_from is not None and came_from in entrants and maps[str(came_from)].get("tileset") == 0:
+        return [came_from]
+    outdoor = [k for k in entrants if maps[str(k)].get("tileset") == 0]
+    return outdoor or entrants
+
+
+def region_route(
+    truth, pairs, src_map: int, src_cell, goal_map: int, banned=frozenset(), max_nodes: int = 300, surf: bool = False
+):
     """The first hop out of the player's reachable REGION toward ``goal_map`` - or None.
 
     ``rom_truth.route`` plans over map ids, and a map is not one place. Route 13, measured
@@ -490,31 +565,32 @@ def region_route(truth, pairs, src_map: int, src_cell, goal_map: int, banned=fro
         return None
 
     def region(mp, cell):
+        if surf:
+            return surf_region(truth, pairs, mp, tuple(cell))
         return reachable(truth, pairs, mp, tuple(cell))
-
-    def whole(mp):
-        m = maps[str(mp)]
-        return {(x, y) for y in range(m["height"]) for x in range(m["width"]) if m["grid"][y][x] == "1"}
 
     start = region(src_map, src_cell)
     seen = {(src_map, min(start))}
-    queue = deque([(src_map, start, None)])
+    queue = deque([(src_map, start, None, None)])
     nodes = 0
     while queue and nodes < max_nodes:
         nodes += 1
-        mp, reg, first = queue.popleft()
+        mp, reg, first, came_from = queue.popleft()
         m = maps[str(mp)]
         hops = []
         for wx, wy, dst, dwarp in m["warps"]:
             if (wx, wy) not in reg:
                 continue
-            if dst == rt.LAST_MAP:  # back out the way in: the door on whichever map enters this one
-                for other, om in maps.items():
-                    if int(other) == mp or (mp, int(other)) in banned:
+            if dst == rt.LAST_MAP:
+                # Back out the way in. Along the chain that is the map we entered from; at the start
+                # (a leg booted inside a building) it is any map with a door into this one. Seafoam
+                # 1F, measured 2026-09-06: both Route 20 and B1 warp into it, and without this the
+                # router "backed out" of the ground floor into the basement.
+                for other in _mat_destinations(maps, mp, dwarp, came_from):
+                    if (mp, other) in banned:
                         continue
-                    if any(w[2] == mp for w in om["warps"]) and dwarp < len(om["warps"]):
-                        land = (om["warps"][dwarp][0], om["warps"][dwarp][1])
-                        hops.append((int(other), land, {"from": mp, "to": int(other), "via": "mat", "x": wx, "y": wy}))
+                    land = (maps[str(other)]["warps"][dwarp][0], maps[str(other)]["warps"][dwarp][1])
+                    hops.append((other, land, {"from": mp, "to": other, "via": "mat", "x": wx, "y": wy}))
                 continue
             if str(dst) not in maps or (mp, dst) in banned:
                 continue
@@ -523,29 +599,66 @@ def region_route(truth, pairs, src_map: int, src_cell, goal_map: int, banned=fro
                 continue
             land = (dw[dwarp][0], dw[dwarp][1])
             hops.append((dst, land, {"from": mp, "to": dst, "via": "warp", "x": wx, "y": wy, "dest_warp": dwarp}))
+        if surf:
+            for cur in truth.get("currents", []):
+                if int(cur["map"]) != mp or (mp, int(cur["lands"][0])) in banned or str(cur["lands"][0]) not in maps:
+                    continue
+                body = _water_reach(m, cur["cell"][0], cur["cell"][1], set())
+                launches = [
+                    (c, f)
+                    for c in reg
+                    if m["grid"][c[1]][c[0]] == "1" and shore_ok(m, *c)
+                    for (dx, dy), f in _FACES.items()
+                    if (c[0] + dx, c[1] + dy) in body
+                ]
+                if launches:
+                    (lx, ly), face = min(launches)
+                    land = (cur["lands"][1], cur["lands"][2])
+                    hop = {"from": mp, "to": int(cur["lands"][0]), "via": "current", "x": lx, "y": ly, "face": face}
+                    hops.append((int(cur["lands"][0]), land, hop))
         for side, dst in m["connections"].items():
             if str(dst) not in maps or (mp, dst) in banned:
                 continue
             cells, _d = edge_cells(truth, mp, dst)
             mine = cells & reg
-            if not mine and (cells or not edge_has_water(truth, mp, dst)):
-                continue  # a land edge this region does not touch; or a modelled edge with nothing to cross on
-            entry = None
-            if mine:
-                dm = maps[str(dst)]
-                cx, cy = min(mine)
-                far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
-                far["east"] = (0, cy)
-                aligned = far[side]
-                fcells, _fd = edge_cells(truth, dst, mp)
-                if fcells:
-                    nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
-                    entry = aligned if aligned in fcells else nearest
+            ours_water = _edge_water(m, _d) & reg if (surf and not cells and edge_has_water(truth, mp, dst)) else set()
+            if not mine and not ours_water:
+                continue  # a land edge this region does not touch; or water, which only a surfer's own water crosses
+            dm = maps[str(dst)]
+            line = {"north": 0, "south": m["height"] - 1, "west": 0, "east": m["width"] - 1}[side]
+            on_line = [c for c in (mine or ours_water) if (c[1] if side in ("north", "south") else c[0]) == line]
+            cx, cy = min(on_line or (mine or ours_water))
+            far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
+            far["east"] = (0, cy)
+            aligned = far[side]
+            fcells, _fd = edge_cells(truth, dst, mp)
+            if fcells:
+                nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
+                entry = aligned if aligned in fcells else nearest
+            elif surf and dm.get("tiles"):
+                # No land to step onto: the far edge is water, and the surf region starts from the water
+                # cell we would land on. Counting the whole far map here let Route 20 look crossable by
+                # stepping out to Cinnabar and back (measured 2026-09-06, 39 identical hops).
+                fline = {"north": dm["height"] - 1, "south": 0, "west": dm["width"] - 1, "east": 0}[side]
+                axis = 1 if side in ("north", "south") else 0
+                fwater = [
+                    (x, y)
+                    for y in range(dm["height"])
+                    for x in range(dm["width"])
+                    if (y if axis == 1 else x) == fline and _water_model(dm, x, y)
+                ]
+                if not fwater:
+                    continue
+                entry = min(fwater, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
+            else:
+                continue  # nothing modelled to stand on over there
             hops.append((dst, entry, {"from": mp, "to": dst, "via": "edge", "edge": side}))
         for dst, land, hop in hops:
-            reg2 = region(dst, land) if land is not None else whole(dst)
-            if not reg2:
-                continue
+            if surf and hop["via"] != "current":
+                carried = current_at(truth, dst, land)
+                if carried is not None:  # the door opens onto a conveyor: the node is where it lands
+                    dst, land = int(carried["lands"][0]), (carried["lands"][1], carried["lands"][2])
+            reg2 = region(dst, land)  # never empty: the entry cell itself stands in it
             key = (dst, min(reg2))
             if key in seen:
                 continue
@@ -553,7 +666,7 @@ def region_route(truth, pairs, src_map: int, src_cell, goal_map: int, banned=fro
             chosen = first or hop
             if dst == goal_map:
                 return chosen
-            queue.append((dst, reg2, chosen))
+            queue.append((dst, reg2, chosen, mp))
     return None
 
 
@@ -788,6 +901,35 @@ SURF_MAX_STEPS = 200  # water steps per crossing; a straight run in the connecti
 WATER_TILES = {0x14, 0x32}
 
 
+# Where water and land meet, per tileset. On the Seafoam tileset (17) SURF launches from, and lands
+# on, 0x15 tiles only: measured 2026-09-06 on B3 - the arm from plain floor (23,12) facing the water
+# at (23,11) was refused 31 times, the arm from the 0x15 at (23,9) rode onto (23,10) at once, and
+# getting off onto plain floor was refused; the 2026-09-04 legend run landed on B4's 0x15 at (7,3).
+# A tileset absent here has no such rule: any walkable cell beside water is a shore.
+SHORE_TILES: dict[int, set[int]] = {17: {0x15}}
+
+
+def shore_ok(m, x: int, y: int) -> bool:
+    """May the surfer step between this land cell and the water beside it?"""
+    allowed = SHORE_TILES.get(m.get("tileset"))
+    if allowed is None or not m.get("tiles"):
+        return True
+    row = m["tiles"][y]
+    return int(row[2 * x : 2 * x + 2], 16) in allowed
+
+
+def current_at(truth, map_id: int, cell) -> dict | None:
+    """The measured current whose water body holds ``cell``, or None."""
+    m = truth["maps"][str(map_id)]
+    for cur in truth.get("currents", []):
+        if int(cur["map"]) != int(map_id):
+            continue
+        body = _water_reach(m, cur["cell"][0], cur["cell"][1], set())
+        if tuple(cell) in body:
+            return cur
+    return None
+
+
 def _water_model(m, x: int, y: int) -> bool:
     """Propose whether this cell is standable mid-SURF. Maps without tile data (fake truth in
     tests) propose everything and let the injected io's refusals be the authority."""
@@ -847,10 +989,12 @@ def shore_stand(truth, pairs, cur: int, nxt: int, start, bodies=()) -> tuple[tup
         return None
     faces = ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left"))
     sx, sy = start
-    if any((sx + dx, sy + dy) in good for dx, dy, _f in faces):
+    if shore_ok(m, sx, sy) and any((sx + dx, sy + dy) in good for dx, dy, _f in faces):
         return None  # already on the shore
     best = None
     for x, y in walkable(truth, pairs, cur, (sx, sy), bodies):
+        if not shore_ok(m, x, y):
+            continue
         for dx, dy, face in faces:
             if (x + dx, y + dy) in good:
                 dist = abs(x - sx) + abs(y - sy)
@@ -886,6 +1030,8 @@ def _board_water(io, truth, pairs, cur: int, nxt: int, arm_surf, battle) -> bool
         x, y = read_pos(io)[1:3]
         face = None
         for dx, dy, f in ((0, 1, "down"), (0, -1, "up"), (1, 0, "right"), (-1, 0, "left")):
+            if not shore_ok(m, x, y):
+                break
             if _water_model(m, x + dx, y + dy) and _touches_far_edge(m, x + dx, y + dy, d):
                 face = f
                 break
@@ -947,7 +1093,7 @@ def _hop_to_far_shore(io, truth, pairs, cur: int, nxt: int, d: str, arm_surf, ba
     for x, y in good:
         for dx, dy in _FACES:
             n = (x + dx, y + dy)
-            if 0 <= n[0] < w and 0 <= n[1] < h and m["grid"][n[1]][n[0]] == "1":
+            if 0 <= n[0] < w and 0 <= n[1] < h and m["grid"][n[1]][n[0]] == "1" and shore_ok(m, *n):
                 stands.add(n)
     if not stands:
         return False
@@ -1094,7 +1240,7 @@ def _water_exits(m, prev: dict, there: set, bodies: set):
     for cell in prev:
         for ex, ey in _FACES:
             land = (cell[0] + ex, cell[1] + ey)
-            if land not in there or land in bodies or m["grid"][land[1]][land[0]] != "1":
+            if land not in there or land in bodies or m["grid"][land[1]][land[0]] != "1" or not shore_ok(m, *land):
                 continue
             path = [cell]
             while prev[path[-1]] is not None:
@@ -1125,6 +1271,8 @@ def water_route(truth, pairs, map_id: int, start, targets, bodies=()):
         return None
     best = None
     for ax, ay in here:
+        if not shore_ok(m, ax, ay):
+            continue
         for (dx, dy), face_in in _FACES.items():
             wx, wy = ax + dx, ay + dy
             if not (0 <= wx < w and 0 <= wy < h) or (wx, wy) in bodies or not _water_model(m, wx, wy):
