@@ -2929,3 +2929,95 @@ def test_region_alt_does_not_step_back_out_the_door_it_just_came_in_while_anothe
     r2 = _runner(FakeRig(start=(3, 0, 7), truth=sealed), tmp_path)
     r2.came_from = 1
     assert r2._region_alt(3, (0, 7))["via"] == "mat"
+
+
+def test_a_cut_growth_is_floor_in_the_model_until_the_map_is_left(tmp_path):
+    """Map 3 (2026-09-07): the bush at (19,28) was cut, the leg stood on it, and the next walk was
+    no-path - the loaded grid still called the cell solid."""
+    truth = _truth()
+    truth["maps"]["1"]["grid"] = ["11111111"] * 3 + ["11101111"] + ["11111111"] * 4
+    truth["maps"]["1"]["tiles"] = ["2c" * 8] * 3 + ["2c" * 3 + "3d" + "2c" * 4] + ["2c" * 8] * 4
+    rig = FakeRig(start=(1, 3, 2), truth=truth)
+    runner = _runner(rig, tmp_path)
+    runner._open_cell(1, (3, 3), (3, 2))
+    assert truth["maps"]["1"]["grid"][3] == "11111111" and truth["maps"]["1"]["tiles"][3] == "2c" * 8
+    assert (1, 3, 3) in runner.opened
+    runner._restore_opened(except_map=1)  # still on the map: kept
+    assert truth["maps"]["1"]["grid"][3] == "11111111"
+    runner._restore_opened(except_map=2)  # left it: the bush is back
+    assert truth["maps"]["1"]["grid"][3] == "11101111" and truth["maps"]["1"]["tiles"][3][6:8] == "3d"
+    assert not runner.opened
+    runner._open_cell(9, (0, 0), (0, 1))  # a map without a tile model: nothing to open
+    assert not runner.opened
+
+
+def test_a_gate_that_turns_pedestrians_away_is_answered_by_the_bicycle(tmp_path):
+    """Route 16's gate (2026-09-07): "No pedestrians are allowed on CYCLING ROAD!" with a BICYCLE in
+    the bag. Ridden once; a bag without one, or another sentence, changes nothing."""
+
+    class BikeRig(FakeRig):
+        def __init__(self, *a, bike=True, **k):
+            super().__init__(*a, **k)
+            self._bag = [(6, 1)] if bike else [(60, 1)]
+            self.rode = 0
+
+        def bag(self):
+            return list(self._bag)
+
+        def item_name(self, item_id):
+            return {6: "BICYCLE", 60: "FRESH WATER"}[item_id]
+
+        def use_item(self, name, face=None):
+            self.rode += 1
+            return True
+
+    rig = BikeRig(start=(186, 5, 7))
+    runner = _runner(rig, tmp_path, goal=28)
+    said = "Excuse me! Wait up please! No pedestrians are allowed on CYCLING ROAD!"
+    assert runner._ride_bicycle(said) is True and rig.rode == 1 and runner.riding
+    assert runner._ride_bicycle(said) is False and rig.rode == 1  # once per leg: the item toggles
+    assert any(e["event"] == "supervisor.bicycle_mounted" for e in rig.events)
+    assert _runner(BikeRig(start=(186, 5, 7), bike=False), tmp_path, goal=28)._ride_bicycle(said) is False
+    assert _runner(BikeRig(start=(186, 5, 7)), tmp_path, goal=28)._ride_bicycle("MOVE ASIDE!") is False
+    refused = BikeRig(start=(186, 5, 7))
+    refused.use_item = lambda name, face=None: False
+    r2 = _runner(refused, tmp_path, goal=28)
+    assert r2._ride_bicycle(said) is False and not r2.riding
+
+
+def test_the_leg_mounts_the_bicycle_at_the_gate_and_goes_on(tmp_path):
+    """The whole ladder: the hop is refused, the refusal reads the guard's sentence, the leg gets on
+    the bicycle and takes the hop again."""
+
+    guard = "Excuse me! Wait up please! No pedestrians are allowed on CYCLING ROAD!"
+
+    class GateRig(FakeRig):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self._bag = [(6, 1)]
+            self.rode = 0
+            self.stopped = False
+
+        def bag(self):
+            return list(self._bag)
+
+        def item_name(self, item_id):
+            return "BICYCLE"
+
+        def use_item(self, name, face=None):
+            self.rode += 1
+            return True
+
+        def press(self, button, hold=8, release=8):
+            super().press(button, hold, release)
+            if button in ("up", "down", "left", "right") and not self.rode:
+                self.stopped = True  # the refusal probe's step: the guard speaks
+
+        def dialogue(self):
+            return guard if self.stopped else ""
+
+    rig = GateRig(start=(1, 5, 5), hops=[None, 2])
+    result = _runner(rig, tmp_path).run()
+    assert result["ok"], result
+    assert rig.rode == 1
+    assert any(e["event"] == "supervisor.bicycle_mounted" for e in rig.events)

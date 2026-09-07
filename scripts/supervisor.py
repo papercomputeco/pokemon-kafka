@@ -494,6 +494,8 @@ class LegRunner:
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.region_mode = False  # the region router has taken this leg over (see _next_hop)
         self.came_from: int | None = None  # the map the last successful hop left (see _region_alt)
+        self.opened: dict[tuple[int, int, int], tuple[str, str]] = {}  # cells a cut opened: (map,x,y) -> original rows
+        self.riding = False  # the BICYCLE has been mounted on this leg
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
         self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
         self.gates: dict[tuple[int, int, int], str] = {}  # (map, x, y) -> what the game said when it refused
@@ -680,6 +682,66 @@ class LegRunner:
         self.log(f"  played the {flute} at {culprit}")
         self.tried.append(f"played the {flute} at the sleeping body {culprit}")
         self.rig.emit("supervisor.sleeper_woken", body=list(culprit), item=flute)
+        return True
+
+    def _open_cell(self, mp: int, cell: tuple[int, int], floor: tuple[int, int]) -> None:
+        """A growth the leg has cut is floor now - in the loaded model too, until the map is left.
+
+        Map 3, measured 2026-09-07 (run fwd_l14_28d): the bush at (19,28) was cut and the leg stood
+        on it, and the next walk was "no-path" - the grid still called the cell solid and the tile
+        pairs still called it a bush, so no plan could leave it. The cell takes the floor's tile
+        and a walkable grid mark; the bush regrows on reload, so the rows are restored when the leg
+        leaves the map (``_restore_opened``).
+        """
+        m = self.rig.truth.get("maps", {}).get(str(mp))
+        if not m or not m.get("tiles"):
+            return
+        x, y = cell
+        key = (mp, x, y)
+        if key not in self.opened:
+            self.opened[key] = (m["grid"][y], m["tiles"][y])
+        row = m["grid"][y]
+        m["grid"][y] = row[:x] + "1" + row[x + 1 :]
+        fx, fy = floor
+        floor_tile = m["tiles"][fy][2 * fx : 2 * fx + 2]
+        trow = m["tiles"][y]
+        m["tiles"][y] = trow[: 2 * x] + floor_tile + trow[2 * x + 2 :]
+
+    def _restore_opened(self, except_map: int) -> None:
+        """Put back every opened cell on maps the leg is no longer on (growths regrow on reload)."""
+        for (mp, x, y), (grid_row, tile_row) in list(self.opened.items()):
+            if mp == except_map:
+                continue
+            m = self.rig.truth["maps"][str(mp)]
+            m["grid"][y], m["tiles"][y] = grid_row, tile_row
+            del self.opened[(mp, x, y)]
+
+    def _ride_bicycle(self, said: str) -> bool:
+        """A gate that turns pedestrians away is answered by riding the BICYCLE from the bag.
+
+        Route 16's gate (186), measured 2026-09-07 (probe_r16_gate_guard): the guard stops every
+        walk along row 7 with "Excuse me! Wait up please! No pedestrians are allowed on CYCLING
+        ROAD!". The sentence names the rule and the bag names the answer; the step past the guard
+        is the proof. The item toggles, so it is used once per leg.
+        """
+        text = (said or "").upper()
+        if "PEDESTRIAN" not in text and "CYCLING ROAD" not in text:
+            return False
+        if self.riding:
+            return False
+        bike = next(
+            (self.rig.item_name(i) for i, _q in self.rig.bag() if "BICYCLE" in self.rig.item_name(i).upper()), None
+        )
+        if bike is None:
+            self.notes.append("the gate turns pedestrians away and the bag holds no BICYCLE")
+            return False
+        if not hasattr(self.rig, "use_item") or not self.rig.use_item(bike):
+            self.notes.append(f"could not get on the {bike}")
+            return False
+        self.riding = True
+        self.log(f"  got on the {bike}")
+        self.tried.append(f"got on the {bike} at the gate")
+        self.rig.emit("supervisor.bicycle_mounted", map=self.rig.pos()[0])
         return True
 
     def _hop_targets(self, hop: dict, mp: int) -> set[tuple[int, int]]:
@@ -876,6 +938,7 @@ class LegRunner:
         self.tried.append(f"cut the growth at {growth}")
         self.notes.append(f"cut the growth at {growth}; the hop's region changed")
         self.rig.emit("supervisor.growth_cut", map=mp, growth=list(growth), stand=list(stand))
+        self._open_cell(mp, growth, stand)
         self.gated.discard((mp, hop["to"]))
         self.banned.discard((mp, hop["to"]))
         return True
@@ -1609,6 +1672,7 @@ class LegRunner:
             if elapsed >= self.budget_s:
                 return self._finish("budget", f"budget of {self.budget_s:.0f}s spent")
             cur = self.rig.pos()[0]
+            self._restore_opened(cur)
             if cur == self.goal:
                 # Confirm on a settled read: a torn one across a warp names a tile that cannot
                 # exist, and "arrived" is the one verdict that must never be reported from it.
@@ -1647,7 +1711,9 @@ class LegRunner:
             self.rig.emit("supervisor.hop_failed", wall=wall, failure=failure, attempt=attempt)
             # Look at it before reasoning about it. A refusal that prints a sentence is a
             # different fact from a silent one, and the sentence is free to obtain.
-            self.read_refusal(hop)
+            said = self.read_refusal(hop)
+            if self._ride_bicycle(said):
+                continue
             # Determinism first, in the order the measurements rule things out.
             # 1. One sprite explains the severance -> it is a gate to open, not a missing road.
             #    This must come before any ban: Route 12's north road was banned as impassable

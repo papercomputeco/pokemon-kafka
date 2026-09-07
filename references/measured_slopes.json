@@ -1,0 +1,5 @@
+{
+  "28": {
+    "down": "2026-09-07, probe_cycling_road_steer (run 20260907-024443-fc0d): idle 120 frames carried the rider (1,93) -> (1,106); a right press steered one column while sliding; up was refused at (3,122); the descent along column 1 ends in the dead end (1,123) (probe_cycling_road_stuck: every direction refused, no box, START opens) while column 6 slides on to (6,129)."
+  }
+}

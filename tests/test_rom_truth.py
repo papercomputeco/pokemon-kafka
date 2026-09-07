@@ -870,3 +870,14 @@ def test_move_table_on_the_cartridge_names_surf_and_hyper_beam():
     assert moves["57"] == {"name": "SURF", "type": "water", "power": 95, "accuracy": 100, "pp": 15}
     assert moves["63"]["name"] == "HYPER BEAM" and moves["63"]["type"] == "normal"
     assert moves["53"]["name"] == "FLAMETHROWER"  # the hand-typed table had put this name on 0x3F
+
+
+def test_load_slopes_reads_the_measured_file_and_is_empty_without_it(tmp_path):
+    import json as _json
+
+    import rom_truth as rt
+
+    assert rt.load_slopes(tmp_path / "none.json") == {}
+    f = tmp_path / "slopes.json"
+    f.write_text(_json.dumps({"28": {"down": "measured"}, "7": "left"}))
+    assert rt.load_slopes(f) == {"28": "down", "7": "left"}

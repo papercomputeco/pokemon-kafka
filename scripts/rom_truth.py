@@ -211,6 +211,24 @@ def load_currents(path: Path | None = None) -> list:
     return json.loads(path.read_text())
 
 
+SLOPES = Path(__file__).resolve().parent.parent / "references" / "measured_slopes.json"
+
+
+def load_slopes(path: Path | None = None) -> dict[str, str]:
+    """Maps the player slides on, and which way: ``{"28": "down"}``.
+
+    Cycling Road (map 28), measured 2026-09-07: the slope moves the rider on its own, a sideways
+    press steers, and a press against the slope is refused. Planning on such a map is directed -
+    no move against the slope - and a cell is only worth standing on if the goal can still be
+    reached from it downhill; column 1 of Cycling Road ends in a dead end that a plain shortest
+    path walked straight into.
+    """
+    path = path or SLOPES
+    if not path.exists():
+        return {}
+    return {k: v if isinstance(v, str) else next(iter(v)) for k, v in json.loads(path.read_text()).items()}
+
+
 def merge_dead_warps(dead: dict, path: Path | None = None) -> dict:
     path = path or DEAD_WARPS
     merged = load_dead_warps(path)
@@ -793,6 +811,7 @@ def attach_measured_gates(truth: dict, path: Path | None = None) -> dict:
         if map_id in truth.get("maps", {}):
             truth["maps"][map_id]["dead_warps"] = tiles
     truth["currents"] = load_currents()
+    truth["slopes"] = load_slopes()
     return truth
 
 

@@ -86,6 +86,51 @@ def _step(io, direction: str) -> None:
     io.wait(30)
 
 
+_SLOPE_DELTA = {"down": (0, 1), "up": (0, -1), "left": (-1, 0), "right": (1, 0)}
+
+
+def _against_slope(truth, map_id: int) -> tuple[int, int] | None:
+    """The step a slope map refuses: the opposite of the slide's direction, or None off a slope."""
+    slope = (truth.get("slopes") or {}).get(str(map_id))
+    if not slope:
+        return None
+    dx, dy = _SLOPE_DELTA[slope]
+    return (-dx, -dy)
+
+
+def safe_cells(truth, pairs, map_id: int, targets, blocked=()) -> set[tuple[int, int]] | None:
+    """On a slope map, the cells from which ``targets`` can still be reached without a step
+    against the slope; None off a slope (every cell is safe). Cycling Road, measured 2026-09-07:
+    the shortest path down column 1 slid into (1,123), where every direction is refused, while
+    column 6 carries on to the bottom. A plan may only stand on cells the slide cannot trap."""
+    against = _against_slope(truth, map_id)
+    if against is None:
+        return None
+    from collections import deque
+
+    m = truth["maps"][str(map_id)]
+    w, h = m["width"], m["height"]
+    blocked = set(blocked)
+    # reverse search: a cell is safe if a forward step (not against the slope) leads to a safe cell
+    safe = {t for t in targets if 0 <= t[0] < w and 0 <= t[1] < h}
+    queue = deque(safe)
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            px, py = x - dx, y - dy  # the cell that steps (dx, dy) into (x, y)
+            if not (0 <= px < w and 0 <= py < h) or (px, py) in safe or (px, py) in blocked:
+                continue
+            if (dx, dy) == against or m["grid"][py][px] != "1":
+                continue
+            import rom_truth as rt
+
+            if not rt.passable(m, pairs, px, py, x, y):
+                continue
+            safe.add((px, py))
+            queue.append((px, py))
+    return safe
+
+
 def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, int]]:
     """Every cell reachable from ``start`` on this map, treating ``blocked`` cells as solid.
 
@@ -112,12 +157,15 @@ def reachable(truth, pairs, map_id: int, start, blocked=()) -> set[tuple[int, in
     # measured): it is reachable from the cell beside it, and leads off the map, so it is a
     # terminal cell here -- seen, never expanded from.
     warps = {(wp[0], wp[1]) for wp in m.get("warps", [])}
+    against = _against_slope(truth, map_id)  # the one step a slope map refuses (measured on Cycling Road)
     seen = {tuple(start)}
     queue = deque([tuple(start)])
     while queue:
         x, y = queue.popleft()
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
             if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in seen or (nx, ny) in blocked:
+                continue
+            if against is not None and (nx - x, ny - y) == against:
                 continue
             if (nx, ny) in warps and m["grid"][ny][nx] != "1" and m["grid"][y][x] == "1":
                 seen.add((nx, ny))
@@ -755,6 +803,12 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
         # is why "could not step off the warp mat" fired on Silph 3F, the Center's exit and the
         # Safari Zone's arrival pad, and why a leg that had just walked in could not walk on.
         here_block = warp_block - {(x, y)}
+        safe = safe_cells(truth, pairs, map_id, targets)
+        if safe is not None:
+            # a slope map: never plan onto a cell the slide cannot bring back toward the target
+            m_ = truth["maps"][str(map_id)]
+            unsafe = {(cx, cy) for cy in range(m_["height"]) for cx in range(m_["width"]) if (cx, cy) not in safe}
+            here_block = here_block | (unsafe - {(x, y)})
         path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=live_bodies(io) | here_block)
         if not path or len(path) < 2:
             path = rt.path_on_map(truth, pairs, map_id, (x, y), targets, blocked=here_block)
