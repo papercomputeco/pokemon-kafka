@@ -5,11 +5,11 @@
 | | |
 |---|---|
 | Organisation | pcc-labs |
-| Document | PK-WP-01, version 1.0 |
+| Document | PK-WP-01, version 1.1 |
 | Date | 7 September 2026 |
 | Prepared by | bdougie, with Claude Code |
 | Repositories | `pcc-labs/pokemon-kafka`, `pcc-labs/empirical-evidence` |
-| Artefacts | HF dataset `bdougie/pokemon-red-sft`; HF adapters `bdougie/smollm3-pokemon-forger-lora`, `bdougie/smollm3-pokemon-red-lora` |
+| Artefacts | HF dataset [bdougie/pokemon-red-sft](https://huggingface.co/datasets/bdougie/pokemon-red-sft); HF adapters [bdougie/smollm3-pokemon-forger-lora](https://huggingface.co/bdougie/smollm3-pokemon-forger-lora), [bdougie/smollm3-pokemon-red-lora](https://huggingface.co/bdougie/smollm3-pokemon-red-lora) |
 
 ## Abstract
 
@@ -172,7 +172,7 @@ The gate passed. The base model's move-choice score of zero is a format failure 
 
 ### 5.5 Serving
 
-The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K_M (`scripts/package_lora.sh` in empirical-evidence), uploaded to the adapter's repository under `gguf/`, and registered with the local Ollama as `pokemon-forger:Q4_K_M`. The crew reaches it through the same recording proxy as every other seat. Any other machine downloads the GGUF with `hf download` and registers it with a two-line Modelfile. A smoke test through the proxy on a held-out prompt returned the right body and the right JSON shape.
+The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K_M (`scripts/package_lora.sh` in empirical-evidence), uploaded to the adapter's repository under `gguf/`, and registered with the local Ollama as `pokemon-forger:Q4_K_M`. The crew reaches it through the same recording proxy as every other seat. Any other machine pulls it straight from the Hub with `ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M`. A smoke test through the proxy on a held-out prompt returned the right body and the right JSON shape.
 
 ## 6. Discussion
 
@@ -192,7 +192,6 @@ The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K
 - The gate scores exact matches on categorical fields. The free-text `clears_with` field of gate-text and the `diagnosis` of handoff are not scored.
 - Labels are what the supervisor recorded, including its own misreads. A body labelled "unknown" with the gate `stale_window_text` is a real event the crew met, but it teaches the model the engine's failure mode as well as the game's behaviour.
 - The gate numbers are the bf16 adapter's. The quantized GGUF returned a wrong outcome on one held-out prompt in a smoke test; it has not been gated separately.
-- The dataset and both adapters are published privately. One-line `ollama pull` from the Hub requires a public repository.
 - Ten maps remain unheard (Appendix C). The corpus cannot contain sentences the crew never read.
 
 ## 8. Future work
@@ -215,7 +214,7 @@ An archetype is a role with a benchmark. Training one from a game that models mi
 4. pcc-labs/pokemon-kafka, `docs/learnings/forward-play-sweep-2026-09-05.md`: the sweep postmortem, walls measured and fixed, 5 to 7 September 2026.
 5. pcc-labs/pokemon-kafka, pull requests #128 to #140.
 6. pcc-labs/empirical-evidence, `docs/forger-adapter.md`: dataset, adapters and serving recipe; pull request #20.
-7. Hugging Face: `bdougie/pokemon-red-sft` (dataset), `bdougie/smollm3-pokemon-forger-lora`, `bdougie/smollm3-pokemon-red-lora`.
+7. Hugging Face: [bdougie/pokemon-red-sft](https://huggingface.co/datasets/bdougie/pokemon-red-sft) (dataset), [bdougie/smollm3-pokemon-forger-lora](https://huggingface.co/bdougie/smollm3-pokemon-forger-lora), [bdougie/smollm3-pokemon-red-lora](https://huggingface.co/bdougie/smollm3-pokemon-red-lora).
 8. HuggingFaceTB/SmolLM3-3B; TRL SFTTrainer; PEFT LoRA; llama.cpp GGUF conversion and quantization; Ollama.
 
 ## Appendix A. Row schemas
@@ -243,8 +242,7 @@ uv run python -m autotune.eval_heldout --adapter out/forger/sft --data-dir data/
 scripts/package_lora.sh out/forger/sft bdougie/smollm3-pokemon-forger-lora pokemon-forger
 
 # any machine
-hf download bdougie/smollm3-pokemon-forger-lora gguf/pokemon-forger.Q4_K_M.gguf
-ollama create pokemon-forger:Q4_K_M -f Modelfile      # FROM ./pokemon-forger.Q4_K_M.gguf
+ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M
 ```
 
 ## Appendix C. What stayed out of reach

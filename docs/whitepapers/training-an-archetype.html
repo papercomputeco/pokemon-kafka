@@ -70,7 +70,7 @@ a{color:var(--accent)}
 </tr>
 <tr>
 <td>Document</td>
-<td>PK-WP-01, version 1.0</td>
+<td>PK-WP-01, version 1.1</td>
 </tr>
 <tr>
 <td>Date</td>
@@ -86,7 +86,7 @@ a{color:var(--accent)}
 </tr>
 <tr>
 <td>Artefacts</td>
-<td>HF dataset <code>bdougie/pokemon-red-sft</code>; HF adapters <code>bdougie/smollm3-pokemon-forger-lora</code>, <code>bdougie/smollm3-pokemon-red-lora</code></td>
+<td>HF dataset <a href="https://huggingface.co/datasets/bdougie/pokemon-red-sft">bdougie/pokemon-red-sft</a>; HF adapters <a href="https://huggingface.co/bdougie/smollm3-pokemon-forger-lora">bdougie/smollm3-pokemon-forger-lora</a>, <a href="https://huggingface.co/bdougie/smollm3-pokemon-red-lora">bdougie/smollm3-pokemon-red-lora</a></td>
 </tr>
 </tbody>
 </table></header>
@@ -490,7 +490,7 @@ a{color:var(--accent)}
 
 <p>The gate passed. The base model's move-choice score of zero is a format failure rather than ignorance: it does not return the requested JSON. Scoring the validation split took 1,086 seconds for the base model and 251 seconds for the tuned one, because tuned answers are short and parse first time.</p>
 <h3>5.5 Serving</h3>
-<p>The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K_M (<code>scripts/package_lora.sh</code> in empirical-evidence), uploaded to the adapter's repository under <code>gguf/</code>, and registered with the local Ollama as <code>pokemon-forger:Q4_K_M</code>. The crew reaches it through the same recording proxy as every other seat. Any other machine downloads the GGUF with <code>hf download</code> and registers it with a two-line Modelfile. A smoke test through the proxy on a held-out prompt returned the right body and the right JSON shape.</p>
+<p>The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K_M (<code>scripts/package_lora.sh</code> in empirical-evidence), uploaded to the adapter's repository under <code>gguf/</code>, and registered with the local Ollama as <code>pokemon-forger:Q4_K_M</code>. The crew reaches it through the same recording proxy as every other seat. Any other machine pulls it straight from the Hub with <code>ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M</code>. A smoke test through the proxy on a held-out prompt returned the right body and the right JSON shape.</p>
 <h2 id="6-discussion">6. Discussion</h2>
 <p><strong>Data moved the number; the recipe did not.</strong> Two Forger adapters were trained with the same rank, schedule and base two days apart. The second is nine points better on body and seventeen points further above the majority on outcome. The only change was 470 rows of dialogue from 78 maps the crew had never stood on. For a seat whose work is to read a world, coverage of the world is the training signal.</p>
 <p><strong>Play produced the data, and the engine had to be fixed to play.</strong> None of the eleven walls in section 4.1 was a modelling problem. They were gaps between the extracted map graph and what the cartridge does at an edge, a shore, a slope, or a sleeping body. Fixing each in the engine rather than in a one-off script is what let the next lane run unattended, and is why the rows exist at all.</p>
@@ -503,7 +503,6 @@ a{color:var(--accent)}
 <li>The gate scores exact matches on categorical fields. The free-text <code>clears_with</code> field of gate-text and the <code>diagnosis</code> of handoff are not scored.</li>
 <li>Labels are what the supervisor recorded, including its own misreads. A body labelled "unknown" with the gate <code>stale_window_text</code> is a real event the crew met, but it teaches the model the engine's failure mode as well as the game's behaviour.</li>
 <li>The gate numbers are the bf16 adapter's. The quantized GGUF returned a wrong outcome on one held-out prompt in a smoke test; it has not been gated separately.</li>
-<li>The dataset and both adapters are published privately. One-line <code>ollama pull</code> from the Hub requires a public repository.</li>
 <li>Ten maps remain unheard (Appendix C). The corpus cannot contain sentences the crew never read.</li>
 </ul>
 <h2 id="8-future-work">8. Future work</h2>
@@ -524,7 +523,7 @@ a{color:var(--accent)}
 <li>pcc-labs/pokemon-kafka, <code>docs/learnings/forward-play-sweep-2026-09-05.md</code>: the sweep postmortem, walls measured and fixed, 5 to 7 September 2026.</li>
 <li>pcc-labs/pokemon-kafka, pull requests #128 to #140.</li>
 <li>pcc-labs/empirical-evidence, <code>docs/forger-adapter.md</code>: dataset, adapters and serving recipe; pull request #20.</li>
-<li>Hugging Face: <code>bdougie/pokemon-red-sft</code> (dataset), <code>bdougie/smollm3-pokemon-forger-lora</code>, <code>bdougie/smollm3-pokemon-red-lora</code>.</li>
+<li>Hugging Face: <a href="https://huggingface.co/datasets/bdougie/pokemon-red-sft">bdougie/pokemon-red-sft</a> (dataset), <a href="https://huggingface.co/bdougie/smollm3-pokemon-forger-lora">bdougie/smollm3-pokemon-forger-lora</a>, <a href="https://huggingface.co/bdougie/smollm3-pokemon-red-lora">bdougie/smollm3-pokemon-red-lora</a>.</li>
 <li>HuggingFaceTB/SmolLM3-3B; TRL SFTTrainer; PEFT LoRA; llama.cpp GGUF conversion and quantization; Ollama.</li>
 </ol>
 <h2 id="appendix-a-row-schemas">Appendix A. Row schemas</h2>
@@ -548,8 +547,7 @@ uv run python -m autotune.eval_heldout --adapter out/forger/sft --data-dir data/
 scripts/package_lora.sh out/forger/sft bdougie/smollm3-pokemon-forger-lora pokemon-forger
 
 # any machine
-hf download bdougie/smollm3-pokemon-forger-lora gguf/pokemon-forger.Q4_K_M.gguf
-ollama create pokemon-forger:Q4_K_M -f Modelfile      # FROM ./pokemon-forger.Q4_K_M.gguf
+ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M
 </code></pre>
 <h2 id="appendix-c-what-stayed-out-of-reach">Appendix C. What stayed out of reach</h2>
 <div class="tw"><table>
@@ -578,5 +576,5 @@ ollama create pokemon-forger:Q4_K_M -f Modelfile      # FROM ./pokemon-forger.Q4
 </tr>
 </tbody>
 </table></div>
-<div class="foot"><span>pcc-labs · PK-WP-01 · version 1.0</span><span>7 September 2026</span></div>
+<div class="foot"><span>pcc-labs · PK-WP-01 · version 1.1</span><span>7 September 2026</span></div>
 </main>
