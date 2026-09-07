@@ -125,3 +125,26 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
   50 bodies heard aboard (`forward_lane13.jsonl`).
 - Do not record this door as dead: on a pre-HM01 run it is the way to HM01. It is a story state,
   and the sentence is the only honest marker until gates can carry a condition.
+
+## Map 27's GIVE_UP cell — measured 2026-09-07: the Route 16 sleeper, then the road
+
+- The cell (27,10) is beside the sleeper at (26,10): "A sleeping POKéMON blocks the way!" The
+  lanes' batons (the 4-badge grind lineage) held no flute; the seats' GIVE_UP was right for them.
+- With the flute (`fly_won-27`, `bicycle`): the wake path had three faults, each measured and fixed
+  (branch `cycling-road`): the ITEM list remembers its scroll, so a second open started mid-list
+  and reported "no bag item called 'POKe FLUTE'"; after "SNORLAX returned to the mountains!" the
+  sprite table still listed the body while the step onto it went through (no single sprite byte
+  separates a removed sprite from an off-screen one — `probe_r16_sprite_bytes`); and two
+  equal-length region chains through a house door and its mat ping-ponged maps 19 and 80.
+- Route 16's gate (186): "Excuse me! Wait up please! No pedestrians are allowed on CYCLING ROAD!"
+  from the guard on row 5; the lower doors pass without it. A BICYCLE in the bag answers it.
+- Cerulean's south side opens on the 0x3D bush at (19,28) — a cut works there — but the loaded
+  model kept the cell solid and the next walk was no-path; a cut cell is floor now until the leg
+  leaves the map.
+- **Cycling Road (28) is a slope**: idle 120 frames carried the rider 13 rows; a sideways press
+  steers one column; up is refused; column 1 ends in a dead end at (1,123) where every direction is
+  refused with no box (and "You can't get off here." to the BICYCLE: the road puts you on it).
+  `references/measured_slopes.json` + `road.safe_cells`: no step against the slide, and a plan may
+  only stand where the goal is still reachable downhill. Live: (28,1,81) → map 29 in one hop.
+- Reached: 28 (Cycling Road) and 29 (its south end). Map 187 is the gate's upper floor, reached
+  from the lower floor's (6,12) - run from `r16_awake-28`.
