@@ -217,9 +217,12 @@ LEARNINGS_DIR = WORKSPACE / "docs" / "learnings"
 NAV_ATTEMPTS = 2  # attempts 1..2 are navigation-class; past that the wall is a puzzle
 LADDER_ATTEMPTS = 4  # 2 navigation + 2 puzzle, then the ladder is written down and stops
 BODY_WAIT_FRAMES = 240  # wanderers clear; a trainer in a corridor never will (PR #113)
-# The two growth classes the field-Cut flow has been measured to open (road.py): 0x3D bushes
-# (the Vermilion yard, Celadon's hedges, Route 16's (34,9)) and 0x50 trees (Erika's garden).
-CUT_TILES = {0x3D, 0x50}
+# The growth class the field-Cut flow has been measured to open: 0x3D bushes (the Vermilion yard,
+# Celadon's hedges, Route 16's (34,9)). 0x50 was listed alongside as "Erika's garden trees" with no
+# growth_cut event ever recorded for it; measured on map 3 (2026-09-07, probe_map3_cut_stages) the
+# flow on the 0x50 trees at (11,28) and (25,9) answers "There isn't anything to CUT!". A tree is not
+# a bush until a cut proves it.
+CUT_TILES = {0x3D}
 # The refusals a field move (STRENGTH on a boulder, SURF over water) can answer before a consult.
 FIELD_MOVE_FAILURES = ("no-path", "body-blocked", "stuck-on-edge", "interior-interior-stuck")
 DEFAULT_MAX_HOPS = 80

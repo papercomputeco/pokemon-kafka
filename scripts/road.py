@@ -19,8 +19,8 @@ was learned by playing:
   pre-battle speech - A leads into the fight and the injected battle handler owns it. The
   text BUFFER stays stale after boxes close (measured), so text alone never means blocked:
   only failing to move after repeated A/B cycles does.
-- **Cut opens two tile classes.** 0x3D (the Vermilion yard and Celadon hedge bushes) and
-  0x50 (Erika's garden trees) both fall to the measured field-Cut flow, driven purely by the
+- **Cut opens 0x3D bushes** (the Vermilion yard and Celadon hedges), driven purely by the measured
+  field-Cut flow; the 0x50 trees answer "There isn't anything to CUT!" (map 3, 2026-09-07), and
   menu registers.
 
 Battles are delegated through an injected ``battle(io)`` callable so the agent's full battle
@@ -1589,8 +1589,8 @@ def cut_facing(io, face: str) -> None:
     """The measured field-Cut flow: face the growth, START -> POKeMON -> lead -> CUT (row 0).
 
     The lead must know Cut - its field submenu then opens with CUT on row 0 (measured on
-    Charmeleon and Charizard alike). Opens both cuttable tile classes: 0x3D bushes and
-    0x50 trees.
+    Charmeleon and Charizard alike). Opens 0x3D bushes; 0x50 trees are not Cut targets
+    (measured on map 3: "There isn't anything to CUT!").
 
     Cadence note: the menu phases here run at 60/25 frames, not the 15/45 that reads as "fast
     enough". `quartermaster` measured the shop dialog swallowing fixed-timing scripts, and

@@ -73,3 +73,19 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
 - Read the refusals at the four GIVE_UP cells above with a probe before writing any code.
 - Re-index the batons (`probe_baton_index.py`, WITH settle) so `npc_catalog.py report` sees
   tonight's 60+ `fwd_l*` banks as "batons standing here".
+
+## Map 3 after the alignment fix (2026-09-07, measured)
+
+- The town's main region (378 cells, entered from Route 15 at rows 18–19) reaches the west edge,
+  the north edge (35) and its doors. Its south and east sides are fenced: the tree line at row 28
+  is 0x50 and the Cut flow there answers **"There isn't anything to CUT!"** (also at (25,9)); the
+  two-cell gap at (16,28)/(17,28) leads onto 0x55/0x56 tiles that refuse the step silently; the
+  x=32 column of 0x55 fences the east strip. So `CUT_TILES` is `{0x3D}` now — 0x50 was never
+  measured cuttable (no `growth_cut` event ever recorded) and is measured not to be.
+- The south edge (→16) belongs to the fenced SW strip (72 cells), entered from Route 15's rows
+  13–17 (its south strip, 35 cells), which is not Route 15's main region either. Reaching 16/70 from
+  the town means leaving by the west edge and coming back in through the other entry — the region
+  router now emits one hop per far region an edge's aligned cells reach (#132), carrying the cell to
+  cross at. Whether Route 15's south strip is reachable from anywhere but map 3's strip is the next
+  measurement (the model says only via map 14's north edge at columns 57..63, which align to
+  Route 15's columns 7..13, not to the strip).
