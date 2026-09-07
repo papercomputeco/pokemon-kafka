@@ -681,26 +681,45 @@ class LegRunner:
         self.notes.append(f"the body at {culprit} (which alone severs this hop) says: {said[:300]}")
         self.log(f"  it says: {said[:160]}")
         self.rig.emit("supervisor.blocker_engaged", body=[bx, by], said=said[:300])
-        self.forger_read("npc-dialogue", mp_now, (bx, by), said, outcome="blocker")
+        self.forger_read("npc-dialogue", mp_now, (bx, by), said, blocker=True)
         return True
 
-    def forger_read(self, kind: str, mp: int, at: tuple[int, int] | None, said: str, **engine) -> dict | None:
+    def forger_read(
+        self,
+        kind: str,
+        mp: int,
+        at: tuple[int, int] | None,
+        said: str,
+        *,
+        handed: bool = False,
+        blocker: bool = False,
+        direction: str | None = None,
+    ) -> dict | None:
         """Hand the sentence to the Forger and record its reading beside the engine's own label.
 
-        ``kind`` is the corpus domain the sentence belongs to (``npc-dialogue`` or ``gate-text``),
-        ``engine`` the label the deterministic loop already knows (the cartridge's sprite kind, a
-        hand-over, a blocker). The reading is *recorded*, not obeyed: ``supervisor.forger_read``
-        carries both so a replay arc measures the adapter live before it steers anything. No
-        Forger seated (``--no-consult``, a fake consult) means no read and no event.
+        ``kind`` is the corpus domain the sentence belongs to (``npc-dialogue`` or ``gate-text``).
+        For a dialogue the engine's label is built the way the corpus builder builds it
+        (``expedition_crew.engine_outcome``): the cartridge's sprite kind for the body; a hand-over,
+        then a fight that ended within FIGHT_WINDOW_S (``rig.last_fight``), then a known gate
+        sentence, then a blocker, then a sentence already read at STALE_MIN_CELLS cells of this
+        run, else ``talk``. The first arc scored the adapter against a label that knew none of
+        this and called five right readings wrong. The reading is *recorded*, not obeyed:
+        ``supervisor.forger_read`` carries both so a replay arc measures the adapter live before
+        it steers anything. No Forger seated (``--no-consult``, a fake consult) means no read.
         """
         import expedition_crew as crew
 
         reader = getattr(self.consult, "read", None)
         if reader is None or not said:
             return None
+        engine: dict = {}
         if kind == "gate-text":
-            system, user = crew.FORGER_GATE_SYSTEM, crew.forger_gate_prompt(mp, at, said, engine.pop("direction", None))
+            system, user = crew.FORGER_GATE_SYSTEM, crew.forger_gate_prompt(mp, at, said, direction)
+            engine["gate"] = crew.classify_gate(said)
         else:
+            sentence = crew.clean_said(said)
+            if sentence in crew.FORGER_NOISE:
+                return None  # the window's leftovers, not the body's words; the corpus drops them too
             sprite = next(
                 (
                     s
@@ -709,7 +728,20 @@ class LegRunner:
                 ),
                 {},
             )
-            engine.setdefault("body", sprite.get("kind", "unknown"))
+            # One sentence at several cells of one run is the window, not the body. Kept on the
+            # rig, because the run's legs share it and the corpus counts per run.
+            seen = self.rig.__dict__.setdefault("forger_sentences", {})
+            seen.setdefault(sentence, set()).add(tuple(at) if at is not None else None)
+            last = getattr(self.rig, "last_fight", None)
+            fought = last[1] if last and 0 <= time.monotonic() - last[0] <= crew.FIGHT_WINDOW_S else "none"
+            gate = crew.classify_gate(sentence)
+            engine = {
+                "body": sprite.get("kind", "unknown"),
+                "outcome": crew.engine_outcome(
+                    handed=handed, fought=fought, gate=gate, blocker=blocker, cells_seen=len(seen[sentence])
+                ),
+                "gate": gate,
+            }
             system, user = crew.FORGER_DIALOGUE_SYSTEM, crew.forger_dialogue_prompt(mp, at, said, sprite.get("pic"))
         reading, model, secs = reader(system, user)
         agree = {k: reading.get(k) == v for k, v in engine.items() if reading is not None and k in reading}
@@ -1604,9 +1636,7 @@ class LegRunner:
             self.log(f"  *** {spot} HANDED OVER {named} ***")
             self.notes.append(f"the body at {spot} gave us {named}")
         self.rig.emit("supervisor.body_engaged", map=mp, at=list(spot), said=said[:300], gained=gained)
-        # The corpus labels a hand-over "handed" and anything else the talk left "talk"; a fight
-        # the talk started is judged by the battle rows, which this hook does not see.
-        self.forger_read("npc-dialogue", mp, spot, said, outcome="handed" if gained else "talk")
+        self.forger_read("npc-dialogue", mp, spot, said, handed=bool(gained))
         return True
 
     def _engage_until_badge(self) -> bool:

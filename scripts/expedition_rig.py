@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
@@ -763,6 +764,7 @@ class Rig:
                 no_fight = 0
             if no_fight >= SPECIAL_MENU_GRACE and self._flee_special_menu():
                 self.emit("battle.fled", pos=list(self.pos()), turns=turns)
+                self.last_fight = (time.monotonic(), None)  # the Forger's hook: a flight, no verdict
                 self._battle_summary(won=False, turns=turns)
                 return
             if turns in (60, 110, 160):
@@ -771,7 +773,9 @@ class Rig:
             self.bank("wedge")
             self.emit("battle.wedge", pos=list(self.pos()), turns=turns)
             raise BattleWedge(f"battle did not end in {turns} turns; banked wedge.state")
-        self._battle_summary(won=not self.mr.player_whited_out(), turns=turns)
+        won = not self.mr.player_whited_out()
+        self.last_fight = (time.monotonic(), won)  # the Forger's hook reads it within FIGHT_WINDOW_S
+        self._battle_summary(won=won, turns=turns)
 
     def _battle_summary(self, won: bool, turns: int) -> None:  # pragma: no cover - drives the emulator
         """Close the fight on the collector; a fight that was never snapshotted has no row."""
