@@ -3106,14 +3106,14 @@ def test_an_engaged_body_is_read_by_the_forger_and_scored_against_the_cartridge(
     rig = FakeRig(start=(1, 5, 5), truth=truth)
     consult = _ForgerConsult({"body": "trainer", "outcome": "talk", "items": [], "gate": None})
     runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
-    reading = runner.forger_read("npc-dialogue", 1, (5, 6), "MOVE|MOVE ASIDE!", outcome="talk")
+    reading = runner.forger_read("npc-dialogue", 1, (5, 6), "MOVE|MOVE ASIDE!")
     assert reading["body"] == "trainer"
     system, user = consult.asked[0]
     assert system.startswith("You are the Forger")
     assert user.startswith("On map 1, the crew talked to the body at (5, 6) (sprite pic 12). It said: 'MOVE ASIDE!'.")
     (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
-    assert ev["engine"] == {"outcome": "talk", "body": "npc"}  # the cartridge's own kind
-    assert ev["agree"] == {"outcome": True, "body": False}
+    assert ev["engine"] == {"body": "npc", "outcome": "talk", "gate": None}  # the cartridge's own kind
+    assert ev["agree"] == {"body": False, "outcome": True, "gate": True}
     assert ev["model"] == "pokemon-forger:Q4_K_M" and ev["seconds"] == 0.5
 
 
@@ -3121,12 +3121,13 @@ def test_a_gate_sentence_is_read_as_gate_text_with_the_facing():
     rig = FakeRig(start=(1, 5, 5))
     consult = _ForgerConsult({"gate": "surf_launch_refused", "clears_with": "SURF from a shore"})
     runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
-    runner.forger_read("gate-text", 1, (5, 5), "No SURFing here!", direction="up")
+    runner.forger_read("gate-text", 1, (5, 5), "No SURFing on GYARADOS here!", direction="up")
     system, user = consult.asked[0]
     assert system.startswith("You are the navigation advisor")
     assert "at (5, 5), facing up, the step was refused" in user
     (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
-    assert ev["kind"] == "gate-text" and ev["engine"] == {} and ev["agree"] == {}
+    assert ev["kind"] == "gate-text" and ev["engine"] == {"gate": "surf_launch_refused"}
+    assert ev["agree"] == {"gate": True}
 
 
 def test_no_forger_seated_means_no_read_and_no_event():
@@ -3141,7 +3142,7 @@ def test_no_forger_seated_means_no_read_and_no_event():
 def test_a_non_reading_is_recorded_as_such_and_agrees_with_nothing():
     rig = FakeRig(start=(1, 5, 5))
     runner = LegRunner(rig, goal=1, consult=_ForgerConsult(None), log=lambda *_: None)
-    assert runner.forger_read("npc-dialogue", 1, (5, 6), "hi", outcome="talk") is None
+    assert runner.forger_read("npc-dialogue", 1, (5, 6), "hi") is None
     (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
     assert ev["reading"] is None and ev["agree"] == {}
 
@@ -3155,3 +3156,46 @@ def test_engaging_a_body_hands_its_sentence_to_the_forger(tmp_path):
     reads = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
     assert len(reads) == len([e for e in rig.events if e["event"] == "supervisor.body_engaged"]) == 2
     assert all(e["engine"]["body"] == "trainer" and e["agree"]["body"] for e in reads)
+
+
+def _read_outcomes(rig, consult):
+    return [e["engine"]["outcome"] for e in rig.events if e["event"] == "supervisor.forger_read"]
+
+
+def test_the_engine_label_follows_the_corpus_rule_hand_over_first():
+    """The first arc scored the adapter against a label that knew only handed/talk and called five
+    right readings wrong. The live label now has the corpus builder's precedence."""
+    import time
+
+    rig = FakeRig(start=(1, 5, 5))
+    consult = _ForgerConsult({"body": "npc", "outcome": "talk", "items": [], "gate": None})
+    runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
+    rig.last_fight = (time.monotonic(), True)
+    runner.forger_read("npc-dialogue", 1, (5, 6), "Here, take this.", handed=True)  # a hand-over beats the fight
+    runner.forger_read("npc-dialogue", 1, (6, 6), "I rode my bird here!")  # the fight, won, inside the window
+    rig.last_fight = (time.monotonic(), False)
+    runner.forger_read("npc-dialogue", 1, (7, 6), "You lose.")
+    rig.last_fight = (time.monotonic(), None)  # fled: no verdict
+    runner.forger_read("npc-dialogue", 1, (8, 6), "Got away.")
+    rig.last_fight = (time.monotonic() - 60, True)  # an old fight is not this talk's
+    runner.forger_read("npc-dialogue", 1, (9, 6), "Wait up please!")  # a known gate sentence
+    runner.forger_read("npc-dialogue", 1, (2, 2), "MOVE ASIDE!", blocker=True)
+    runner.forger_read("npc-dialogue", 1, (3, 3), "plain words")
+    assert _read_outcomes(rig, consult) == ["handed", "fought-won", "fought-lost", "fled", "gate", "blocker", "talk"]
+    gate_ev = [e for e in rig.events if e["event"] == "supervisor.forger_read"][4]
+    assert gate_ev["engine"]["gate"] == "route_gate_guard" and gate_ev["agree"]["gate"] is False
+
+
+def test_one_sentence_at_three_cells_of_a_run_is_stale_and_noise_is_not_read():
+    rig = FakeRig(start=(1, 5, 5))
+    consult = _ForgerConsult({"body": "unknown", "outcome": "stale", "items": [], "gate": None})
+    runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
+    runner.forger_read("npc-dialogue", 1, (5, 6), "SAFARI ZONE has a zoo|SAFARI ZONE has a zoo in front")
+    runner.forger_read("npc-dialogue", 1, (6, 6), "SAFARI ZONE has a zoo in front")
+    second = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)  # the next leg of the same run
+    second.forger_read("npc-dialogue", 1, (7, 6), "SAFARI ZONE has a zoo in front")
+    assert _read_outcomes(rig, consult) == ["talk", "talk", "stale"]
+    assert [e["agree"]["outcome"] for e in rig.events if e["event"] == "supervisor.forger_read"] == [False, False, True]
+    assert runner.forger_read("npc-dialogue", 1, (8, 6), "OPTION EXIT") is None
+    assert runner.forger_read("npc-dialogue", 1, (8, 6), "Got away safely!") is None
+    assert len(consult.asked) == 3

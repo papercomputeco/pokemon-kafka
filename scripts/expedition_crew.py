@@ -24,6 +24,7 @@ failure document. The emulator-driving loop injects I/O around it.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -83,6 +84,59 @@ FORGER_GATE_SYSTEM = (
 )
 FORGER_BODIES = ("trainer", "npc", "item", "unknown")
 FORGER_OUTCOMES = ("talk", "handed", "fought-won", "fought-lost", "fled", "gate", "blocker", "stale")
+
+
+# The gate classes the corpus labels (empirical-evidence autotune/handoff_corpus.py GATES): each
+# pattern is a sentence this cartridge printed on a refused step, each class a docs/learnings verdict.
+# Copied rather than imported so the live label and the training label are one rule.
+GATE_CLASSES: tuple[tuple[str, str], ...] = (
+    ("strength_boulder", r"requires STRENGTH"),
+    ("surf_launch_refused", r"No SURFing on"),
+    ("surf_no_landing", r"no place to get off"),
+    ("current_too_fast", r"current is much too fast"),
+    ("card_key_door", r"Darn! It needs a CARD KEY"),
+    ("sleeping_blocker", r"sleeping POK"),
+    ("route_gate_guard", r"Wait up please"),
+    ("script_guard", r"Get out of the way"),
+    ("trainer_challenge", r"heart attack"),
+    ("nothing_to_cut", r"isn't anything to CUT"),
+    ("badge_gate", r"only if you have the \w+BADGE"),
+    ("stale_window_text", r"hope to see you again"),
+)
+_GATE_PATTERNS = tuple((cls, re.compile(pat)) for cls, pat in GATE_CLASSES)
+# Reads that are not the body's words (the START menu on a ball tile, the text pinned after a
+# flee); the corpus drops them and so does the live read.
+FORGER_NOISE = frozenset({"OPTION EXIT", "Got away safely!"})
+FIGHT_WINDOW_S = 5.0  # a talk that started a fight: the fight's verdict lands just before the read
+STALE_MIN_CELLS = 3  # one sentence read at this many cells of one run is the window, not the body
+
+
+def classify_gate(text: str) -> str | None:
+    """The gate class a sentence belongs to, or None when it is not a known refusal."""
+    for cls, pat in _GATE_PATTERNS:
+        if pat.search(text):
+            return cls
+    return None
+
+
+def engine_outcome(*, handed: bool, fought, gate: str | None, blocker: bool, cells_seen: int) -> str:
+    """The corpus builder's label for what a talk yielded, in its order of precedence.
+
+    ``fought`` is the fight's verdict when a fight ended inside FIGHT_WINDOW_S (True won, False
+    lost, None fled) and the string ``"none"`` when there was no fight — three verdicts and an
+    absence cannot share one bool.
+    """
+    if handed:
+        return "handed"
+    if fought != "none":
+        return "fought-won" if fought else ("fought-lost" if fought is not None else "fled")
+    if gate:
+        return "gate"
+    if blocker:
+        return "blocker"
+    if cells_seen >= STALE_MIN_CELLS:
+        return "stale"
+    return "talk"
 
 
 def clean_said(said: str) -> str:

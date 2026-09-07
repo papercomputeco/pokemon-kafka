@@ -302,3 +302,23 @@ def test_parse_forger_takes_the_first_json_object_and_nothing_else():
     assert crew.parse_forger("[1, 2]") is None
     assert crew.parse_forger("no braces") is None
     assert crew.parse_forger("{unclosed") is None
+
+
+def test_gate_classes_are_the_corpus_builders_and_unknown_sentences_are_not_gates():
+    assert crew.classify_gate("No SURFing on GYARADOS here!") == "surf_launch_refused"
+    assert crew.classify_gate("Excuse me! Wait up please!") == "route_gate_guard"
+    assert crew.classify_gate("You can pass only if you have the CASCADEBADGE!") == "badge_gate"
+    assert crew.classify_gate("We hope to see you again!") == "stale_window_text"
+    assert crew.classify_gate("I like shorts!") is None
+
+
+def test_engine_outcome_precedence_is_the_corpus_builders():
+    o = crew.engine_outcome
+    assert o(handed=True, fought=True, gate="x", blocker=True, cells_seen=9) == "handed"
+    assert o(handed=False, fought=True, gate="x", blocker=True, cells_seen=9) == "fought-won"
+    assert o(handed=False, fought=False, gate=None, blocker=False, cells_seen=0) == "fought-lost"
+    assert o(handed=False, fought=None, gate=None, blocker=False, cells_seen=0) == "fled"
+    assert o(handed=False, fought="none", gate="badge_gate", blocker=True, cells_seen=9) == "gate"
+    assert o(handed=False, fought="none", gate=None, blocker=True, cells_seen=9) == "blocker"
+    assert o(handed=False, fought="none", gate=None, blocker=False, cells_seen=3) == "stale"
+    assert o(handed=False, fought="none", gate=None, blocker=False, cells_seen=2) == "talk"
