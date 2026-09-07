@@ -158,7 +158,7 @@ def build_rom() -> bytearray:
 
     # Map 1 — outdoor 4x4: east connection to map 2, a warp into map 0, a grass/wall mix.
     rom[HDR1 : HDR1 + 10] = bytes([0, 2, 2, *_u16(DATA1), 0, 0, 0, 0, 0x01])  # east
-    rom[HDR1 + 10 : HDR1 + 21] = bytes([2] + [0] * 10)  # east -> map 2
+    rom[HDR1 + 10 : HDR1 + 21] = bytes([2, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0])  # east -> map 2, rows +8
     rom[HDR1 + 21 : HDR1 + 23] = bytes(_u16(OBJ1))
     rom[DATA1 : DATA1 + 4] = bytes([0, 1, 2, 0])  # walk, wall, grass, walk
     rom[OBJ1 : OBJ1 + 2] = bytes([0, 1])
@@ -168,7 +168,7 @@ def build_rom() -> bytearray:
 
     # Map 2 — outdoor: west connection to 1, plus a warp to an absent map (filtered from routing).
     rom[HDR2 : HDR2 + 10] = bytes([0, 2, 2, *_u16(DATA2), 0, 0, 0, 0, 0x02])  # west
-    rom[HDR2 + 10 : HDR2 + 21] = bytes([1] + [0] * 10)
+    rom[HDR2 + 10 : HDR2 + 21] = bytes([1, 0, 0, 0, 0, 0, 0, 248, 0, 0, 0])  # west -> map 1, rows -8
     rom[HDR2 + 21 : HDR2 + 23] = bytes(_u16(OBJ2))
     rom[DATA2 : DATA2 + 4] = bytes([0, 3, 0, 0])  # lip blocks top-right: a walkable pair-collision
     rom[OBJ2 : OBJ2 + 2] = bytes([0, 1])
@@ -248,6 +248,9 @@ def test_parse_map_reads_dims_warps_connections_and_sprites(rom):
     assert m0["grid"] == ["1111", "1111", "1111", "1111"]
     m1 = parse_map(data, 1)
     assert m1["connections"] == {"east": 2}
+    assert m1["connection_offsets"] == {"east": 8}  # the far map's row is ours + 8
+    assert parse_map(data, 2)["connection_offsets"] == {"west": -8}  # and back: signed
+    assert m0["connection_offsets"] == {}
     assert m1["grid"] == ["1100", "1100", "1111", "1111"]  # block 1 (wall) top-right
     assert [0, 2] in m1["grass"] and [1, 3] in m1["grass"]
 

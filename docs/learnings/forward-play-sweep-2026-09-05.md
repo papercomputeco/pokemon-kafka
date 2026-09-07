@@ -51,10 +51,14 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
    rule (water↔land only through 0x15: `SHORE_TILES`) and measured currents
    (`references/measured_currents.json`) as hops. Lanes 3–8 of the sweep had been re-seeded from
    mainland batons to avoid this hop; the west-side batons can now route east.
-2. **15→3, Route 15 → Fuchsia.** Route 15 is two halves joined through the gate (59) and its upper
-   floor (60); the region router finds that. But Fuchsia's west entry is a 13-cell pocket in the
-   model whose only exit is the door (4,11)→228; the town is not reachable from it. Either the
-   grid is wrong there or the game gates it — read the screen at (3, 0..4, 12..13) next.
+2. **15→3, Route 15 → map 3 — SOLVED 2026-09-06.** The "13-cell pocket" was the model's, not the
+   game's: the extraction dropped each connection's alignment byte, and the region router's
+   nearest-open-cell guess entered map 3 at rows 12–13 while the game (measured: the leg stood at
+   (3,0,18) after crossing from row 10) enters at row 18. `parse_map` now records
+   `connection_offsets` (east/west: rows, north/south: columns, signed) — Route 15 → 3 is +8,
+   Route 19 → 20 is −36, Cinnabar → Route 20 and Route 21 → Pallet are 0, all matching the
+   measured crossings — and `region_route` enters the far map at the aligned cell. Live: Route 15's
+   gate → 3 → map 63, both of its bodies heard (run fwd_l12_63).
 3. **13→46 on Route 13.** The north edge IS reachable from (3,44) (the leg crossed 13→2 after the
    ban) but the walk to the door at (12,9) is no-path from both halves: a door-approach problem,
    not a pocket one. Map 48 has no route from any healthy baton at all.

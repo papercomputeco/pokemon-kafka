@@ -270,10 +270,17 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         return None
     data = _faddr(bank, _u16(rom, off + 3))
     conns: dict[str, int] = {}
+    offsets: dict[str, int] = {}
     p = off + 10
     for name, bit in _CONN_BITS:
         if rom[off + 9] & bit:
             conns[name] = rom[p]
+            # The entry's alignment bytes: the far map's row (east/west) or column (north/south) is
+            # ours plus this signed value. Measured 2026-09-06 before it was read: Route 15 -> map 3
+            # is +8 (the leg crossed at row 10 and stood on row 18), Route 19 -> Route 20 is -36 (the
+            # band 40..52 opens onto 4..16), Cinnabar -> Route 20 and Route 21 -> Pallet are 0.
+            raw = rom[p + 7] if name in ("east", "west") else rom[p + 8]
+            offsets[name] = raw - 256 if raw >= 128 else raw
             p += 11
     obj = _faddr(bank, _u16(rom, p))
     warps = []
@@ -340,6 +347,7 @@ def parse_map(rom: bytes, map_id: int) -> dict | None:
         "height": h,
         "tileset": tileset,
         "connections": conns,
+        "connection_offsets": offsets,
         "warps": [list(wp) for wp in warps],
         "signs": [list(s) for s in signs],
         "sprites": sprites,
