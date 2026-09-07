@@ -509,15 +509,13 @@ class LegRunner:
             if ride is not None and ride(hop):
                 return None
             return "current-refused"
-        result = self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
+        result = self._cross_or_warp(cur, hop)
         if result in FIELD_MOVE_FAILURES and self.rig.pos()[0] == cur:
             # A field move the party holds may reconnect the target from right here. Tried
             # BEFORE the gate-building detour: on Route 23 (measured 2026-09-05) that detour
             # left the map, and the surf could only ever be planned from the shore it left.
             if self._push_through(hop) or self._surf_through(hop):
-                result = (
-                    self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
-                )
+                result = self._cross_or_warp(cur, hop)
         if result == "no-path" and (cur, hop["to"]) not in self.gated:
             # A severed route is usually its own gate building (Route 11's Diglett house taught
             # that the nearest door is not the gate). Determinism gets this before the crew does.
@@ -531,9 +529,7 @@ class LegRunner:
             else:
                 cells = {(hop["x"], hop["y"])}
             if self.rig.gate(cur, cells):
-                result = (
-                    self.rig.cross(cur, hop["to"]) if hop["via"] == "edge" else self.rig.warp(cur, hop["x"], hop["y"])
-                )
+                result = self._cross_or_warp(cur, hop)
             elif self.rig.pos()[0] != cur:
                 # A failed gate pass can end INSIDE a building whose far side would not open.
                 # Route 16's gate did exactly that twenty times in a row: every verdict after it
@@ -683,13 +679,24 @@ class LegRunner:
         return True
 
     def _hop_targets(self, hop: dict, mp: int) -> set[tuple[int, int]]:
-        """The cells this hop needs to stand on: the open edge, or the warp tile."""
+        """The cells this hop needs to stand on: the open edge (or the one edge cell the region
+        router named), or the warp tile."""
         import road
 
         if hop["via"] == "edge":
+            if "x" in hop:
+                return {(hop["x"], hop["y"])}
             cells, _direction = road.edge_cells(self.rig.truth, mp, hop["to"])
             return set(cells)
         return {(hop["x"], hop["y"])}
+
+    def _cross_or_warp(self, cur: int, hop: dict):
+        """Drive one hop: an edge (at the region router's cell when it named one) or a warp tile."""
+        if hop["via"] != "edge":
+            return self.rig.warp(cur, hop["x"], hop["y"])
+        if "x" in hop:
+            return self.rig.cross(cur, hop["to"], cells={(hop["x"], hop["y"])})
+        return self.rig.cross(cur, hop["to"])
 
     def _push_through(self, hop: dict) -> bool:
         """Push the one boulder whose line reconnects this hop, when the party has STRENGTH.
