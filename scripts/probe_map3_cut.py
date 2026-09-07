@@ -12,13 +12,19 @@ import road  # noqa: E402
 from expedition_rig import Rig  # noqa: E402
 from quartermaster import ADDR_IN_BATTLE  # noqa: E402
 
-rig = Rig("data/local_runs/roster-bench/fuchsia_west_entry.state", live_label="probe — map 3 trees: cuttable?")
+rig = Rig("data/local_runs/roster-bench/probe_strip-3.state", live_label="probe — map 3 x=10 tree column: cuttable?")
 io = rig.io
 for _ in range(4):
     io.press("b")
     io.wait(20)
 print("start", rig.pos(), "lead moves:", rig.party()[0], "knows CUT idx:", rig.knows_move("CUT"), flush=True)
-for stand, face in (((11, 27), "down"), ((24, 9), "right")):
+if rig.pos()[0] == 16:  # the bank settles onto Route 16's edge cell; cross back up into map 3
+    print("cross 16 -> 3:", rig.cross(16, 3), "at", rig.pos(), flush=True)
+if rig.pos()[0] != 3:
+    print("NOT ON MAP 3 - probe invalid", rig.pos(), flush=True)
+    rig.finish(outcome="probe map 3 cut: not on 3", goals="x=10 trees")
+    sys.exit(1)
+for stand, face in (((11, 35), "left"), ((11, 34), "left")):
     r = rig.walk(3, {stand}, cap=500)
     print(f"walk to {stand} -> {r} at {rig.pos()}", flush=True)
     if rig.pos()[1:] != stand:
