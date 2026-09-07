@@ -26,6 +26,9 @@
 #                                   movement problem, so it takes the nav winner's model.
 #   default    -> qwen38-27b-128k   best local operator score and the roster's proven
 #                                   investigator (skill_matrix_chain.sh roster note).
+#   forger     -> pokemon-forger:Q4_K_M  the one trained seat: a LoRA gated on held-out rows of
+#                                   the crew's own dialogue (body 0.82, outcome 0.66 vs 0.49
+#                                   majority; docs/whitepapers/training-an-archetype.md).
 #
 # scripts/semantic_router.py validates this file, mirrors the classification offline for
 # tests, and registers the router as a pi provider. Change a route only with a run to
@@ -80,6 +83,16 @@ providers:
           chat_path: /agents/pi/v1/chat/completions
           weight: 100
 
+    - name: "pokemon-forger:Q4_K_M"
+      provider_model_id: "pokemon-forger:Q4_K_M"
+      api_format: openai
+      backend_refs:
+        - name: tapes-proxy
+          base_url: http://host.docker.internal:42345
+          provider: openai
+          chat_path: /agents/pi/v1/chat/completions
+          weight: 100
+
 routing:
   strategy: priority
 
@@ -107,8 +120,30 @@ routing:
       capabilities: [chat, reasoning]
       tags: [puzzle, cloud]
 
+    - name: "pokemon-forger:Q4_K_M"
+      context_window_size: 131072
+      description: >-
+        The Forger. SmolLM3-3B LoRA trained on the crew's own measured dialogue
+        (docs/whitepapers/training-an-archetype.md): held-out body 0.82, outcome 0.66
+        vs a 0.49 majority, gate sentences 4/4. Reads what the game said; never routes.
+      capabilities: [chat]
+      tags: [forger, dialogue, local, trained]
+
   signals:
     keywords:
+      - name: forger_keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - forger
+          - "it said"
+          - "the step was refused"
+          - "talked to the body"
+          - refusal sentence
+          - what this body is
+          - hand-over
+        case_sensitive: false
+        bm25_threshold: 0.1
       # Puzzle-leg vocabulary must not appear in the battle/nav missions (guarded by
       # tests/test_semantic_router.py) — puzzle outranks both, so a stray hit here
       # would steal their traffic.
@@ -176,6 +211,19 @@ routing:
         bm25_threshold: 0.1
 
   decisions:
+    - name: forger-to-trained-adapter
+      description: >-
+        Reading what the game said back — a body's sentence, a refusal on screen. The
+        only seat with a held-out gate behind it (body 0.21 -> 0.82, outcome 0.33 -> 0.66
+        against a 0.49 majority; empirical-evidence docs/forger-adapter.md).
+      priority: 500
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: forger_keywords
+      modelRefs:
+        - model: "pokemon-forger:Q4_K_M"
     - name: recon-to-investigator
       description: >-
         Observation before anyone reasons. The arc that engaged 82 bodies won its badge;

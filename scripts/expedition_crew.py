@@ -59,7 +59,110 @@ CREW: dict[str, dict] = {
     # model because recon is a movement problem, and it is cheap on purpose -- it runs before the
     # expensive seats, so its budget is small and its timeout short.
     "recon": {"title": "The Investigator", "model": "qwen38-27b-128k", "tokens": 1200, "timeout": 120},
+    # The Forger reads what the game says back: a body's sentence -> what the body is and what
+    # the talk yields; a refusal sentence -> the gate class and what clears it. It is the first
+    # seat trained rather than cast: a LoRA on SmolLM3-3B over the crew's own measured dialogue
+    # (docs/whitepapers/training-an-archetype.md; held-out body 0.21 -> 0.82, outcome 0.33 -> 0.66
+    # against a 0.49 majority), served quantized as pokemon-forger:Q4_K_M. It is asked a JSON
+    # question, never a menu, and its reading is recorded beside the engine's own label
+    # (``supervisor.forger_read``) before it is allowed to steer anything: an outcome head that is
+    # wrong one time in three earns a vote by being measured live first.
+    "forger": {"title": "The Forger", "model": "pokemon-forger:Q4_K_M", "tokens": 160, "timeout": 60},
 }
+
+# The Forger's two questions, byte-for-byte the prompts it was trained on (empirical-evidence
+# autotune/npc_corpus.py and autotune/handoff_corpus.py). A prompt that drifts from the training
+# prompt is a different task, and the gate numbers stop applying to it.
+FORGER_DIALOGUE_SYSTEM = (
+    "You are the Forger for a Pokemon Red crew: you read what a body says when the crew talks "
+    "to it and decide what that body is worth. Answer with only the requested JSON."
+)
+FORGER_GATE_SYSTEM = (
+    "You are the navigation advisor for a Pokemon Red expedition agent. What the game says on "
+    "screen is the instruction stream. Answer with only the requested JSON."
+)
+FORGER_BODIES = ("trainer", "npc", "item", "unknown")
+FORGER_OUTCOMES = ("talk", "handed", "fought-won", "fought-lost", "fled", "gate", "blocker", "stale")
+
+
+def clean_said(said: str) -> str:
+    """One sentence from the decoder's growing window reads: partial reads dropped, the overlap
+    between consecutive reads merged once. The corpus builder's cleaner, so live reads match."""
+    parts = [p.strip() for p in said.split("|") if p.strip()]
+    keep: list[str] = []
+    for p in parts:
+        if any(o != p and o.startswith(p) for o in parts):
+            continue
+        if keep and keep[-1] == p:
+            continue
+        keep.append(p)
+    out = ""
+    for p in keep:
+        if not out:
+            out = p
+            continue
+        k = next((n for n in range(min(len(out), len(p)), 2, -1) if out.endswith(p[:n])), 0)
+        out = out + p[k:] if k else out + " " + p
+    return out
+
+
+def forger_dialogue_prompt(mp: int, at: tuple[int, int], said: str, pic: int | None = None) -> str:
+    """The npc-dialogue question: where the body stands, its sprite picture, what it said."""
+    x, y = at
+    pic_s = f" (sprite pic {pic})" if pic is not None else ""
+    return (
+        f"On map {mp}, the crew talked to the body at ({x}, {y}){pic_s}. "
+        f"It said: {clean_said(said)!r}.\n"
+        "What is this body, and what comes of talking to it? Respond with JSON "
+        '{"body": "trainer"|"npc"|"item"|"unknown", "outcome": "talk"|"handed"|'
+        '"fought-won"|"fought-lost"|"fled"|"gate"|"blocker"|"stale", '
+        '"items": [str], "gate": str|null}'
+    )
+
+
+def forger_gate_prompt(mp: int, at: tuple[int, int] | None, said: str, direction: str | None = None) -> str:
+    """The gate-text question: where the step was refused and the sentence the game printed."""
+    sentence = max((s.strip() for s in said.split("|")), key=len)
+    where = f"On map {mp}" + (f" at ({at[0]}, {at[1]})" if at is not None else "")
+    facing = f", facing {direction}" if direction else ""
+    return (
+        f"{where}{facing}, the step was refused and the game said: {sentence!r}.\n"
+        "What gates this step, and what clears it? "
+        'Respond with JSON {"gate": str, "clears_with": str}.'
+    )
+
+
+def forger_body(model: str, system: str, user: str, max_tokens: int) -> dict[str, Any]:
+    """The Forger's request: a system seat and one user question, greedy, one whole reply."""
+    return {
+        "model": model,
+        "temperature": 0,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+
+
+def parse_forger(text: str) -> dict | None:
+    """The first JSON object in the reply, or None. An unparsed reading is a non-reading."""
+    import json as _json
+
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = _json.loads(text[start : i + 1])
+                    except ValueError:
+                        break
+                    return obj if isinstance(obj, dict) else None
+        start = text.find("{", start + 1)
+    return None
+
 
 # The tapes capture proxy (~/.tapes/config.toml: provider openai, upstream 11434, listen 42345).
 # Calling ollama on :11434 directly produces an uncaptured session, which the doctrine forbids.

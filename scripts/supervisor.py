@@ -440,6 +440,32 @@ class TapesConsult:
         self.log(f"  {seat['title']} ({seat['model']}) -> {action or 'NO-ANSWER'}: {why[:120]}")
         return action, why, seat["model"]
 
+    def read(self, system: str, user: str) -> tuple[dict | None, str, float]:
+        """Ask the Forger one JSON question. Returns ``(reading, model, seconds)``; an unparsed or
+        failed reply is ``None``. Not streamed: the adapter answers in one short line, and the
+        question is the training prompt verbatim, so a system message carries the seat."""
+        import urllib.error
+        import urllib.request
+
+        import expedition_crew as crew
+
+        seat = crew.seat_for("forger")
+        body = json.dumps(crew.forger_body(seat["model"], system, user, crew.answer_tokens("forger"))).encode()
+        wait = self.timeout if self.timeout is not None else crew.answer_timeout("forger")
+        request = urllib.request.Request(
+            crew.TAPES_CHAT_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(request, timeout=wait) as resp:
+                payload = json.loads(resp.read().decode())
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            self.log(f"  {seat['title']} read FAILED ({seat['model']}): {exc}")
+            return None, seat["model"], time.monotonic() - started
+        message = (payload.get("choices") or [{}])[0].get("message") or {}
+        text = message.get("content") or message.get("reasoning") or ""
+        return crew.parse_forger(text), seat["model"], time.monotonic() - started
+
 
 class LegRunner:
     """One leg: boot to goal, supervised. Deterministic Python moves; the crew only chooses."""
@@ -655,7 +681,53 @@ class LegRunner:
         self.notes.append(f"the body at {culprit} (which alone severs this hop) says: {said[:300]}")
         self.log(f"  it says: {said[:160]}")
         self.rig.emit("supervisor.blocker_engaged", body=[bx, by], said=said[:300])
+        self.forger_read("npc-dialogue", mp_now, (bx, by), said, outcome="blocker")
         return True
+
+    def forger_read(self, kind: str, mp: int, at: tuple[int, int] | None, said: str, **engine) -> dict | None:
+        """Hand the sentence to the Forger and record its reading beside the engine's own label.
+
+        ``kind`` is the corpus domain the sentence belongs to (``npc-dialogue`` or ``gate-text``),
+        ``engine`` the label the deterministic loop already knows (the cartridge's sprite kind, a
+        hand-over, a blocker). The reading is *recorded*, not obeyed: ``supervisor.forger_read``
+        carries both so a replay arc measures the adapter live before it steers anything. No
+        Forger seated (``--no-consult``, a fake consult) means no read and no event.
+        """
+        import expedition_crew as crew
+
+        reader = getattr(self.consult, "read", None)
+        if reader is None or not said:
+            return None
+        if kind == "gate-text":
+            system, user = crew.FORGER_GATE_SYSTEM, crew.forger_gate_prompt(mp, at, said, engine.pop("direction", None))
+        else:
+            sprite = next(
+                (
+                    s
+                    for s in self.rig.truth.get("maps", {}).get(str(mp), {}).get("sprites", [])
+                    if at is not None and (s.get("x"), s.get("y")) == tuple(at)
+                ),
+                {},
+            )
+            engine.setdefault("body", sprite.get("kind", "unknown"))
+            system, user = crew.FORGER_DIALOGUE_SYSTEM, crew.forger_dialogue_prompt(mp, at, said, sprite.get("pic"))
+        reading, model, secs = reader(system, user)
+        agree = {k: reading.get(k) == v for k, v in engine.items() if reading is not None and k in reading}
+        self.rig.emit(
+            "supervisor.forger_read",
+            kind=kind,
+            map=mp,
+            at=list(at) if at is not None else None,
+            said=said[:300],
+            reading=reading,
+            engine=engine,
+            agree=agree,
+            model=model,
+            seconds=round(secs, 2),
+        )
+        verdict = "no-reading" if reading is None else ", ".join(f"{k}={v!r}" for k, v in reading.items())
+        self.log(f"  the Forger reads {kind} at {at}: {verdict} ({secs:.1f}s; engine {engine})")
+        return reading
 
     def _wake_sleeper(self, culprit: tuple[int, int], said: str, face: str) -> bool:
         """A blocker the game calls a sleeping POKeMON is woken with the flute from the bag.
@@ -989,6 +1061,7 @@ class LegRunner:
             self.log(f'  the game says: "{said[:160]}"')
             self.notes.append(f'stepping {direction} from ({x}, {y}) on map {mp} prints: "{said[:200]}"')
             self.rig.emit("supervisor.gate_text", map=mp, at=[x, y], direction=direction, said=said[:300])
+            self.forger_read("gate-text", mp, (x, y), said, direction=direction)
         return said
 
     def _can_surf(self) -> bool:
@@ -1531,6 +1604,9 @@ class LegRunner:
             self.log(f"  *** {spot} HANDED OVER {named} ***")
             self.notes.append(f"the body at {spot} gave us {named}")
         self.rig.emit("supervisor.body_engaged", map=mp, at=list(spot), said=said[:300], gained=gained)
+        # The corpus labels a hand-over "handed" and anything else the talk left "talk"; a fight
+        # the talk started is judged by the battle rows, which this hook does not see.
+        self.forger_read("npc-dialogue", mp, spot, said, outcome="handed" if gained else "talk")
         return True
 
     def _engage_until_badge(self) -> bool:

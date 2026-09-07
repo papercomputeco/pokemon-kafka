@@ -247,3 +247,58 @@ def test_decide_from_stream_does_not_reparse_on_every_token():
     action, why, text = crew.decide_from_stream(stream, menu)
     assert action == "RIDE_PAD" and why == "measured"
     assert text.startswith("hm hm ")
+
+
+# --- the Forger: the first seat trained rather than cast -------------------------------------
+
+
+def test_the_forger_is_seated_on_the_trained_adapter():
+    seat = crew.seat_for("forger")
+    assert seat["title"] == "The Forger"
+    assert seat["model"] == "pokemon-forger:Q4_K_M"
+    assert seat["tokens"] < 400  # one JSON line, not a chain of thought
+
+
+def test_the_dialogue_prompt_is_the_training_prompt_byte_for_byte():
+    # A row of the held-out split of bdougie/pokemon-red-sft (npc-dialogue, map 182).
+    want = (
+        "On map 182, the crew talked to the body at (18, 22). It said: 'We hope to see you again!'.\n"
+        "What is this body, and what comes of talking to it? Respond with JSON "
+        '{"body": "trainer"|"npc"|"item"|"unknown", "outcome": "talk"|"handed"|'
+        '"fought-won"|"fought-lost"|"fled"|"gate"|"blocker"|"stale", "items": [str], "gate": str|null}'
+    )
+    assert crew.forger_dialogue_prompt(182, (18, 22), "We hope to see you again!") == want
+    assert "(sprite pic 7)" in crew.forger_dialogue_prompt(182, (18, 22), "hi", pic=7)
+    assert crew.FORGER_DIALOGUE_SYSTEM.startswith("You are the Forger for a Pokemon Red crew")
+
+
+def test_the_gate_prompt_is_the_training_prompt_and_keeps_the_longest_clause():
+    want = (
+        "On map 15 at (16, 15), facing up, the step was refused and the game said: "
+        "'No SURFing on GYARADOS here!'.\n"
+        'What gates this step, and what clears it? Respond with JSON {"gate": str, "clears_with": str}.'
+    )
+    said = "No SURFing|No SURFing on GYARADOS here!"
+    assert crew.forger_gate_prompt(15, (16, 15), said, "up") == want
+    assert crew.forger_gate_prompt(15, None, "x", None).startswith("On map 15, the step")
+
+
+def test_clean_said_drops_partial_window_reads_and_merges_the_overlap():
+    assert crew.clean_said("We hope|We hope to see|We hope to see you again!") == "We hope to see you again!"
+    assert crew.clean_said("Hello there!|there! Welcome.") == "Hello there! Welcome."
+    assert crew.clean_said("A|A|B") == "A B"
+
+
+def test_the_forger_body_carries_the_seat_as_a_system_message_and_is_greedy():
+    body = crew.forger_body("m", "sys", "q", 160)
+    assert body["messages"] == [{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}]
+    assert body["temperature"] == 0 and body["max_tokens"] == 160 and "stream" not in body
+
+
+def test_parse_forger_takes_the_first_json_object_and_nothing_else():
+    assert crew.parse_forger('{"body": "npc", "items": []}') == {"body": "npc", "items": []}
+    assert crew.parse_forger('Sure: {"gate": "x", "d": {"n": 1}} trailing') == {"gate": "x", "d": {"n": 1}}
+    assert crew.parse_forger('{not json} {"ok": 1}') == {"ok": 1}
+    assert crew.parse_forger("[1, 2]") is None
+    assert crew.parse_forger("no braces") is None
+    assert crew.parse_forger("{unclosed") is None
