@@ -433,6 +433,26 @@ uv run scripts/evolve.py rom/pokemon_red.gb --llm local
 
 See the [autotune integration doc](https://github.com/pcc-labs/autotune/blob/main/docs/pokemon-kafka-integration.md) for the full workflow.
 
+## Training an Archetype (the Forger's data and adapters)
+
+The crew's seats are trained from what the game did, never from what a model recalls about it. The first seat taken end to end is the Forger, the seat that reads what a body says and what a refusal sentence means. The full record is the white paper [Training an Archetype](docs/whitepapers/training-an-archetype.md) (PK-WP-01; [styled HTML](docs/whitepapers/training-an-archetype.html)), and the pipeline lives in the sibling repo [empirical-evidence](https://github.com/pcc-labs/empirical-evidence) (`docs/forger-adapter.md`).
+
+| artefact | where | what |
+|---|---|---|
+| corpus | HF dataset `bdougie/pokemon-red-sft` (private) | 27,836 rows in nine domains, every row measured from a run on the cartridge; `sft_v5u` |
+| Forger adapter | HF `bdougie/smollm3-pokemon-forger-lora` | LoRA r32 on SmolLM3-3B; held-out body 0.21 -> 0.82, outcome 0.33 -> 0.66 vs a 0.49 majority, gate sentences 4/4; Q4_K_M GGUF under `gguf/` |
+| all-seats adapter | HF `bdougie/smollm3-pokemon-red-lora` | same recipe on every seat's rows; battle-outcome 0.52 -> 0.99, move-choice 0.00 -> 0.95, a weaker Forger than the dedicated one |
+
+The data came from the forward-play sweep of 2026-09-05/07 (`docs/learnings/forward-play-sweep-2026-09-05.md`): 166 legs from healthy saves into the maps the crew had never stood on, each wall fixed in the road engine as measured (PRs #128-#139), and the body catalogue grew from 600 of 922 bodies on 119 maps to 887 of 996 on 184.
+
+```bash
+# serve the Forger locally (this box has it registered already)
+ollama run pokemon-forger:Q4_K_M
+# any other machine: the repo is private, so log in first
+hf download bdougie/smollm3-pokemon-forger-lora gguf/pokemon-forger.Q4_K_M.gguf
+ollama create pokemon-forger:Q4_K_M -f Modelfile   # FROM ./pokemon-forger.Q4_K_M.gguf
+```
+
 ## Testing
 
 100% line coverage enforced via `pytest-cov` (`fail_under = 100` in `pyproject.toml`).
