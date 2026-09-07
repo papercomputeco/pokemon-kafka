@@ -439,18 +439,17 @@ The crew's seats are trained from what the game did, never from what a model rec
 
 | artefact | where | what |
 |---|---|---|
-| corpus | HF dataset `bdougie/pokemon-red-sft` (private) | 27,836 rows in nine domains, every row measured from a run on the cartridge; `sft_v5u` |
-| Forger adapter | HF `bdougie/smollm3-pokemon-forger-lora` | LoRA r32 on SmolLM3-3B; held-out body 0.21 -> 0.82, outcome 0.33 -> 0.66 vs a 0.49 majority, gate sentences 4/4; Q4_K_M GGUF under `gguf/` |
-| all-seats adapter | HF `bdougie/smollm3-pokemon-red-lora` | same recipe on every seat's rows; battle-outcome 0.52 -> 0.99, move-choice 0.00 -> 0.95, a weaker Forger than the dedicated one |
+| corpus | [bdougie/pokemon-red-sft](https://huggingface.co/datasets/bdougie/pokemon-red-sft) (HF dataset) | 27,836 rows in nine domains, every row measured from a run on the cartridge; `sft_v5u` |
+| Forger adapter | [bdougie/smollm3-pokemon-forger-lora](https://huggingface.co/bdougie/smollm3-pokemon-forger-lora) | LoRA r32 on SmolLM3-3B; held-out body 0.21 -> 0.82, outcome 0.33 -> 0.66 vs a 0.49 majority, gate sentences 4/4; Q4_K_M GGUF under `gguf/` |
+| all-seats adapter | [bdougie/smollm3-pokemon-red-lora](https://huggingface.co/bdougie/smollm3-pokemon-red-lora) | same recipe on every seat's rows; battle-outcome 0.52 -> 0.99, move-choice 0.00 -> 0.95, a weaker Forger than the dedicated one |
 
 The data came from the forward-play sweep of 2026-09-05/07 (`docs/learnings/forward-play-sweep-2026-09-05.md`): 166 legs from healthy saves into the maps the crew had never stood on, each wall fixed in the road engine as measured (PRs #128-#139), and the body catalogue grew from 600 of 922 bodies on 119 maps to 887 of 996 on 184.
 
 ```bash
 # serve the Forger locally (this box has it registered already)
 ollama run pokemon-forger:Q4_K_M
-# any other machine: the repo is private, so log in first
-hf download bdougie/smollm3-pokemon-forger-lora gguf/pokemon-forger.Q4_K_M.gguf
-ollama create pokemon-forger:Q4_K_M -f Modelfile   # FROM ./pokemon-forger.Q4_K_M.gguf
+# any other machine, straight from the Hub
+ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M
 ```
 
 ## Testing
