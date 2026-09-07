@@ -2908,3 +2908,24 @@ def test_a_current_hop_is_ridden_and_a_refused_ride_is_its_own_failure(tmp_path)
     bare = FakeRig(start=(1, 3, 3))
     bare.ride_current = None  # a rig that cannot ride: the hop is refused, not crashed
     assert _runner(bare, tmp_path)._hop(hop) == "current-refused"
+
+
+def test_region_alt_does_not_step_back_out_the_door_it_just_came_in_while_another_way_leads_on(tmp_path):
+    """Maps 19 and 80 (2026-09-07): from the road the router named the house door, from the house
+    its mat back to the road - two chains of equal length - and the leg stepped in and out for its
+    whole budget. The map the last hop left is held back on the first ask."""
+    truth = _two_pocket_truth()
+    truth["maps"]["3"]["warps"].append([7, 0, 5, 0])  # a back door onto map 5, which also reaches the goal
+    truth["maps"]["5"] = {**truth["maps"]["2"], "warps": [[0, 0, 3, 2], [3, 3, 2, 0]]}
+    rig = FakeRig(start=(3, 0, 7), truth=truth)
+    runner = _runner(rig, tmp_path)
+    runner.came_from = 1
+    alt = runner._region_alt(3, (0, 7))
+    assert alt["to"] == 5  # onward through map 5, not back to 1
+    runner.came_from = None
+    assert _runner(FakeRig(start=(3, 0, 7), truth=truth), tmp_path)._region_alt(3, (0, 7))["to"] in (1, 5)
+    # a dead-end house: back out is the only way, and it is still taken
+    sealed = _two_pocket_truth()
+    r2 = _runner(FakeRig(start=(3, 0, 7), truth=sealed), tmp_path)
+    r2.came_from = 1
+    assert r2._region_alt(3, (0, 7))["via"] == "mat"

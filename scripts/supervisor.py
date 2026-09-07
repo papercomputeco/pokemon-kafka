@@ -493,6 +493,7 @@ class LegRunner:
         self.consults: list[dict] = []
         self.banned: set[tuple[int, int]] = set()  # hops the world has refused; routing skips them
         self.region_mode = False  # the region router has taken this leg over (see _next_hop)
+        self.came_from: int | None = None  # the map the last successful hop left (see _region_alt)
         self.gated: set[tuple[int, int]] = set()  # hops whose gate building we have already tried
         self.engaged: set[tuple[int, int]] = set()  # blocking bodies we have already gone to meet
         self.gates: dict[tuple[int, int, int], str] = {}  # (map, x, y) -> what the game said when it refused
@@ -945,6 +946,11 @@ class LegRunner:
 
         m = self.rig.truth["maps"].get(str(mp), {})
         stay = set(self.banned) | {(mp, other) for other in m.get("connections", {}).values() if other != self.goal}
+        # And not straight back where the last hop came from while anything else leads on: two
+        # equal-length chains through a house door and its mat (maps 19 and 80, measured 2026-09-07,
+        # run 20260907-022124-caa9) had the leg step in and out for 80 hops.
+        if self.came_from is not None and self.came_from != self.goal:
+            stay.add((mp, self.came_from))
         surf = self._can_surf()
         alt = road.region_route(self.rig.truth, self.rig.pairs, mp, cell, self.goal, banned=stay, surf=surf)
         if alt is None and stay != set(self.banned):
@@ -1632,6 +1638,7 @@ class LegRunner:
                 self.log(f"hop: {cur} --{hop['via']}--> {hop['to']}")
                 failure = self._hop(hop)
                 if failure is None:
+                    self.came_from = cur
                     continue  # progress: the wall counter for the next hop starts clean
             wall = f"{cur}->{hop['to'] if hop else self.goal}"
             self.attempts[wall] += 1
