@@ -181,3 +181,12 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
   floor (tileset 22) behind a door on map 21 where the walk wedged inside an interior - its own
   investigation.
 - Catalog: 887 of 996 bodies with a sentence on 184 of 213 maps. Unheard maps with no save: 83 28 103 102 104 81 173 226 227 228 69 78 75 239 240.
+
+## What the sweep fed — 2026-09-07
+
+- Dataset `bdougie/pokemon-red-sft` (HF, private): 27,836 rows; the Forger's npc-dialogue rows
+  grew from 848 to 1,318 and gate-text from 65 to 82 on the sweep's sink.
+- Adapter `bdougie/smollm3-pokemon-forger-lora` (Forger only): held-out body accuracy 0.21 → 0.82,
+  outcome 0.33 → 0.66 against a 0.49 majority, gate sentences 4/4. Served locally as
+  `ollama run pokemon-forger:Q4_K_M`; recipe and the all-seats adapter in
+  empirical-evidence `docs/forger-adapter.md`.
