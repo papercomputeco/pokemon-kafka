@@ -322,3 +322,14 @@ def test_engine_outcome_precedence_is_the_corpus_builders():
     assert o(handed=False, fought="none", gate=None, blocker=True, cells_seen=9) == "blocker"
     assert o(handed=False, fought="none", gate=None, blocker=False, cells_seen=3) == "stale"
     assert o(handed=False, fought="none", gate=None, blocker=False, cells_seen=2) == "talk"
+
+
+def test_a_reply_cut_off_by_the_token_cap_keeps_its_completed_fields():
+    """Lane 33: the gate guard's sentence sent the adapter into a "9999 9999" runaway inside
+    clears_with; the gate name in the first tokens is the reading, the runaway is not."""
+    cut = '{"gate": "script_guard", "clears_with": "a story gate, not a trainer: 9999 9999 9999 9999 99'
+    assert crew.parse_forger(cut) == {"gate": "script_guard", "partial": True}
+    cut2 = '{"body": "npc", "outcome": "talk", "items": ["POKe FLUTE", "and then 9999 9999'
+    assert crew.parse_forger(cut2) == {"body": "npc", "outcome": "talk", "partial": True}
+    assert crew.parse_forger('{"clears_with": "9999 9999') is None  # nothing salvageable
+    assert "partial" not in crew.parse_forger('{"gate": "x", "clears_with": "y"}')  # whole replies stay whole
