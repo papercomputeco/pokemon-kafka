@@ -2263,3 +2263,45 @@ def test_a_wild_drawn_on_the_test_press_is_fought_and_the_walk_goes_on():
 
     assert road.walk(io, truth, PAIRS, 1, {(3, 0)}, battle=fight) is True
     assert io.fought == 1
+
+
+# --------------------------------------------------------------------------- slopes
+
+
+def _slope_truth():
+    """Cycling Road in miniature: a road that slides down; column 0 ends in a dead end at the
+    bottom-left, column 3 reaches the exit row; the exit is (3,5)."""
+    grid = ["1111", "1111", "1111", "1011", "1011", "0001"]
+    truth = {"maps": {"1": _map(grid)}, "slopes": {"1": "down"}}
+    return truth
+
+
+def test_reachable_on_a_slope_never_steps_against_it():
+    truth = _slope_truth()
+    top = road.reachable(truth, PAIRS, 1, (0, 0))
+    assert (3, 5) in top and (0, 4) in top
+    bottom_left = road.reachable(truth, PAIRS, 1, (0, 4))
+    assert bottom_left == {(0, 4)}  # cannot climb, cannot cross: the dead end
+    assert road._against_slope(truth, 1) == (0, -1)
+    assert road._against_slope({"maps": {}}, 1) is None
+
+
+def test_safe_cells_exclude_what_the_slide_would_trap():
+    truth = _slope_truth()
+    safe = road.safe_cells(truth, PAIRS, 1, {(3, 5)})
+    assert (3, 5) in safe and (3, 0) in safe and (0, 0) in safe  # from the top you can still steer right
+    assert (0, 3) not in safe and (0, 4) not in safe  # below the split, column 0 only leads to the dead end
+    assert road.safe_cells({"maps": {"1": _map(["11"])}}, PAIRS, 1, {(1, 0)}) is None  # not a slope
+    # a tile pair the cartridge refuses between two walkable cells severs the slide the same way
+    paired = _slope_truth()
+    m = paired["maps"]["1"]
+    m["tiles"] = ["11" * 4] * 5 + ["22" * 4]  # the exit row is tile 0x22, everything above 0x11
+    assert (3, 4) not in road.safe_cells(paired, {(m["tileset"], 0x11, 0x22)}, 1, {(3, 5)})
+
+
+def test_walk_on_a_slope_steers_away_from_the_dead_end():
+    truth = _slope_truth()
+    io = RoadIO(truth, (1, 0, 0))
+    assert road.walk(io, truth, PAIRS, 1, {(3, 5)}) is True
+    assert "up" not in io.pressed  # never a step against the slope
+    assert io.pressed.index("right") < io.pressed.index("down")  # steered right before the split, not into column 0
