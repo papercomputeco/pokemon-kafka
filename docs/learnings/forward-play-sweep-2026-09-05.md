@@ -111,3 +111,17 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
   has opened under a press.
 - Banks on an edge cell settle across the edge on reload (`probe_strip-3.state` at (3,14,35)
   boots on 16 at (4,0)); bank one step inside instead.
+
+## Map 5's GIVE_UP cells — measured 2026-09-07: the ship has sailed
+
+- Both cells, (5,15,6) and (5,18,29), are the same wall: the dock warps at (18,31)/(19,31) into
+  map 94 (the S.S. Anne). The sailor at (19,30) says **"The ship set sail."** The six targets
+  behind it (95, 99, 100, 102, 103, 104) are the ship's interior (94 → 95 → …).
+- Every baton the sweep used carries HM01, and every one of them is told the same sentence: the
+  ship is gone on that whole lineage. The seats' GIVE_UP was right.
+- Batons from before the ship left do exist: `at_gym_v` (map 5 (11,4), two badges, S.S.TICKET,
+  no HM01, Charmeleon L34 at 94 HP), `captain_room` (aboard, map 96) and `captain_done` (map
+  101, HM01 in hand). Lane 13 ran the ship from `at_gym_v`: all six maps reached in 1–3 s each,
+  50 bodies heard aboard (`forward_lane13.jsonl`).
+- Do not record this door as dead: on a pre-HM01 run it is the way to HM01. It is a story state,
+  and the sentence is the only honest marker until gates can carry a condition.
