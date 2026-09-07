@@ -162,3 +162,22 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
   map 27 (the Route 16 sleeper and the road's slope), map 10 (the grunt: `b7-10`), map 23 (the
   sleeper: `snorlax_still`). Catalog after: 866 of 973 bodies with a sentence on 177 of 213 maps;
   21 unheard no-save maps remain.
+
+## The last lanes — 2026-09-07 late
+
+- Map 46's door on Route 13 opened on the second attempt from the south-half bank; the "no-path
+  from both halves" was the model's. Map 48, which the map-level router called unreachable from
+  every baton, and 49 were heard from the new north-half bank (`fwd_l16_46`).
+- The ship maps 102, 103 and 104 were heard in full from `at_gym_v`; Cycling Road's trainers from
+  `r16_bike-28`; 132 from `fwd_l3_130`; 185 from `kg3_gate`; 223 from
+  `replay_F5_fuchsia_hm03-218`; 81 from `b5_lavender`.
+- Map 72 (the Day Care) needed one more router fix: the region holding its door on map 16 is a
+  one-way superset of the west strip the leg stood in - a ledge row joins them downhill only - and
+  both share their smallest cell, so the door's region read as already seen. Region keys carry the
+  region's size now; the chain up into Cerulean and back down onto the east part is found and
+  driven (branch `region-keys`).
+- Six maps have no entrance in the cartridge's warp table and are unreachable by design: 173, 69,
+  78, 75, 239, 240. Three sit in map 3's closed pocket pair: 226, 227, 228. Map 83 is a facility
+  floor (tileset 22) behind a door on map 21 where the walk wedged inside an interior - its own
+  investigation.
+- Catalog: 887 of 996 bodies with a sentence on 184 of 213 maps. Unheard maps with no save: 83 28 103 102 104 81 173 226 227 228 69 78 75 239 240.

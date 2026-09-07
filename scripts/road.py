@@ -617,8 +617,15 @@ def region_route(
             return surf_region(truth, pairs, mp, tuple(cell))
         return reachable(truth, pairs, mp, tuple(cell))
 
+    def key_of(mp, reg):
+        # Map 16, measured 2026-09-07: the region holding the door to 72 is a one-way superset of
+        # the west strip the leg stood in (a ledge row joins them downhill only), and both have the
+        # same smallest cell. Keyed by that cell alone the door's region was "already seen" and
+        # never expanded. Size tells them apart.
+        return (mp, min(reg), len(reg))
+
     start = region(src_map, src_cell)
-    seen = {(src_map, min(start))}
+    seen = {key_of(src_map, start)}
     queue = deque([(src_map, start, None, None)])
     nodes = 0
     while queue and nodes < max_nodes:
@@ -700,7 +707,7 @@ def region_route(
                     far_cell = across(c)
                     if far_cell not in fcells:
                         continue
-                    far_key = min(reachable(truth, pairs, dst, far_cell))
+                    far_key = key_of(dst, reachable(truth, pairs, dst, far_cell))
                     if far_key in seen_far:
                         continue
                     seen_far.add(far_key)
@@ -740,7 +747,7 @@ def region_route(
                 if carried is not None:  # the door opens onto a conveyor: the node is where it lands
                     dst, land = int(carried["lands"][0]), (carried["lands"][1], carried["lands"][2])
             reg2 = region(dst, land)  # never empty: the entry cell itself stands in it
-            key = (dst, min(reg2))
+            key = key_of(dst, reg2)
             if key in seen:
                 continue
             seen.add(key)

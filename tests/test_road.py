@@ -2305,3 +2305,23 @@ def test_walk_on_a_slope_steers_away_from_the_dead_end():
     assert road.walk(io, truth, PAIRS, 1, {(3, 5)}) is True
     assert "up" not in io.pressed  # never a step against the slope
     assert io.pressed.index("right") < io.pressed.index("down")  # steered right before the split, not into column 0
+
+
+def test_region_keys_tell_a_one_way_superset_from_the_strip_it_contains():
+    """Map 16 (2026-09-07): the door's region reaches the west strip over a ledge (one way), so
+    both regions share their smallest cell. The router must still expand the door's region."""
+    # map 1: column 0 is a strip; a tree at (1,0)-(1,1) walls it from the east at the top; a ledge
+    # row (tile 0x37 under 0x39) at row 2 x>=1 drops the east part onto the strip's row 3.
+    grid = ["1011", "1011", "1000", "1111"]
+    m = _map(grid, connections={"north": 2}, warps=[[3, 1, 5, 0]])
+    m["tileset"] = 0
+    m["tiles"] = ["39" * 4, "39" * 4, "39" + "37" * 3, "39" * 4]
+    far = _map(["1111"], connections={"south": 1})
+    far["connection_offsets"] = {"south": 0}
+    m["connection_offsets"] = {"north": 0}
+    truth = {"maps": {"1": m, "2": far, "5": _map(["11"], warps=[[0, 0, 1, 0]])}, "ledges": [["down", 0x39, 0x37]]}
+    strip = road.reachable(truth, PAIRS, 1, (0, 3))
+    east = road.reachable(truth, PAIRS, 1, (2, 0))
+    assert min(strip) == min(east) and len(strip) < len(east)  # same smallest cell, different regions
+    hop = road.region_route(truth, PAIRS, 1, (0, 3), 5)
+    assert hop is not None and hop["to"] == 2  # up to map 2, back down onto the east part, then the door
