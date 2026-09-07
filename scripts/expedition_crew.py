@@ -196,8 +196,35 @@ def forger_body(model: str, system: str, user: str, max_tokens: int) -> dict[str
     }
 
 
+# String fields a truncated reply can still be salvaged for. Measured on the Saffron gate guard
+# (2026-09-07, lane 33): the adapter named the gate in its first tokens, then ran away into
+# "9999 9999 …" inside clears_with and hit the token cap with the object unclosed — eight reads,
+# eight non-readings, and the one field that mattered was there every time.
+FORGER_SALVAGE_KEYS = ("gate", "body", "outcome")
+
+
 def parse_forger(text: str) -> dict | None:
-    """The first JSON object in the reply, or None. An unparsed reading is a non-reading."""
+    """The first JSON object in the reply, or None. An unparsed reading is a non-reading.
+
+    A reply cut off by the token cap has no closing brace; its completed string fields are
+    salvaged into a reading marked ``"partial": True`` rather than thrown away with the runaway.
+    """
+
+    obj = _first_object(text)
+    if obj is not None:
+        return obj
+    salvaged = {}
+    for key in FORGER_SALVAGE_KEYS:
+        m = re.search(r'"%s"\s*:\s*"([^"]*)"' % key, text)
+        if m:
+            salvaged[key] = m.group(1)
+    if not salvaged:
+        return None
+    salvaged["partial"] = True
+    return salvaged
+
+
+def _first_object(text: str) -> dict | None:
     import json as _json
 
     start = text.find("{")
