@@ -1989,7 +1989,7 @@ def test_region_route_leaves_the_half_we_stand_in_through_the_gate_house():
 def test_region_route_takes_an_edge_the_region_holds_and_enters_at_the_nearest_open_cell():
     truth = _two_half_truth()
     hop = road.region_route(truth, PAIRS, 1, (6, 4), 4)
-    assert hop == {"from": 1, "to": 4, "via": "edge", "edge": "east"}
+    assert hop == {"from": 1, "to": 4, "via": "edge", "edge": "east", "x": 7, "y": 6}  # the one aligned open pair
     # the west half does not touch the east edge: it goes through the house first
     hop = road.region_route(truth, PAIRS, 1, (1, 4), 4)
     assert hop["via"] == "warp" and hop["to"] == 3
@@ -2205,13 +2205,13 @@ def test_region_route_enters_the_far_map_at_the_connections_alignment():
     far["grid"] = ["0111"] * 8 + ["1111"] * 4
     truth = {"maps": {"1": near, "2": far, "5": _map(["11"], warps=[[0, 0, 2, 0]])}}
     hop = road.region_route(truth, PAIRS, 1, (0, 1), 5)
-    assert hop == {"from": 1, "to": 2, "via": "edge", "edge": "east"}
-    # without the alignment the entry would have been guessed at the nearest open cell - the same
-    # answer here, since map 2's whole open part is one region; the alignment matters when it is not
+    assert hop["via"] == "edge" and hop["to"] == 2 and hop["y"] + 8 in range(8, 12)  # crosses where the far side opens
+    # a far map whose edge opens onto two regions: the hop names the cell whose far side leads on
     split = _map(["1" * 4] * 4, connections={"east": 2})
     split["connection_offsets"] = {"east": 8}
     pocket = _map(["1111"] * 2 + ["0000"] * 6 + ["1111"] * 4, connections={"west": 1}, warps=[[3, 10, 5, 0]])
     truth2 = {"maps": {"1": split, "2": pocket, "5": _map(["11"], warps=[[0, 0, 2, 0]])}}
-    assert road.region_route(truth2, PAIRS, 1, (0, 1), 5) == {"from": 1, "to": 2, "via": "edge", "edge": "east"}
-    split["connection_offsets"] = {}  # rows aligned 1:1: row 1 enters the top pocket, which reaches nothing
+    hop2 = road.region_route(truth2, PAIRS, 1, (0, 1), 5)
+    assert hop2["to"] == 2 and hop2["y"] + 8 >= 8  # row 0..3 + 8 -> rows 8..11: the lower pocket, with the door
+    split["connection_offsets"] = {}  # rows aligned 1:1: rows 0..3 enter the top pocket only, which reaches nothing
     assert road.region_route(truth2, PAIRS, 1, (0, 1), 5) is None

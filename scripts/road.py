@@ -626,15 +626,46 @@ def region_route(
                 continue  # a land edge this region does not touch; or water, which only a surfer's own water crosses
             dm = maps[str(dst)]
             line = {"north": 0, "south": m["height"] - 1, "west": 0, "east": m["width"] - 1}[side]
-            on_line = [c for c in (mine or ours_water) if (c[1] if side in ("north", "south") else c[0]) == line]
-            cx, cy = min(on_line or (mine or ours_water))
+            vertical = side in ("north", "south")
+            on_line = [c for c in (mine or ours_water) if (c[1] if vertical else c[0]) == line]
             # The connection's alignment (extracted from the header; measured first on Route 15 -> map 3,
             # where the "nearest open cell" guess put the leg in a 13-cell pocket the game never enters).
             shift = m.get("connection_offsets", {}).get(side, 0)
-            far = {"north": (cx + shift, dm["height"] - 1), "south": (cx + shift, 0)}
-            far["west"], far["east"] = (dm["width"] - 1, cy + shift), (0, cy + shift)
-            aligned = far[side]
+
+            def across(c):
+                if side == "north":
+                    return (c[0] + shift, dm["height"] - 1)
+                if side == "south":
+                    return (c[0] + shift, 0)
+                if side == "west":
+                    return (dm["width"] - 1, c[1] + shift)
+                return (0, c[1] + shift)
+
             fcells, _fd = edge_cells(truth, dst, mp)
+            if mine:
+                # One connection, several far regions: map 3's west edge (measured 2026-09-06) opens
+                # onto the town at rows 18..19 and onto a fenced strip at rows 21..35, and only the
+                # strip walks on to the south edge. Every aligned pair of open cells is its own entry,
+                # and the hop carries the cell to cross at.
+                seen_far = set()
+                for c in sorted(on_line or mine):
+                    far_cell = across(c)
+                    if far_cell not in fcells:
+                        continue
+                    far_key = min(reachable(truth, pairs, dst, far_cell))
+                    if far_key in seen_far:
+                        continue
+                    seen_far.add(far_key)
+                    hop = {"from": mp, "to": dst, "via": "edge", "edge": side, "x": c[0], "y": c[1]}
+                    hops.append((dst, far_cell, hop))
+                if seen_far:
+                    continue
+                if not fcells and surf and dm.get("tiles"):
+                    pass  # land here, water there: fall through to the water entry below
+                else:
+                    continue
+            cx, cy = min(on_line or (mine or ours_water))
+            aligned = across((cx, cy))
             if fcells:
                 nearest = min(fcells, key=lambda c: abs(c[0] - aligned[0]) + abs(c[1] - aligned[1]))
                 entry = aligned if aligned in fcells else nearest
@@ -643,12 +674,11 @@ def region_route(
                 # cell we would land on. Counting the whole far map here let Route 20 look crossable by
                 # stepping out to Cinnabar and back (measured 2026-09-06, 39 identical hops).
                 fline = {"north": dm["height"] - 1, "south": 0, "west": dm["width"] - 1, "east": 0}[side]
-                axis = 1 if side in ("north", "south") else 0
                 fwater = [
                     (x, y)
                     for y in range(dm["height"])
                     for x in range(dm["width"])
-                    if (y if axis == 1 else x) == fline and _water_model(dm, x, y)
+                    if (y if vertical else x) == fline and _water_model(dm, x, y)
                 ]
                 if not fwater:
                     continue
@@ -857,9 +887,13 @@ def pass_gate(io, truth, pairs, cur: int, goal_cells, *, battle=_default_battle)
                 return True
 
 
-def cross_edge(io, truth, pairs, cur: int, nxt: int, *, battle=_default_battle):
-    """Cross a map connection, sweeping the outward step across edge cells for alignment."""
-    cells, d = edge_cells(truth, cur, nxt)
+def cross_edge(io, truth, pairs, cur: int, nxt: int, *, battle=_default_battle, cells=None):
+    """Cross a map connection, sweeping the outward step across edge cells for alignment.
+
+    ``cells`` restricts the sweep to those edge cells: the region router names the cell whose far
+    side is the region it wants (map 3's west edge opens onto two, measured 2026-09-06)."""
+    all_cells, d = edge_cells(truth, cur, nxt)
+    cells = (set(cells) & all_cells) or all_cells if cells else all_cells
     r = walk(io, truth, pairs, cur, cells, battle=battle)
     if r is not True:
         return r
