@@ -70,7 +70,7 @@ a{color:var(--accent)}
 </tr>
 <tr>
 <td>Document</td>
-<td>PK-WP-01, version 1.1</td>
+<td>PK-WP-01, version 1.2</td>
 </tr>
 <tr>
 <td>Date</td>
@@ -91,7 +91,7 @@ a{color:var(--accent)}
 </tbody>
 </table></header>
 <section class="abstract"><h2 id="abstract">Abstract</h2><p>An expedition system plays Pokémon Red with a crew of local language models, each seated by a router for one kind of work: reconnaissance, navigation, puzzles, battle, and reading what the game says back. This paper describes how one of those seats, the Forger, was turned from a role description into a trained adapter. The Forger's job is to name what a body on the map is and what talking to it yields, to classify the game's refusal sentences as gates, and to take an operator's handoff. Its training data was the thinnest in the corpus because the crew had only ever spoken to bodies on maps it had a saved game for. We ran a forward-play sweep that walked from healthy saves into 78 previously unheard maps, fixing the road engine wherever a measured wall stopped it, and rebuilt the corpus from the telemetry the sweep left behind. The corpus grew to 27,836 rows across nine domains and the Forger's dialogue rows from 848 to 1,318. A LoRA adapter on SmolLM3-3B trained on the Forger's 1,481 rows raised held-out body accuracy from 0.21 to 0.82 and outcome accuracy from 0.33 to 0.66 against a 0.49 majority baseline, and read all held-out gate sentences correctly. A second adapter trained on every seat's rows carries the battle seats at 0.99 and 0.95 while remaining a weaker Forger than the dedicated one. Both adapters, the dataset, and a quantized GGUF for local serving are published. Every row in the corpus is measured from the cartridge; no recalled game fact is load-bearing anywhere in the pipeline.</p></section>
-<nav class="toc"><p class="caption">Contents</p><ol><li><a href="#1-introduction">1. Introduction</a></li><li><a href="#2-background-the-expedition-system">2. Background: the expedition system</a></li><li><a href="#3-the-forger-archetype">3. The Forger archetype</a></li><li><a href="#4-method">4. Method</a></li><li><a href="#5-results">5. Results</a></li><li><a href="#6-discussion">6. Discussion</a></li><li><a href="#7-limitations">7. Limitations</a></li><li><a href="#8-future-work">8. Future work</a></li><li><a href="#9-conclusion">9. Conclusion</a></li><li><a href="#references">References</a></li><li><a href="#appendix-a-row-schemas">Appendix A. Row schemas</a></li><li><a href="#appendix-b-reproduction">Appendix B. Reproduction</a></li><li><a href="#appendix-c-what-stayed-out-of-reach">Appendix C. What stayed out of reach</a></li></ol></nav>
+<nav class="toc"><p class="caption">Contents</p><ol><li><a href="#1-introduction">1. Introduction</a></li><li><a href="#2-background-the-expedition-system">2. Background: the expedition system</a></li><li><a href="#3-the-forger-archetype">3. The Forger archetype</a></li><li><a href="#4-method">4. Method</a></li><li><a href="#5-results">5. Results</a></li><li><a href="#6-discussion">6. Discussion</a></li><li><a href="#7-limitations">7. Limitations</a></li><li><a href="#8-future-work">8. Future work</a></li><li><a href="#9-conclusion">9. Conclusion</a></li><li><a href="#addendum-v1-2-7-september-2026-late-the-seat-live-and-the-by-map-gate">Addendum (v1.2, 7 September 2026, late): the seat, live, and the by-map gate</a></li><li><a href="#references">References</a></li><li><a href="#appendix-a-row-schemas">Appendix A. Row schemas</a></li><li><a href="#appendix-b-reproduction">Appendix B. Reproduction</a></li><li><a href="#appendix-c-what-stayed-out-of-reach">Appendix C. What stayed out of reach</a></li></ol></nav>
 <h2 id="1-introduction">1. Introduction</h2>
 <p>The pokemon-kafka project asks a narrow question: can a system of small, locally served models learn to play a Game Boy cartridge well enough that each run makes the next run better, without a human in the loop body? The answer depends on where the models get their facts. Pokémon Red exists in several versions, and language models recall them interchangeably. The project's own record of trusting recall is expensive: a hand-typed species table hid 6,515 wild Paras sightings as Metapod, a recalled type chart carried two swapped pairs and mis-scored every battle for months, and a recalled RAM address wasted a probe session. The project therefore treats the ROM and the running game as the only sources of truth. Structures are extracted from the cartridge by content signature; behaviour and story are measured live.</p>
 <p>That rule shapes how a seat can be trained. There is no textbook to distil. The training set for a seat has to be assembled from what the game actually did when the crew acted, recorded as events, and converted into prompts whose answers were observed rather than believed. This paper is the record of doing that for one seat end to end: the data problem, the play that solved it, the corpus, the adapter, the gate it had to pass, and how it is served.</p>
@@ -515,6 +515,38 @@ a{color:var(--accent)}
 </ol>
 <h2 id="9-conclusion">9. Conclusion</h2>
 <p>An archetype is a role with a benchmark. Training one from a game that models mis-remember meant refusing recall as a source and building the training set from measured play instead. That forced the play to happen, which forced the engine to be fixed wherever the map graph and the cartridge disagreed. The result is a corpus of 27,836 measured rows, a dedicated Forger adapter that quadruples the base model's body accuracy and beats the majority outcome label by seventeen points, an all-seats adapter that carries the battle seats, and a served quantized model any machine can pull. Each step is reproducible from the commands in Appendix B, and each number in this paper is the output of one of them.</p>
+<h2 id="addendum-v1-2-7-september-2026-late-the-seat-live-and-the-by-map-gate">Addendum (v1.2, 7 September 2026, late): the seat, live, and the by-map gate</h2>
+<p>After publication the Forger adapter was seated in the crew (pull request #144) and read every engaged body and refused step on three replay arcs, recorded beside the engine's own label and obeyed by nothing. Across 69 reads it always answered, in 0.3 s on average; body kind agreed with the cartridge on 57 of 61 dialogue reads, and every disagreement on outcome was either a fight the sentence does not show or the timing of a repeated window sentence. On the one refusal no training row had covered, the Saffron gate house guard, the quantized adapter named its nearest class and then degenerated into a digit runaway inside the free-text field until the token cap. Two consequences followed. The parser now salvages the categorical fields of a truncated reply. And the corpus builder now emits refused steps whose sentence no class knows as rows labelled <code>unclassified</code>, so the seat has seen the answer "not one I know, go measure".</p>
+<p>The gate on which the guard stood was then measured across seven banked saves (refused on every two- and three-badge save, open on the lineage whose guard says "Hi, thanks for the cool drinks!") and added as a class. The corpus was rebuilt (v6u, 28,003 rows; gate-text 82 to 101) and the adapter retrained twice with the same recipe: once on a random split and once with 29 of 192 maps held out entirely.</p>
+<p class="caption">Table 7. Held-out gates on v6u, Forger adapter.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>split</th>
+<th style="text-align: right;">rows</th>
+<th>body base → tuned</th>
+<th>outcome base → tuned (majority)</th>
+<th>gate base → tuned</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>random</td>
+<td style="text-align: right;">154</td>
+<td>0.25 → 0.89</td>
+<td>0.39 → 0.63 (0.54)</td>
+<td>0.00 → 0.80</td>
+</tr>
+<tr>
+<td>by map, 29 unseen maps</td>
+<td style="text-align: right;">370</td>
+<td>0.22 → 0.90</td>
+<td>0.39 → 0.64 (0.55)</td>
+<td>0.00 → 0.89</td>
+</tr>
+</tbody>
+</table></div>
+<p>The by-map result answers the question section 6 left open. Had the body head been a lookup of the cartridge's sprite table by coordinates, it would have fallen toward the base's 0.22 on maps it never saw. It did not. The head reads the sentence and the sprite picture; Red's coordinates are context, not the answer. The outcome head sits the same nine points above the majority on both splits, so its ceiling is the label's, not the maps'.</p>
 <h2 id="references">References</h2>
 <ol>
 <li>pcc-labs/pokemon-kafka, <code>AGENTS.md</code>: ground-truth rule and the measured cost of breaking it.</li>
@@ -576,5 +608,5 @@ ollama pull hf.co/bdougie/smollm3-pokemon-forger-lora:Q4_K_M
 </tr>
 </tbody>
 </table></div>
-<div class="foot"><span>pcc-labs · PK-WP-01 · version 1.1</span><span>7 September 2026</span></div>
+<div class="foot"><span>pcc-labs · PK-WP-01 · version 1.2</span><span>7 September 2026</span></div>
 </main>

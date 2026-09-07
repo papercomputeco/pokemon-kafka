@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Organisation | pcc-labs |
-| Document | PK-WP-01, version 1.1 |
+| Document | PK-WP-01, version 1.2 |
 | Date | 7 September 2026 |
 | Prepared by | bdougie, with Claude Code |
 | Repositories | `pcc-labs/pokemon-kafka`, `pcc-labs/empirical-evidence` |
@@ -205,6 +205,21 @@ The Forger adapter is merged into the base, converted to GGUF, quantized to Q4_K
 ## 9. Conclusion
 
 An archetype is a role with a benchmark. Training one from a game that models mis-remember meant refusing recall as a source and building the training set from measured play instead. That forced the play to happen, which forced the engine to be fixed wherever the map graph and the cartridge disagreed. The result is a corpus of 27,836 measured rows, a dedicated Forger adapter that quadruples the base model's body accuracy and beats the majority outcome label by seventeen points, an all-seats adapter that carries the battle seats, and a served quantized model any machine can pull. Each step is reproducible from the commands in Appendix B, and each number in this paper is the output of one of them.
+
+## Addendum (v1.2, 7 September 2026, late): the seat, live, and the by-map gate
+
+After publication the Forger adapter was seated in the crew (pull request #144) and read every engaged body and refused step on three replay arcs, recorded beside the engine's own label and obeyed by nothing. Across 69 reads it always answered, in 0.3 s on average; body kind agreed with the cartridge on 57 of 61 dialogue reads, and every disagreement on outcome was either a fight the sentence does not show or the timing of a repeated window sentence. On the one refusal no training row had covered, the Saffron gate house guard, the quantized adapter named its nearest class and then degenerated into a digit runaway inside the free-text field until the token cap. Two consequences followed. The parser now salvages the categorical fields of a truncated reply. And the corpus builder now emits refused steps whose sentence no class knows as rows labelled `unclassified`, so the seat has seen the answer "not one I know, go measure".
+
+The gate on which the guard stood was then measured across seven banked saves (refused on every two- and three-badge save, open on the lineage whose guard says "Hi, thanks for the cool drinks!") and added as a class. The corpus was rebuilt (v6u, 28,003 rows; gate-text 82 to 101) and the adapter retrained twice with the same recipe: once on a random split and once with 29 of 192 maps held out entirely.
+
+**Table 7. Held-out gates on v6u, Forger adapter.**
+
+| split | rows | body base → tuned | outcome base → tuned (majority) | gate base → tuned |
+|---|---:|---|---|---|
+| random | 154 | 0.25 → 0.89 | 0.39 → 0.63 (0.54) | 0.00 → 0.80 |
+| by map, 29 unseen maps | 370 | 0.22 → 0.90 | 0.39 → 0.64 (0.55) | 0.00 → 0.89 |
+
+The by-map result answers the question section 6 left open. Had the body head been a lookup of the cartridge's sprite table by coordinates, it would have fallen toward the base's 0.22 on maps it never saw. It did not. The head reads the sentence and the sprite picture; Red's coordinates are context, not the answer. The outcome head sits the same nine points above the majority on both splits, so its ceiling is the label's, not the maps'.
 
 ## References
 
