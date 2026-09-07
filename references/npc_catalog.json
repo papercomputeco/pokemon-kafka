@@ -1,5 +1,5 @@
 {
- "built": "2026-09-05T17:57:36-07:00",
+ "built": "2026-09-06T18:52:36-07:00",
  "maps": {
   "0": {
    "bodies": {
@@ -496,8 +496,205 @@
    "sprites": 15
   },
   "100": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "13,10": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 20,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Snivel...Sniff... I only get to peel onions... Snivel...": 1
+     },
+     "won": 0
+    },
+    "13,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 20,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Hum-de-hum-de- ho... I peel spuds every day! Hum-hum...": 1
+     },
+     "won": 0
+    },
+    "13,8": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 20,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Did you hear about SNORLAX? All it does is eat and sleep!": 1
+     },
+     "won": 0
+    },
+    "5,11": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I saw an odd ball in the trash.": 1
+     },
+     "won": 0
+    },
+    "5,12": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I saw an odd ball in the trash.": 1
+     },
+     "won": 0
+    },
+    "5,13": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I saw an odd ball in the trash.": 1
+     },
+     "won": 0
+    },
+    "5,8": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 20,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I saw an odd ball in the trash.": 1
+     },
+     "won": 0
+    },
+    "9,1": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,2": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,3": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,4": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,8": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    },
+    "9,9": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015141-0a91"
+     ],
+     "seen": 1,
+     "sentences": {
+      "I so busy I getting dizzy!": 1
+     },
+     "won": 0
+    }
+   },
+   "engaged": 14,
    "sprites": 7
   },
   "101": {
@@ -521,8 +718,38 @@
    "sprites": 1
   },
   "102": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "12,15": {
+     "fought": 0,
+     "gained": {},
+     "item": "TM08",
+     "kind": "item",
+     "pic": 61,
+     "refused": 1,
+     "runs": [
+      "20260907-015143-50fb"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    },
+    "2,3": {
+     "fought": 1,
+     "gained": {},
+     "kind": "trainer",
+     "pic": 16,
+     "runs": [
+      "20260907-015143-50fb"
+     ],
+     "seen": 2,
+     "sentences": {
+      "I travel alone on my journeys! My POK\u00e9MON are my only friends!": 1,
+      "You should be nice to friends!": 1
+     },
+     "won": 1
+    }
+   },
+   "engaged": 2,
    "items": [
     {
      "item": "TM08",
@@ -534,8 +761,51 @@
    "sprites": 11
   },
   "103": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "0,12": {
+     "fought": 0,
+     "gained": {},
+     "item": "RARE CANDY",
+     "kind": "item",
+     "pic": 61,
+     "refused": 1,
+     "runs": [
+      "20260907-015144-348e"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    },
+    "1,2": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 16,
+     "runs": [
+      "20260907-015144-348e"
+     ],
+     "seen": 2,
+     "sentences": {
+      "In all my travels I've never seen any POK\u00e9MON sleep like this one!": 2
+     },
+     "won": 0
+    },
+    "12,1": {
+     "fought": 0,
+     "gained": {},
+     "item": "MAX ETHER",
+     "kind": "item",
+     "pic": 61,
+     "refused": 1,
+     "runs": [
+      "20260907-015144-348e"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    }
+   },
+   "engaged": 3,
    "items": [
     {
      "item": "MAX ETHER",
@@ -553,8 +823,80 @@
    "sprites": 13
   },
   "104": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "10,13": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 12,
+     "runs": [
+      "20260907-015145-c6d2"
+     ],
+     "seen": 2,
+     "sentences": {
+      "My buddy, MACHOKE, is super strong! He has enough STRENGTH to move": 2
+     },
+     "won": 0
+    },
+    "10,2": {
+     "fought": 0,
+     "gained": {},
+     "item": "TM44",
+     "kind": "item",
+     "pic": 61,
+     "refused": 1,
+     "runs": [
+      "20260907-015145-c6d2"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    },
+    "11,12": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 5,
+     "runs": [
+      "20260907-015145-c6d2"
+     ],
+     "seen": 2,
+     "sentences": {
+      "MACHOKE: Gwoh! Goggoh!": 2
+     },
+     "won": 0
+    },
+    "12,11": {
+     "fought": 0,
+     "gained": {
+      "MAX POTION": 1
+     },
+     "item": "MAX POTION",
+     "kind": "item",
+     "pic": 61,
+     "runs": [
+      "20260907-015145-c6d2"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    },
+    "20,2": {
+     "fought": 0,
+     "gained": {},
+     "item": "ETHER",
+     "kind": "item",
+     "pic": 61,
+     "refused": 1,
+     "runs": [
+      "20260907-015145-c6d2"
+     ],
+     "seen": 0,
+     "sentences": {},
+     "won": 0
+    }
+   },
+   "engaged": 5,
    "items": [
     {
      "item": "ETHER",
@@ -570,7 +912,7 @@
     },
     {
      "item": "MAX POTION",
-     "picked": false,
+     "picked": true,
      "x": 12,
      "y": 11
     }
@@ -3539,18 +3881,23 @@
      "won": 0
     },
     "12,6": {
-     "fought": 0,
+     "blocker": true,
+     "fought": 2,
      "gained": {},
      "kind": "unknown",
      "pic": null,
      "runs": [
-      "20260905-182711-5491"
+      "20260905-182711-5491",
+      "20260907-000255-dd81",
+      "20260907-000642-bdcc"
      ],
-     "seen": 1,
+     "seen": 3,
      "sentences": {
+      "AAAAAAAAAA gained 84 EXP. Points!": 1,
+      "AAAAAAAAAA gained 97 EXP. Points!": 1,
       "Ouch! I tripped over a rocky POK\u00e9MON, GEODUDE!": 1
      },
-     "won": 0
+     "won": 2
     },
     "12,7": {
      "fought": 0,
@@ -3589,7 +3936,7 @@
      "item": "TM04",
      "kind": "item",
      "pic": 61,
-     "refused": 17,
+     "refused": 21,
      "runs": [
       "20260904-192933-4fc3",
       "20260905-182711-5491",
@@ -3607,17 +3954,21 @@
       "20260905-233741-4e90",
       "20260905-232647-b977",
       "20260905-234425-b878",
-      "20260905-234431-7ecb"
+      "20260905-234431-7ecb",
+      "20260906-011632-a085",
+      "20260907-000255-dd81",
+      "20260907-000642-bdcc",
+      "20260907-000849-0ef9"
      ],
      "seen": 0,
      "sentences": {},
      "won": 0
     },
     "9,8": {
-     "fought": 14,
+     "fought": 17,
      "gained": {},
      "kind": "npc",
-     "noise": 5,
+     "noise": 6,
      "pic": 6,
      "runs": [
       "20260904-192933-4fc3",
@@ -3634,13 +3985,16 @@
       "20260905-233741-4e90",
       "20260905-232647-b977",
       "20260905-234425-b878",
-      "20260905-234431-7ecb"
+      "20260905-234431-7ecb",
+      "20260906-011632-a085",
+      "20260907-000255-dd81",
+      "20260907-000642-bdcc"
      ],
-     "seen": 15,
+     "seen": 18,
      "sentences": {
-      "Ouch! I tripped over a rocky POK\u00e9MON, GEODUDE!": 10
+      "Ouch! I tripped over a rocky POK\u00e9MON, GEODUDE!": 12
      },
-     "won": 14
+     "won": 17
     }
    },
    "engaged": 7,
@@ -4342,8 +4696,37 @@
    "sprites": 6
   },
   "162": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "8,14": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260906-014004-39f7"
+     ],
+     "seen": 1,
+     "sentences": {
+      "AAAAAAAAAA gained 414 EXP. Points!": 1
+     },
+     "won": 0
+    },
+    "9,14": {
+     "fought": 1,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260906-014004-39f7"
+     ],
+     "seen": 1,
+     "sentences": {
+      "AAAAAAAAAA gained 414 EXP. Points!": 1
+     },
+     "won": 1
+    }
+   },
+   "engaged": 2,
    "sprites": 3
   },
   "163": {
@@ -7055,10 +7438,12 @@
      "item": "TM30",
      "kind": "item",
      "pic": 61,
-     "refused": 2,
+     "refused": 4,
      "runs": [
       "20260905-180255-3281",
-      "20260905-195736-6c61"
+      "20260905-195736-6c61",
+      "20260907-004533-534d",
+      "20260907-010456-1d82"
      ],
      "seen": 0,
      "sentences": {},
@@ -9876,12 +10261,13 @@
      "kind": "npc",
      "pic": 10,
      "runs": [
-      "20260906-000532-3767"
+      "20260906-000532-3767",
+      "20260907-004526-be92"
      ],
-     "seen": 14,
+     "seen": 28,
      "sentences": {
-      "POK\u00e9MON BADGEs are owned only by skilled trainers. I see you h": 1,
-      "POK\u00e9MON BADGEs are owned only by skilled trainers. I see you ha": 13
+      "POK\u00e9MON BADGEs are owned only by skilled trainers. I see you h": 10,
+      "POK\u00e9MON BADGEs are owned only by skilled trainers. I see you ha": 18
      },
      "won": 0
     }
@@ -10981,9 +11367,11 @@
      "runs": [
       "talk01",
       "20260905-234009-bf4e",
-      "20260906-003431-210b"
+      "20260906-003431-210b",
+      "20260907-000849-0ef9",
+      "20260907-002241-c295"
      ],
-     "seen": 2595,
+     "seen": 2597,
      "sentences": {
       "DIGLETT how to DIG without a TM!": 1454,
       "SLOWBRO ignored orders...": 56,
@@ -10991,7 +11379,7 @@
       "SLOWBRO took a snooze...": 79,
       "SLOWBRO turned away...": 55,
       "We hope to see you again!": 2,
-      "force has trouble with the ROCKETs!": 2,
+      "force has trouble with the ROCKETs!": 4,
       "home, so it won't get dirty!": 546,
       "their way into no good!": 343
      },
@@ -11006,15 +11394,21 @@
       "talk01",
       "20260905-163444-8344",
       "20260905-234009-bf4e",
-      "20260906-003431-210b"
+      "20260906-003431-210b",
+      "20260907-000849-0ef9",
+      "20260907-002241-c295",
+      "20260907-002833-8eb9",
+      "20260907-002930-5523",
+      "20260907-003032-4e8f"
      ],
-     "seen": 2596,
+     "seen": 2601,
      "sentences": {
       "SLOWBRO ignored orders...": 223,
       "SLOWBRO is loafing around...": 235,
       "SLOWBRO took a snooze...": 296,
       "SLOWBRO turned away...": 233,
-      "The people here were robbed. It's obvious that TEAM ROCKET is": 3,
+      "The people here were robbed. It's obvious that TEAM ROCKET is": 7,
+      "force has trouble with the ROCKETs!": 1,
       "home, so it won't get dirty!": 1604,
       "home, so it won't get dirty! TEAM ROCKET": 2
      },
@@ -11028,11 +11422,16 @@
      "runs": [
       "talk01",
       "20260905-234009-bf4e",
-      "20260906-003431-210b"
+      "20260906-003431-210b",
+      "20260907-000849-0ef9",
+      "20260907-002241-c295",
+      "20260907-002833-8eb9",
+      "20260907-002930-5523",
+      "20260907-003032-4e8f"
      ],
-     "seen": 2595,
+     "seen": 2600,
      "sentences": {
-      "The people here were robbed. It's obvious that TEAM ROCKET is": 2595
+      "The people here were robbed. It's obvious that TEAM ROCKET is": 2600
      },
      "won": 0
     },
@@ -11087,11 +11486,14 @@
      "kind": "npc",
      "pic": 7,
      "runs": [
-      "talk01"
+      "talk01",
+      "20260907-002833-8eb9",
+      "20260907-002930-5523",
+      "20260907-003032-4e8f"
      ],
-     "seen": 2593,
+     "seen": 2596,
      "sentences": {
-      "Youe a trainer too? Collecting, fighting, it's a tough life.": 2593
+      "Youe a trainer too? Collecting, fighting, it's a tough life.": 2596
      },
      "won": 0
     },
@@ -11273,7 +11675,7 @@
   "31": {
    "bodies": {
     "34,9": {
-     "fought": 12,
+     "fought": 16,
      "gained": {},
      "kind": "trainer",
      "pic": 7,
@@ -11289,13 +11691,17 @@
       "20260905-232400-cdb7",
       "20260905-232647-b977",
       "20260905-234339-7cdf",
-      "20260905-234431-7ecb"
+      "20260905-234431-7ecb",
+      "20260906-011359-1e54",
+      "20260906-011632-a085",
+      "20260906-012051-7aa4",
+      "20260906-014004-39f7"
      ],
-     "seen": 12,
+     "seen": 16,
      "sentences": {
-      "I rode my bird POK\u00e9MON here! 99 99 99 99 999999999999999999 999999999999999999": 12
+      "I rode my bird POK\u00e9MON here! 99 99 99 99 999999999999999999 999999999999999999": 16
      },
-     "won": 12
+     "won": 16
     },
     "45,10": {
      "fought": 0,
@@ -14390,27 +14796,29 @@
      "pic": 11,
      "runs": [
       "talk01",
-      "20260906-000530-4909"
+      "20260906-000530-4909",
+      "20260907-000642-bdcc"
      ],
-     "seen": 8,
+     "seen": 15,
      "sentences": {
-      "Hello there! Do you want to trade your POLIWHIRL for JYNX?": 8
+      "Hello there! Do you want to trade your POLIWHIRL for JYNX?": 15
      },
      "won": 0
     },
     "5,4": {
-     "fought": 0,
+     "fought": 1,
      "gained": {},
      "kind": "npc",
      "pic": 40,
      "runs": [
-      "20260906-000530-4909"
+      "20260906-000530-4909",
+      "20260907-000642-bdcc"
      ],
-     "seen": 7,
+     "seen": 14,
      "sentences": {
-      "My husband likes trading POK\u00e9MON. If you are a collector, would": 7
+      "My husband likes trading POK\u00e9MON. If you are a collector, would": 14
      },
-     "won": 0
+     "won": 1
     }
    },
    "engaged": 2,
@@ -16065,8 +16473,137 @@
    "sprites": 3
   },
   "95": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "10,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 3,
+     "sentences": {
+      "Ah! Le strong silent type! Bonjour! I am le waiter on this ship!": 1,
+      "Bonjour! I am le waiter on this ship! I will be ha": 2
+     },
+     "won": 0
+    },
+    "11,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be h": 1
+     },
+     "won": 0
+    },
+    "12,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 26,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "challenged by the more bored ones!": 1
+     },
+     "won": 0
+    },
+    "27,5": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 19,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 3,
+     "sentences": {
+      "The passengers are restless! You might be challenged by the": 3
+     },
+     "won": 0
+    },
+    "4,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 2,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be h": 1,
+      "Bonjour! I am le waiter on this ship! I will be ha": 1
+     },
+     "won": 0
+    },
+    "5,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be ha": 1
+     },
+     "won": 0
+    },
+    "6,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be h": 1
+     },
+     "won": 0
+    },
+    "7,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be ha": 1
+     },
+     "won": 0
+    },
+    "8,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015139-cdc9"
+     ],
+     "seen": 1,
+     "sentences": {
+      "Bonjour! I am le waiter on this ship! I will be h": 1
+     },
+     "won": 0
+    }
+   },
+   "engaged": 9,
    "sprites": 2
   },
   "96": {
@@ -16227,8 +16764,107 @@
    "sprites": 1
   },
   "99": {
-   "bodies": {},
-   "engaged": 0,
+   "bodies": {
+    "10,7": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 2,
+     "sentences": {
+      "My Pa said there are 100 kinds of POK\u00e9MON. I think there are more.": 2
+     },
+     "won": 0
+    },
+    "10,8": {
+     "fought": 1,
+     "gained": {},
+     "kind": "trainer",
+     "pic": 19,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 1,
+     "sentences": {
+      "AAAAAAA got 510 for winning!": 1
+     },
+     "won": 1
+    },
+    "4,4": {
+     "fought": 1,
+     "gained": {},
+     "kind": "trainer",
+     "pic": 19,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 1,
+     "sentences": {
+      "AAAAAAA got 540 for winning!": 1
+     },
+     "won": 1
+    },
+    "4,6": {
+     "fought": 0,
+     "gained": {},
+     "kind": "unknown",
+     "pic": null,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 2,
+     "sentences": {
+      "How many kinds of POK\u00e9MON do you think there are?": 2
+     },
+     "won": 0
+    },
+    "4,9": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 19,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 2,
+     "sentences": {
+      "Scrubbing decks is hard work!": 2
+     },
+     "won": 0
+    },
+    "5,2": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 12,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 3,
+     "sentences": {
+      "The party's over. The ship will be departing soon.": 3
+     },
+     "won": 0
+    },
+    "7,11": {
+     "fought": 0,
+     "gained": {},
+     "kind": "npc",
+     "pic": 7,
+     "runs": [
+      "20260907-015146-ea01"
+     ],
+     "seen": 3,
+     "sentences": {
+      "Urf. I feel ill. I stepped out to get some air.": 3
+     },
+     "won": 0
+    }
+   },
+   "engaged": 7,
    "sprites": 5
   }
  }
