@@ -2192,3 +2192,26 @@ def test_load_currents_without_the_file_is_empty(tmp_path):
     import rom_truth as rt
 
     assert rt.load_currents(tmp_path / "none.json") == []
+
+
+def test_region_route_enters_the_far_map_at_the_connections_alignment():
+    """Route 15 -> map 3 (2026-09-06): the far map is twice as tall and its rows sit 8 below ours;
+    the nearest-open-cell guess entered a 13-cell pocket the game never uses. The header's
+    alignment names the row."""
+    near = _map(["1" * 4] * 4, connections={"east": 2})
+    near["connection_offsets"] = {"east": 8}
+    far_grid = ["0" + "1" * 3] * 8 + ["1" * 4] * 4  # the west edge opens only on rows 8..11
+    far = _map(far_grid, connections={"west": 1}, warps=[[3, 10, 5, 0]])
+    far["grid"] = ["0111"] * 8 + ["1111"] * 4
+    truth = {"maps": {"1": near, "2": far, "5": _map(["11"], warps=[[0, 0, 2, 0]])}}
+    hop = road.region_route(truth, PAIRS, 1, (0, 1), 5)
+    assert hop == {"from": 1, "to": 2, "via": "edge", "edge": "east"}
+    # without the alignment the entry would have been guessed at the nearest open cell - the same
+    # answer here, since map 2's whole open part is one region; the alignment matters when it is not
+    split = _map(["1" * 4] * 4, connections={"east": 2})
+    split["connection_offsets"] = {"east": 8}
+    pocket = _map(["1111"] * 2 + ["0000"] * 6 + ["1111"] * 4, connections={"west": 1}, warps=[[3, 10, 5, 0]])
+    truth2 = {"maps": {"1": split, "2": pocket, "5": _map(["11"], warps=[[0, 0, 2, 0]])}}
+    assert road.region_route(truth2, PAIRS, 1, (0, 1), 5) == {"from": 1, "to": 2, "via": "edge", "edge": "east"}
+    split["connection_offsets"] = {}  # rows aligned 1:1: row 1 enters the top pocket, which reaches nothing
+    assert road.region_route(truth2, PAIRS, 1, (0, 1), 5) is None

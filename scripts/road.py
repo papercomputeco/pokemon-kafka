@@ -628,8 +628,11 @@ def region_route(
             line = {"north": 0, "south": m["height"] - 1, "west": 0, "east": m["width"] - 1}[side]
             on_line = [c for c in (mine or ours_water) if (c[1] if side in ("north", "south") else c[0]) == line]
             cx, cy = min(on_line or (mine or ours_water))
-            far = {"north": (cx, dm["height"] - 1), "south": (cx, 0), "west": (dm["width"] - 1, cy)}
-            far["east"] = (0, cy)
+            # The connection's alignment (extracted from the header; measured first on Route 15 -> map 3,
+            # where the "nearest open cell" guess put the leg in a 13-cell pocket the game never enters).
+            shift = m.get("connection_offsets", {}).get(side, 0)
+            far = {"north": (cx + shift, dm["height"] - 1), "south": (cx + shift, 0)}
+            far["west"], far["east"] = (dm["width"] - 1, cy + shift), (0, cy + shift)
             aligned = far[side]
             fcells, _fd = edge_cells(truth, dst, mp)
             if fcells:
