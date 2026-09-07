@@ -89,3 +89,25 @@ whole 1000 s budget, and one consult to the Extractor can run past it (lane 4, m
   cross at. Whether Route 15's south strip is reachable from anywhere but map 3's strip is the next
   measurement (the model says only via map 14's north edge at columns 57..63, which align to
   Route 15's columns 7..13, not to the strip).
+
+## Route 15's south strip — measured 2026-09-07: no entry
+
+- **Live from the south** (run 20260907-012441, `probe_strip`): map 10 → 16 at (11,35) → map 3 at
+  (14,35) → Route 15 at (89,11). The leg came up through map 3's south/east part into the town and
+  out at row 19 — the planner's own region from (14,35) is 632 cells and contains the town (378),
+  while the town does not contain the south part: a one-way passage, town ← south part, that the
+  grid's ledges explain. It never touched the SW strip: (0,21) is in neither region.
+- **The only barrier into the SW strip** from the south part is the 0x50 tree column at x=10,
+  rows 32–35. Cut at (10,35) from (11,35) and at (10,34) from (11,34): no change, no sentence
+  (run 20260907-012649-aa79). Four 0x50 refusals on this map now.
+- Route 15's south strip (x=81..89, rows 13–17, 35 cells) is sealed by rock (row 12, x=80) and a
+  fenced pond; its south edge lands at x=136..139 on map 14, off the map. Its one neighbour is
+  map 3's SW strip. **The pair has no entry.** Nothing routes to it and nothing is behind it.
+- **The same shape holds for map 228's door** at map 3 (4,11): its pocket (rows 12–13) pairs with
+  Route 15's north strip (row 4, x=76..89, plus rows 2–3/6 at x=76..79), which drains one-way over
+  the row-5 ledge into Route 15's main region and is entered from nowhere else in the model. So
+  228, and 226/227 behind it, are out of reach from any baton until a live entry is found — the
+  candidates are tiles the extraction calls solid (0x11 pond, 0x55/0x56, 0x24 fence), none of which
+  has opened under a press.
+- Banks on an edge cell settle across the edge on reload (`probe_strip-3.state` at (3,14,35)
+  boots on 16 at (4,0)); bank one step inside instead.
