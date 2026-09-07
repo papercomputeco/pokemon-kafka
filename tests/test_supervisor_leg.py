@@ -3021,3 +3021,137 @@ def test_the_leg_mounts_the_bicycle_at_the_gate_and_goes_on(tmp_path):
     assert result["ok"], result
     assert rig.rode == 1
     assert any(e["event"] == "supervisor.bicycle_mounted" for e in rig.events)
+
+
+# --- the Forger reads beside the engine -------------------------------------------------------
+
+
+def test_the_forger_read_posts_one_whole_json_question_to_the_proxy(monkeypatch):
+    import expedition_crew as crew
+
+    posted = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": 'ok {"body": "npc", "outcome": "talk"}'}}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        posted["url"] = req.full_url
+        posted["body"] = json.loads(req.data)
+        posted["timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    reading, model, secs = supervisor.TapesConsult(log=lambda *_: None).read("sys", "question")
+    assert posted["url"] == crew.TAPES_CHAT_URL
+    assert posted["body"]["model"] == crew.CREW["forger"]["model"] == model
+    assert posted["body"]["messages"][0] == {"role": "system", "content": "sys"}
+    assert "stream" not in posted["body"]  # one short line: no need to read it as it is written
+    assert posted["timeout"] == crew.CREW["forger"]["timeout"]
+    assert reading == {"body": "npc", "outcome": "talk"} and secs >= 0
+
+
+def test_a_forger_reply_in_reasoning_only_or_unparsable_or_dead_is_a_non_reading(monkeypatch):
+    class _Resp:
+        def __init__(self, message):
+            self._m = message
+
+        def read(self):
+            return json.dumps({"choices": [{"message": self._m}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    consult = supervisor.TapesConsult(log=lambda *_: None)
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _Resp({"reasoning": '{"gate": "g"}'}))
+    assert consult.read("s", "q")[0] == {"gate": "g"}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _Resp({"content": "no json here"}))
+    assert consult.read("s", "q")[0] is None
+
+    def boom(req, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    reading, model, _ = consult.read("s", "q")
+    assert reading is None and model == "pokemon-forger:Q4_K_M"
+
+
+class _ForgerConsult:
+    """A consult that also reads: what the Forger seat looks like to the loop."""
+
+    def __init__(self, reading):
+        self.reading = reading
+        self.asked: list[tuple[str, str]] = []
+
+    def __call__(self, tier, facts, menu):
+        return None, "", "none"
+
+    def read(self, system, user):
+        self.asked.append((system, user))
+        return self.reading, "pokemon-forger:Q4_K_M", 0.5
+
+
+def test_an_engaged_body_is_read_by_the_forger_and_scored_against_the_cartridge():
+    truth = _truth()
+    truth["maps"]["1"]["sprites"] = [{"kind": "npc", "x": 5, "y": 6, "pic": 12}]
+    rig = FakeRig(start=(1, 5, 5), truth=truth)
+    consult = _ForgerConsult({"body": "trainer", "outcome": "talk", "items": [], "gate": None})
+    runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
+    reading = runner.forger_read("npc-dialogue", 1, (5, 6), "MOVE|MOVE ASIDE!", outcome="talk")
+    assert reading["body"] == "trainer"
+    system, user = consult.asked[0]
+    assert system.startswith("You are the Forger")
+    assert user.startswith("On map 1, the crew talked to the body at (5, 6) (sprite pic 12). It said: 'MOVE ASIDE!'.")
+    (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
+    assert ev["engine"] == {"outcome": "talk", "body": "npc"}  # the cartridge's own kind
+    assert ev["agree"] == {"outcome": True, "body": False}
+    assert ev["model"] == "pokemon-forger:Q4_K_M" and ev["seconds"] == 0.5
+
+
+def test_a_gate_sentence_is_read_as_gate_text_with_the_facing():
+    rig = FakeRig(start=(1, 5, 5))
+    consult = _ForgerConsult({"gate": "surf_launch_refused", "clears_with": "SURF from a shore"})
+    runner = LegRunner(rig, goal=1, consult=consult, log=lambda *_: None)
+    runner.forger_read("gate-text", 1, (5, 5), "No SURFing here!", direction="up")
+    system, user = consult.asked[0]
+    assert system.startswith("You are the navigation advisor")
+    assert "at (5, 5), facing up, the step was refused" in user
+    (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
+    assert ev["kind"] == "gate-text" and ev["engine"] == {} and ev["agree"] == {}
+
+
+def test_no_forger_seated_means_no_read_and_no_event():
+    rig = FakeRig(start=(1, 5, 5))
+    runner = LegRunner(rig, goal=1, consult=lambda *a: (None, "", "none"), log=lambda *_: None)
+    assert runner.forger_read("npc-dialogue", 1, (5, 6), "hello") is None
+    seated = LegRunner(rig, goal=1, consult=_ForgerConsult({"body": "npc"}), log=lambda *_: None)
+    assert seated.forger_read("npc-dialogue", 1, (5, 6), "") is None  # nothing said, nothing to read
+    assert not [e for e in rig.events if e["event"] == "supervisor.forger_read"]
+
+
+def test_a_non_reading_is_recorded_as_such_and_agrees_with_nothing():
+    rig = FakeRig(start=(1, 5, 5))
+    runner = LegRunner(rig, goal=1, consult=_ForgerConsult(None), log=lambda *_: None)
+    assert runner.forger_read("npc-dialogue", 1, (5, 6), "hi", outcome="talk") is None
+    (ev,) = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
+    assert ev["reading"] is None and ev["agree"] == {}
+
+
+def test_engaging_a_body_hands_its_sentence_to_the_forger(tmp_path):
+    truth = _top_floor()
+    rig = FakeRig(start=(234, 8, 8), truth=truth)
+    consult = _ForgerConsult({"body": "trainer", "outcome": "talk", "items": [], "gate": None})
+    runner = LegRunner(rig, goal=234, clear_floor=True, consult=consult, log=lambda *_: None, learnings_dir=tmp_path)
+    assert runner.run()["ok"]
+    reads = [e for e in rig.events if e["event"] == "supervisor.forger_read"]
+    assert len(reads) == len([e for e in rig.events if e["event"] == "supervisor.body_engaged"]) == 2
+    assert all(e["engine"]["body"] == "trainer" and e["agree"]["body"] for e in reads)
