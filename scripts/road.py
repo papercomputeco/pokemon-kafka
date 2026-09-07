@@ -761,6 +761,17 @@ def walk(io, truth, pairs, map_id: int, targets, *, battle=_default_battle, cap:
             if not path or len(path) < 2:
                 return "no-path"
             if tuple(path[1]) in live_bodies(io):
+                # The table is not the world. Route 16, measured 2026-09-07 (run 20260907-022845-fdad):
+                # after "SNORLAX returned to the mountains!" the sprite table still listed the body
+                # at (26,10) and the step onto it went through. So a listed body is tested with one
+                # press before it is waited for; only a press that does not move is a body.
+                if body_waits == 0:
+                    nx, ny = path[1]
+                    _step(io, "right" if nx > x else "left" if nx < x else "down" if ny > y else "up")
+                    if io.read(ADDR_IN_BATTLE):
+                        battle(io)
+                    if read_pos(io) != (mp, x, y):
+                        continue
                 # Bodies are not walls: wanderers move - wait them out before giving up
                 # (a parked story-body earns the verdict only after real patience).
                 body_waits += 1

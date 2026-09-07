@@ -1678,6 +1678,14 @@ class Rig:
         self.ctl.wait(60)
         self.ctl.wait(50)
         target = _menu_key(name)
+        # The bag remembers where it was scrolled. Measured on Route 16 (runs 20260907-022124-caa9
+        # and -022454-d545): opened a second time, the list stood at the flute's row already, the
+        # scan below started from there, ran off the end at CANCEL and reported "no bag item called
+        # 'POKe FLUTE'" with the flute in the bag. Walk to the top first; the scan is then the same
+        # every time.
+        for _ in range(len(self.bag()) + 4):
+            self.ctl.press("up")
+            self.ctl.wait(12)
         # The bag renders entries on rows 4/6/8/10 with their quantities interleaved, the cursor
         # caps at 2, and the list scrolls under it — so the highlighted row is 4 + 2*cursor and
         # the walk needs one step per item, not a fixed count.

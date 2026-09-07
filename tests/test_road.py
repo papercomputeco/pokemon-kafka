@@ -111,7 +111,7 @@ def test_walk_no_path_and_body_blocked():
     truth = {"maps": {"1": _map(["101"])}}
     io = RoadIO(truth, (1, 0, 0))
     assert road.walk(io, truth, PAIRS, 1, {(2, 0)}) == "no-path"
-    io2 = RoadIO(_open_world(w=3), (1, 0, 0))
+    io2 = RoadIO(_open_world(w=3), (1, 0, 0), frozen_at={(1, 0, 0)})  # a real body: the press into it does not move us
     io2.mem[road.SPRITE_STATE_BASE + 0x10] = 1
     io2.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 0 + 4
     io2.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 1 + 4
@@ -2215,3 +2215,51 @@ def test_region_route_enters_the_far_map_at_the_connections_alignment():
     assert hop2["to"] == 2 and hop2["y"] + 8 >= 8  # row 0..3 + 8 -> rows 8..11: the lower pocket, with the door
     split["connection_offsets"] = {}  # rows aligned 1:1: rows 0..3 enter the top pocket only, which reaches nothing
     assert road.region_route(truth2, PAIRS, 1, (0, 1), 5) is None
+
+
+def test_a_listed_body_is_tested_with_one_press_before_it_is_waited_for():
+    """Route 16 (2026-09-07): the sprite table still listed the beaten Snorlax at (26,10) while the
+    step onto it went through. A body the press walks through is not a body."""
+    truth = {"maps": {"1": _map(["1111"])}}
+    io = RoadIO(truth, (1, 0, 0))
+    io.mem[road.SPRITE_STATE_BASE + 0x10] = 1  # a "body" listed at (1,0)
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 0 + 4
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 1 + 4
+    assert road.walk(io, truth, PAIRS, 1, {(3, 0)}) is True  # walked straight through the phantom
+    assert io.pressed.count("right") == 3
+
+
+def test_a_body_the_press_does_not_move_through_is_still_waited_for():
+    truth = {"maps": {"1": _map(["1111"])}}
+    io = RoadIO(truth, (1, 0, 0), frozen_at={(1, 0, 0)})  # the press is eaten: a real body
+    io.mem[road.SPRITE_STATE_BASE + 0x10] = 1
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 0 + 4
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 1 + 4
+    assert road.walk(io, truth, PAIRS, 1, {(3, 0)}) == "body-blocked"
+
+
+def test_a_wild_drawn_on_the_test_press_is_fought_and_the_walk_goes_on():
+    truth = {"maps": {"1": _map(["1111"])}}
+
+    class WildOnFirstPress(RoadIO):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.wild, self.fought = True, 0
+
+        def press(self, btn, hold=8, release=8):
+            super().press(btn, hold, release)
+            if btn == "right" and self.wild:
+                self.wild = False
+                self.mem[qm.ADDR_IN_BATTLE] = 1
+
+    io = WildOnFirstPress(truth, (1, 0, 0))
+    io.mem[road.SPRITE_STATE_BASE + 0x10] = 1  # a phantom body at (1,0)
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 4] = 0 + 4
+    io.mem[road.SPRITE_DATA_BASE + 0x10 + 5] = 1 + 4
+
+    def fight(fio):
+        fio.mem[qm.ADDR_IN_BATTLE] = 0
+        fio.fought += 1
+
+    assert road.walk(io, truth, PAIRS, 1, {(3, 0)}, battle=fight) is True
+    assert io.fought == 1
